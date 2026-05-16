@@ -54,6 +54,7 @@
 //! [`Precision::Inexact`]: datafusion::common::stats::Precision::Inexact
 
 pub mod optimizer_rule;
+pub mod physical_plan;
 pub mod stats_provider;
 pub mod table_provider;
 

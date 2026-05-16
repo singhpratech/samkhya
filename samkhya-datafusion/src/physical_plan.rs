@@ -85,11 +85,7 @@ impl DisplayAs for SamkhyaStatsExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
         match t {
             DisplayFormatType::Default | DisplayFormatType::Verbose => {
-                write!(
-                    f,
-                    "SamkhyaStatsExec: num_rows={:?}",
-                    self.stats.num_rows
-                )
+                write!(f, "SamkhyaStatsExec: num_rows={:?}", self.stats.num_rows)
             }
         }
     }
@@ -140,7 +136,10 @@ impl ExecutionPlan for SamkhyaStatsExec {
             .into_iter()
             .next()
             .expect("SamkhyaStatsExec has exactly one child");
-        Ok(Arc::new(SamkhyaStatsExec::new(new_input, self.stats.clone())))
+        Ok(Arc::new(SamkhyaStatsExec::new(
+            new_input,
+            self.stats.clone(),
+        )))
     }
 
     fn execute(
@@ -185,8 +184,7 @@ mod tests {
         let inner = tiny_input_exec().await;
         let mut stats = Statistics::new_unknown(inner.schema().as_ref());
         stats.num_rows = Precision::Inexact(42);
-        let wrapped: Arc<dyn ExecutionPlan> =
-            Arc::new(SamkhyaStatsExec::new(inner, stats));
+        let wrapped: Arc<dyn ExecutionPlan> = Arc::new(SamkhyaStatsExec::new(inner, stats));
         let s = wrapped.statistics().expect("stats present");
         assert_eq!(s.num_rows, Precision::Inexact(42));
     }
@@ -204,6 +202,9 @@ mod tests {
         let rebuilt = Arc::clone(&wrapped)
             .with_new_children(vec![inner])
             .expect("rebuild");
-        assert_eq!(rebuilt.statistics().unwrap().num_rows, Precision::Inexact(7));
+        assert_eq!(
+            rebuilt.statistics().unwrap().num_rows,
+            Precision::Inexact(7)
+        );
     }
 }

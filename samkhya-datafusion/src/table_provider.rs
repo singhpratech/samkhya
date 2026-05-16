@@ -163,7 +163,35 @@ impl TableProvider for SamkhyaTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        self.inner.scan(state, projection, filters, limit).await
+        // Ask the inner provider for its native scan exec, then wrap it
+        // in `SamkhyaStatsExec` so the physical layer publishes the
+        // samkhya-corrected `Statistics` to every downstream operator.
+        //
+        // This is the actual injection path: DataFusion 46's mainline
+        // planner does not consult `TableProvider::statistics()` when
+        // building the physical plan — it calls `scan()` and trusts the
+        // returned `ExecutionPlan::statistics()`. So the only reliable
+        // way to flow corrected row counts into
+        // `physical.statistics()?.num_rows` is to override at the exec
+        // level, here.
+        //
+        // If we have no overrides installed we still wrap, using the
+        // statistics() fold as-is — the cost is one cheap delegation
+        // call per execute()/statistics() and the inner provider's
+        // values are preserved by the merge in `self.statistics()`.
+        let inner_plan = self.inner.scan(state, projection, filters, limit).await?;
+
+        // Project the table-level Statistics onto the scan's *output*
+        // schema (which honours `projection`), so the wrapped exec
+        // reports column_statistics aligned to the columns it actually
+        // emits — not the full table schema. This matches what
+        // `TableProvider`-aware execs (`DataSourceExec`) already do.
+        let full_stats = self
+            .statistics()
+            .unwrap_or_else(|| Statistics::new_unknown(self.inner.schema().as_ref()));
+        let output_stats = full_stats.project(projection);
+
+        Ok(Arc::new(SamkhyaStatsExec::new(inner_plan, output_stats)))
     }
 
     fn supports_filters_pushdown(
