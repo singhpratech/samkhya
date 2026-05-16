@@ -6,6 +6,9 @@ use std::path::Path;
 use samkhya_core::feedback::FeedbackStore;
 use samkhya_core::{Error, Result};
 
+use crate::queries::Suite;
+use crate::runner::Runner;
+
 /// Print a per-template summary of all observations in the store.
 pub fn summarize(path: &Path) -> Result<()> {
     let store = FeedbackStore::open(path)?;
@@ -59,6 +62,19 @@ pub fn summarize(path: &Path) -> Result<()> {
             println!("avg q-error: {avg:.2}, max q-error: {max:.2}");
         }
     }
+    Ok(())
+}
+
+/// Run a suite twice (baseline + samkhya) and print a side-by-side
+/// comparison of each query's estimate, actual rows, and q-error.
+///
+/// Both runs use in-memory feedback stores; nothing is persisted.
+pub fn compare(suite: Suite) -> Result<()> {
+    println!("=== baseline (raw MemTable) ===");
+    Runner::new(suite, true).run()?;
+    println!();
+    println!("=== samkhya-wrapped (SamkhyaTableProvider) ===");
+    Runner::new(suite, false).run()?;
     Ok(())
 }
 

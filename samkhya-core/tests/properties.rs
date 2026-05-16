@@ -8,7 +8,9 @@ use std::io::Cursor;
 use proptest::collection::{hash_set, vec as pvec};
 use proptest::prelude::*;
 
-use samkhya_core::lpbound::{ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp};
+use samkhya_core::lpbound::{
+    ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp,
+};
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
 use samkhya_core::sketches::{BloomFilter, HllSketch, Sketch};
 

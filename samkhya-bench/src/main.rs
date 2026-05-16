@@ -35,6 +35,13 @@ enum Command {
         feedback: Option<std::path::PathBuf>,
     },
 
+    /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
+    Compare {
+        /// Which benchmark suite to run.
+        #[arg(long, value_enum)]
+        suite: SuiteArg,
+    },
+
     /// Render a report from a feedback store.
     Report {
         /// Path to the feedback store (SQLite) to summarize.
@@ -87,6 +94,7 @@ fn main() -> Result<()> {
             }
             runner.run()
         }
+        Command::Compare { suite } => samkhya_bench::report::compare(suite.into()),
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
         Command::Train { feedback, template } => {
             samkhya_bench::report::train_stub(&feedback, &template)
