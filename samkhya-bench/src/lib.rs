@@ -4,6 +4,7 @@
 //! compares samkhya-corrected plans against baseline plans on embedded
 //! analytical engines.
 
+pub mod calibrate;
 pub mod queries;
 pub mod report;
 pub mod runner;

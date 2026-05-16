@@ -41,6 +41,20 @@ pub struct QueryOutcome {
     pub latency_ms: f64,
 }
 
+/// Per-query result captured during a corrector-aware run. The raw
+/// estimate is what DataFusion's optimizer reports; the corrected
+/// estimate is the residual corrector's output for the same plan.
+#[derive(Debug, Clone)]
+pub struct CorrectedOutcome {
+    pub name: &'static str,
+    pub raw_estimate: u64,
+    pub corrected_estimate: u64,
+    pub actual_rows: u64,
+    pub q_error_raw: f64,
+    pub q_error_corrected: f64,
+    pub latency_ms: f64,
+}
+
 impl Runner {
     pub fn new(suite: Suite, baseline: bool) -> Self {
         Self {
@@ -155,6 +169,46 @@ impl Runner {
             println!("avg q-error: {avg_q:.2}, max q-error: {max_q:.2}");
         }
         Ok(())
+    }
+
+    /// Execute the configured suite, applying a residual `Corrector` to
+    /// every raw DataFusion estimate. Returns one [`CorrectedOutcome`]
+    /// per successfully executed query. The original [`Runner::run`]
+    /// path is unaffected.
+    pub fn run_with_corrector<C: Corrector + ?Sized>(
+        &self,
+        corrector: &C,
+    ) -> Result<Vec<CorrectedOutcome>> {
+        if !self.suite.is_executable() {
+            println!(
+                "runner: suite {} is not in-process executable yet (needs real dataset); skipping.",
+                self.suite.label()
+            );
+            return Ok(Vec::new());
+        }
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(Error::from)?;
+        rt.block_on(self.run_with_corrector_async(corrector))
+    }
+
+    async fn run_with_corrector_async<C: Corrector + ?Sized>(
+        &self,
+        corrector: &C,
+    ) -> Result<Vec<CorrectedOutcome>> {
+        let ctx = build_synthetic_context(self.baseline).await?;
+        let mut outcomes = Vec::new();
+        for q in self.suite.queries() {
+            match execute_query_with_corrector(&ctx, q, corrector).await {
+                Ok(outcome) => outcomes.push(outcome),
+                Err(e) => {
+                    println!("{:<6} ERROR: {}", q.name, e);
+                }
+            }
+        }
+        Ok(outcomes)
     }
 }
 
@@ -302,6 +356,63 @@ async fn execute_query(ctx: &SessionContext, q: &Query) -> Result<QueryOutcome> 
         estimated_rows,
         actual_rows,
         q_error,
+        latency_ms,
+    })
+}
+
+/// Variant of [`execute_query`] that feeds the raw optimizer estimate
+/// into a residual [`Corrector`] and reports q-error both before and
+/// after correction. The bench only sees `baseline_estimate` today; the
+/// other [`CorrectionFeatures`] slots stay at their `None`/0 defaults,
+/// which is an honest reflection of what the feedback path observes.
+async fn execute_query_with_corrector<C: Corrector + ?Sized>(
+    ctx: &SessionContext,
+    q: &Query,
+    corrector: &C,
+) -> Result<CorrectedOutcome> {
+    let logical = ctx
+        .state()
+        .create_logical_plan(q.sql)
+        .await
+        .map_err(df_err)?;
+    let physical: Arc<dyn ExecutionPlan> = ctx
+        .state()
+        .create_physical_plan(&logical)
+        .await
+        .map_err(df_err)?;
+    let raw_estimate = physical
+        .statistics()
+        .ok()
+        .and_then(|s| match s.num_rows {
+            datafusion::common::stats::Precision::Exact(n)
+            | datafusion::common::stats::Precision::Inexact(n) => Some(n as u64),
+            datafusion::common::stats::Precision::Absent => None,
+        })
+        .unwrap_or(0);
+
+    let features = CorrectionFeatures {
+        baseline_estimate: raw_estimate,
+        ..Default::default()
+    };
+    let corrected_estimate = corrector.correct(&features)?.unwrap_or(raw_estimate);
+
+    let start = Instant::now();
+    let df = ctx.sql(q.sql).await.map_err(df_err)?;
+    let batches = df.collect().await.map_err(df_err)?;
+    let elapsed = start.elapsed();
+    let latency_ms = elapsed.as_secs_f64() * 1000.0;
+
+    let actual_rows = extract_actual_count(&batches);
+    let q_error_raw = compute_q_error(raw_estimate, actual_rows);
+    let q_error_corrected = compute_q_error(corrected_estimate, actual_rows);
+
+    Ok(CorrectedOutcome {
+        name: q.name,
+        raw_estimate,
+        corrected_estimate,
+        actual_rows,
+        q_error_raw,
+        q_error_corrected,
         latency_ms,
     })
 }

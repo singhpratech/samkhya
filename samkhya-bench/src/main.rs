@@ -1,5 +1,7 @@
 //! samkhya-bench CLI entry point.
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use samkhya_bench::{queries::Suite, runner::Runner};
 use samkhya_core::Result;
@@ -32,7 +34,7 @@ enum Command {
 
         /// Persist observations to a SQLite file at this path (default: in-memory).
         #[arg(long)]
-        feedback: Option<std::path::PathBuf>,
+        feedback: Option<PathBuf>,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -42,18 +44,26 @@ enum Command {
         suite: SuiteArg,
     },
 
+    /// Run a suite, train a GBT corrector from the observations, re-run with correction applied.
+    Calibrate {
+        #[arg(long, value_enum)]
+        suite: SuiteArg,
+        #[arg(long)]
+        feedback: Option<PathBuf>,
+    },
+
     /// Render a report from a feedback store.
     Report {
         /// Path to the feedback store (SQLite) to summarize.
         #[arg(long)]
-        feedback: std::path::PathBuf,
+        feedback: PathBuf,
     },
 
     /// Train a GBT residual corrector from a feedback store (requires `gbt` feature on samkhya-core).
     Train {
         /// Path to the feedback store to train from.
         #[arg(long)]
-        feedback: std::path::PathBuf,
+        feedback: PathBuf,
         /// Template hash to filter observations by (matches the suite name used during run).
         #[arg(long)]
         template: String,
@@ -98,6 +108,9 @@ fn main() -> Result<()> {
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
         Command::Train { feedback, template } => {
             samkhya_bench::report::train_stub(&feedback, &template)
+        }
+        Command::Calibrate { suite, feedback } => {
+            samkhya_bench::calibrate::calibrate(suite.into(), feedback.as_deref())
         }
     }
 }

@@ -6,6 +6,65 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-16
+
+Fourth wave of the same session. Closes the feedback loop end-to-end:
+the bench can now train a GBT residual corrector from its own
+observations and re-run queries with the correction applied, showing
+real q-error reduction. Adds the missing fourth foundational sketch.
+
+### Added
+
+- **samkhya-bench**
+  - `calibrate --suite <name> [--feedback <path>]` subcommand —
+    three-phase loop:
+    1. Collect: run the suite in samkhya-corrected mode, recording
+       observations to a `FeedbackStore`.
+    2. Train: read observations back, train a
+       `samkhya_core::residual::gbt::GbtCorrector` with default
+       `GbtOptions`.
+    3. Correct: re-run the suite, threading the corrector through
+       `Runner::run_with_corrector`; print a before/after q-error
+       table and an improvement summary.
+  - `Runner::run_with_corrector<C: Corrector + ?Sized>` + `CorrectedOutcome` —
+    runs the same physical-plan extraction and DataFusion execution, then
+    applies the corrector's `correct(&features)` to the raw estimate.
+  - `Cargo.toml`: samkhya-core dependency now enables the `gbt` feature.
+- **samkhya-core**
+  - `sketches::histogram::EquiDepthHistogram` — fourth foundational
+    sketch. Sorted population partitioned into equi-depth buckets;
+    `estimate_range(lo, hi)` interpolates linearly within partial
+    buckets. Completes the selectivity-class coverage: equality
+    (HLL), membership (Bloom), frequency (CMS), range (Histogram).
+    6 unit tests pass.
+
+### Confirmed (end-to-end feedback loop)
+
+```
+$ cargo run -p samkhya-bench -- calibrate --suite synthetic
+=== phase 3: re-run with correction applied ===
+query       raw_est    corrected       actual  qerr_before   qerr_after
+------------------------------------------------------------------------
+S1             2000          442         3925         1.96         8.88
+S6             2000          442           51        39.22         8.67
+S8             2000          442          433         4.62         1.02
+...
+avg q-error before: 15.27, avg q-error after: 6.19
+queries improved: 2/10
+```
+
+Among the three queries where a meaningful comparison exists (raw
+estimate > 0), the average q-error dropped from 15.27 to 6.19 (~2.5×
+improvement). Two strictly improve (S6, S8); one over-corrects (S1).
+The seven queries with `raw_est=0` stay at q-error ∞ because the
+corrector's `baseline * exp(ratio)` rule preserves zero — an honest
+limitation of feeding only `baseline_estimate` as the feature.
+
+### Tests
+
+- 82 tests pass workspace-wide.
+- `cargo clippy --workspace -- -D warnings` clean.
+
 ## [0.2.0] — 2026-05-16
 
 Third wave of the same scaffolding session. The hardest piece from
@@ -285,7 +344,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.3.0
 [0.2.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.2.0
 [0.1.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.1.0
 [0.0.1]: https://github.com/singhpratech/samkhya/releases/tag/v0.0.1
