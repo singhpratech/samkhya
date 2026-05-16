@@ -221,9 +221,11 @@ Please do **not** open a public GitHub issue for security-sensitive
 reports (sketch payloads that trigger panics, deserialization issues,
 unsafe-code soundness, etc.).
 
-Email the maintainer directly:
+Use GitHub Security Advisories on the
+[singhpratech/samkhya](https://github.com/singhpratech/samkhya/security/advisories)
+repository to file a private report:
 
-**aiexplore369@gmail.com**
+> *Security → Advisories → Report a vulnerability*
 
 Include a description of the issue, reproduction steps if possible, and
 the affected crate(s) and versions. We will acknowledge receipt within

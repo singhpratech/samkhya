@@ -5,6 +5,7 @@
 //! analytical engines.
 
 pub mod calibrate;
+pub mod imdb;
 pub mod puffin_io;
 pub mod queries;
 pub mod report;

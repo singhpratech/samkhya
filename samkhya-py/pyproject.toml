@@ -9,7 +9,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
 authors = [
-    { name = "Prateek Singh", email = "aiexplore369@gmail.com" },
+    { name = "Prateek Singh" },
 ]
 keywords = ["cardinality", "sketches", "hyperloglog", "bloom-filter", "query-optimizer"]
 classifiers = [

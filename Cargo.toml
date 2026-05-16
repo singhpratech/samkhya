@@ -4,18 +4,20 @@ members = [
     "samkhya-core",
     "samkhya-datafusion",
     "samkhya-duckdb",
+    "samkhya-duckdb-ext",
     "samkhya-py",
     "samkhya-polars",
     "samkhya-postgres",
     "samkhya-gpudb",
     "samkhya-bench",
+    "samkhya-cli",
 ]
 
 [workspace.package]
 version = "0.0.1"
 edition = "2024"
 license = "Apache-2.0"
-authors = ["Prateek Singh <aiexplore369@gmail.com>"]
+authors = ["Prateek Singh"]
 repository = "https://github.com/singhpratech/samkhya"
 homepage = "https://github.com/singhpratech/samkhya"
 readme = "README.md"

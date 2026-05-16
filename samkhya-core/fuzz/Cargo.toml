@@ -1,0 +1,57 @@
+# Standalone cargo-fuzz workspace for samkhya-core.
+#
+# This Cargo.toml is its OWN workspace (note `[workspace]` block below);
+# `cargo check -p samkhya-core` from the repository root never descends into
+# this directory, which is exactly what we want — fuzz targets pull in
+# libfuzzer-sys (a nightly-only sanitizer-instrumented crate) and should not
+# affect default workspace builds.
+#
+# To run:
+#
+#   cargo install cargo-fuzz                    # one-time
+#   rustup toolchain install nightly            # one-time
+#   cd samkhya-core/fuzz
+#   cargo +nightly fuzz run puffin_reader       # 1-hour local run
+#   cargo +nightly fuzz run sketch_decoder
+#
+# Sole author: Prateek Singh. License: Apache-2.0.
+
+[package]
+name = "samkhya-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Prateek Singh <aiexplore369@gmail.com>"]
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+# Empty `members = []` makes this its own workspace, isolated from the
+# repository-root workspace. Critical: without this, the libfuzzer-sys
+# dependency leaks into the default `cargo check` graph.
+members = []
+
+[dependencies]
+libfuzzer-sys = "0.4"
+samkhya-core = { path = ".." }
+
+# Each fuzz_target generates a binary; cargo-fuzz expects them registered
+# with `test = false` / `doc = false` / `bench = false` so they don't get
+# pulled into `cargo test` or doc-builds. The `path =` is the conventional
+# `fuzz_targets/<name>.rs` layout.
+
+[[bin]]
+name = "puffin_reader"
+path = "fuzz_targets/puffin_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sketch_decoder"
+path = "fuzz_targets/sketch_decoder.rs"
+test = false
+doc = false
+bench = false

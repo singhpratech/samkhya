@@ -1,0 +1,145 @@
+# cargo-deny configuration for samkhya.
+#
+# Run locally:   cargo install --locked cargo-deny && cargo deny check
+# Run in CI:     EmbarkStudios/cargo-deny-action@v2 (see .github/workflows/ci.yml).
+#
+# The four sections below correspond to cargo-deny's four checks:
+#   * bans         — duplicate-version detection + per-crate disallows
+#   * licenses     — SPDX allow/deny lists, applied to every transitive crate
+#   * advisories   — RustSec advisory database lookups
+#   * sources      — restricts which registries / git remotes are allowed
+#
+# Sole author: Prateek Singh. License: Apache-2.0.
+
+# ---------------------------------------------------------------------------
+# graph — which target/cfg combinations to evaluate. Default `targets = []`
+# means cargo-deny walks the host target only; that's the right behavior for
+# samkhya since we only ship Linux/macOS x86_64 + aarch64 from CI and the
+# duplicate-version analysis is most useful on the host target. Add targets
+# here if a future release adds wasm32 or a cross-compiled embedded path.
+# ---------------------------------------------------------------------------
+[graph]
+all-features = false
+no-default-features = false
+
+# ---------------------------------------------------------------------------
+# advisories — RustSec database lookups. We keep `ignore = []` (no exempted
+# advisories) so every release tag re-validates the whole transitive surface.
+# If an advisory ever lands that cannot be addressed before a release, add the
+# RUSTSEC-XXXX-NNNN id here with a comment explaining the embargo plan; do
+# NOT silently bypass.
+# ---------------------------------------------------------------------------
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+ignore = []
+
+# ---------------------------------------------------------------------------
+# licenses — standard Rust-ecosystem allowlist. Everything else is denied by
+# default; cargo-deny refuses to build the workspace until an explicit entry
+# is added. The list mirrors what the rustc / Servo / DataFusion projects
+# accept: permissive licenses only, no copyleft.
+# ---------------------------------------------------------------------------
+[licenses]
+# `confidence-threshold` controls SPDX detection strictness. 0.8 is the
+# project default and catches our existing LICENSE-APACHE-style files
+# without false positives on standard MIT/BSD variants.
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+]
+# Exceptions are *narrowed* allowlists for specific crates that ship under
+# a license we otherwise consider case-by-case. Empty today; add entries
+# here rather than widening `allow` above.
+exceptions = []
+
+# ---------------------------------------------------------------------------
+# bans — duplicate-version control and per-crate disallows.
+#
+# Duplicate-version policy:
+#
+#   * `multiple-versions = "warn"` is the default, but we tighten it to
+#     `"deny"` so the workspace cannot quietly grow a fourth hashbrown
+#     version after a sloppy upgrade.
+#   * `skip` exempts crates where multiple versions are *unavoidable* — they
+#     live deep in the dependency graph through crates we don't control
+#     (rusqlite, datafusion, criterion, gbdt, etc.). Each skip is
+#     scoped to a specific version so a new duplicate of the same crate
+#     re-trips the deny.
+#   * `skip-tree` is intentionally NOT used; we want every duplicate to be
+#     justified individually rather than ignored wholesale through a
+#     sub-tree.
+#
+# As of v0.9.0 the known-transitive duplicate set is:
+#   * hashbrown 0.12 / 0.14 / 0.15 / 0.17 — pulled by indexmap, datafusion,
+#     std internal, and the modern direct users respectively.
+#   * bitflags 1.3 — legacy clap-2 / rusqlite path; bitflags 2 is the modern
+#     direct user.
+#   * syn 1.0 — legacy proc-macro deps still rooted in serde_derive_internals
+#     / older derive macros; syn 2 is the modern direct user.
+#   * thiserror 1.0 — datafusion / pyo3 still on v1; we use v1 directly
+#     until those ecosystems migrate.
+#   * windows-sys 0.52 / 0.60 — only matters when CI runs on Windows
+#     (currently disabled); kept here so a future Windows job doesn't
+#     immediately trip the duplicate rule.
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+# `highlight = "all"` makes the duplicate-version report show every path to
+# every duplicated crate, which is what an operator needs to decide whether
+# a new duplicate is upstream-unavoidable or our own sloppiness.
+highlight = "all"
+# Crates we never want pulled in transitively. Empty today; populated if a
+# future audit flags one of the openssl-sys families (we use rustls-only
+# paths throughout) or a known-yanked crate.
+deny = []
+# Known-transitive duplicates. Each entry should have a one-line comment
+# explaining *why* the duplicate exists; if upstream consolidates, remove
+# the skip in the same PR.
+skip = [
+    # hashbrown — pulled by indexmap 1.x (older deps), DataFusion 46,
+    # std-internal, and the modern direct user. Four versions live in the
+    # graph as of v0.9.0; consolidation is upstream's call.
+    { name = "hashbrown", version = "0.12" },
+    { name = "hashbrown", version = "0.14" },
+    { name = "hashbrown", version = "0.15" },
+    # bitflags — legacy 1.3 still rooted in clap-2 / rusqlite ffi; we use
+    # the modern 2.x line directly.
+    { name = "bitflags", version = "1.3" },
+    # syn — legacy 1.0 still required by older proc-macro crates; we use
+    # syn 2 directly. Drop when the laggards (serde_derive_internals etc.)
+    # migrate.
+    { name = "syn", version = "1.0" },
+    # thiserror — DataFusion and PyO3 still on 1.x; we use 1.x directly
+    # via workspace.dependencies. Bump both arms together when DF moves.
+    { name = "thiserror", version = "1.0" },
+    # windows-sys — Windows-only target dupes (0.52 / 0.60). The CI matrix
+    # currently runs Linux + macOS; these skips keep the rule from tripping
+    # if a Windows job is added back.
+    { name = "windows-sys", version = "0.52" },
+    { name = "windows-sys", version = "0.60" },
+]
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# sources — restricts crate origins. `unknown-registry = "deny"` means every
+# crate must come from crates.io (or a registry explicitly whitelisted
+# below); `unknown-git = "deny"` means no `git = "https://..."` deps without
+# an explicit allow. Both are critical for supply-chain hygiene at the
+# pre-1.0 hardening tier.
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

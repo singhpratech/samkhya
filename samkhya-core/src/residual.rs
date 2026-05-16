@@ -1,8 +1,9 @@
 //! Residual correction model.
 //!
-//! Optional learning layer. Takes a baseline cardinality estimate plus a
-//! feature vector (query plan + column stats) and returns a corrected
-//! estimate. Trained on observations recorded by [`crate::feedback`].
+//! Optional feedback-driven correction layer. Takes a baseline cardinality
+//! estimate plus a feature vector (query plan + column stats) and returns
+//! a corrected estimate. Trained on observations recorded by
+//! [`crate::feedback`].
 //!
 //! Contracts every backend honors:
 //!
@@ -13,7 +14,41 @@
 //! Concrete backends (all behind feature flags):
 //!
 //! - `gbt` — gradient-boosted trees (the [`gbt`] submodule, gated on the `gbt` cargo feature)
-//! - `tabpfn` — TabPFN-style foundation-model wrapper (network or local, future)
+//! - `additive_gbt` — additive gradient-boosted trees ([`additive`], gated on `additive_gbt`)
+//! - `tabpfn` — foundation-model interface (see the [`tabpfn`] submodule)
+//!
+//! # Foundation-model interface (Layer 5)
+//!
+//! The architecture reserves a pluggable backend slot for foundation tabular
+//! models such as TabPFN-2.5 (arXiv 2511.08667). The contract is identical
+//! to every other backend:
+//!
+//! > *feed [`CorrectionFeatures`], receive `Option<u64>` clamped to the
+//! > LpBound ceiling.*
+//!
+//! Two deployment shapes are scaffolded:
+//!
+//! 1. **localhost HTTP** — a Python TabPFN inference server runs out of
+//!    band; samkhya POSTs the feature vector as JSON and reads back an
+//!    `{"estimate": <u64>}` response. Implemented today behind the
+//!    `tabpfn_http` cargo feature (see [`tabpfn::TabPfnHttpCorrector`]).
+//! 2. **subprocess** — samkhya spawns a Python child, frames JSON over
+//!    stdin/stdout, and keeps the process warm across estimates. Deferred:
+//!    the scaffolding is present (umbrella `tabpfn` feature), the
+//!    transport itself is not implemented in this revision.
+//!
+//! A no-op [`TabPfnStub`] is **always** compiled in, regardless of
+//! features. Its job is purely architectural: downstream code can reference
+//! `TabPfnStub` to mark "TabPFN integration point, currently disabled"
+//! without taking the `tabpfn_http` feature dependency. This reflects the
+//! integration point in every build, so the contract is visible even when
+//! the transport is not.
+//!
+//! Failure policy across all TabPFN backends: any transport error, parse
+//! error, or timeout returns `Ok(None)` (never `Err`). The engine then
+//! falls back cleanly to the native estimate. This is the safety contract;
+//! a remote inference server going down must never surface as a query
+//! failure.
 
 use crate::Result;
 
@@ -87,6 +122,34 @@ impl Corrector for IdentityCorrector {
 
     fn name(&self) -> &'static str {
         "identity"
+    }
+}
+
+/// No-op stub for the foundation-model interface (Layer 5).
+///
+/// Always compiled, regardless of cargo features. Returns `Ok(None)` from
+/// every call, signalling the engine to fall back to its native estimate.
+///
+/// The point of an always-on stub is architectural: it lets downstream
+/// callers reference `TabPfnStub` to mark "TabPFN integration point,
+/// currently disabled" without taking the `tabpfn_http` feature
+/// dependency. The integration shape is visible in every build.
+///
+/// To wire in a real foundation-model backend, swap this for
+/// [`tabpfn::TabPfnHttpCorrector`] (gated on `tabpfn_http`) or a future
+/// subprocess adapter. The trait contract is identical, so the swap is
+/// a one-line change at the call site.
+pub struct TabPfnStub;
+
+impl Corrector for TabPfnStub {
+    fn correct(&self, _features: &CorrectionFeatures) -> Result<Option<u64>> {
+        // Deliberately `None`: the integration point is wired but
+        // disabled. The engine falls back to the native estimate.
+        Ok(None)
+    }
+
+    fn name(&self) -> &'static str {
+        "tabpfn-stub"
     }
 }
 
@@ -408,6 +471,204 @@ pub mod additive {
     }
 }
 
+#[cfg(feature = "tabpfn_http")]
+pub mod tabpfn {
+    //! Foundation-model interface — HTTP transport.
+    //!
+    //! Posts a [`super::CorrectionFeatures`] vector as JSON to a
+    //! user-configured endpoint (e.g., a Python TabPFN inference server
+    //! listening on `http://localhost:8765/infer`), parses an
+    //! `{"estimate": <u64>}` reply, and clamps the result to the LpBound
+    //! ceiling via [`crate::lpbound::saturating_clamp`].
+    //!
+    //! Transport: pure-Rust `ureq` (rustls-only, no OpenSSL). Compiled in
+    //! only when the `tabpfn_http` cargo feature is enabled.
+    //!
+    //! # Safety contract
+    //!
+    //! Any failure — DNS, connection refused, HTTP non-2xx, body parse
+    //! error, timeout — returns `Ok(None)`. The engine falls back to the
+    //! native estimate. We never propagate transport errors to the
+    //! optimizer hot path; a remote inference server going down must not
+    //! surface as a query failure.
+    //!
+    //! Note on naming: this is *the foundation-model interface*, not a
+    //! "learned" or "AI" feature. The corrector is a pluggable backend
+    //! behind the same `Corrector` trait as every other backend in this
+    //! module.
+    //!
+    //! # Wire format
+    //!
+    //! Request body (JSON):
+    //!
+    //! ```json
+    //! {
+    //!   "features": [<f64>, <f64>, ...],
+    //!   "baseline_estimate": <u64>
+    //! }
+    //! ```
+    //!
+    //! Response body (JSON):
+    //!
+    //! ```json
+    //! { "estimate": <u64> }
+    //! ```
+    //!
+    //! Any extra fields in the response are ignored, so server
+    //! implementations are free to add diagnostics without breaking the
+    //! client.
+    //!
+    //! # See also
+    //!
+    //! - [`super::TabPfnStub`] — always-on no-op for the same integration
+    //!   slot, no transport dependency.
+
+    use serde::{Deserialize, Serialize};
+    use std::time::Duration;
+
+    use super::{CorrectionFeatures, Corrector};
+    use crate::Result;
+    use crate::lpbound::saturating_clamp;
+
+    /// Configuration for [`TabPfnHttpCorrector`].
+    #[derive(Debug, Clone)]
+    pub struct TabPfnHttpOptions {
+        /// Inference endpoint URL. The corrector POSTs here on every
+        /// `correct()` call. Example: `http://localhost:8765/infer`.
+        pub base_url: String,
+        /// Per-request timeout. Applies independently to the connect and
+        /// read phases. Bounded by the architecture's sub-ms budget for
+        /// the production path, but configurable so users can dial it up
+        /// for diagnostics.
+        pub timeout_ms: u64,
+        /// Inclusive upper bound applied to every corrected estimate via
+        /// [`saturating_clamp`]. The Layer 3 safety guarantee — corrections
+        /// can never exceed this regardless of what the remote backend
+        /// returns. Use `u64::MAX` to disable.
+        pub ceiling: u64,
+    }
+
+    impl Default for TabPfnHttpOptions {
+        fn default() -> Self {
+            Self {
+                base_url: "http://localhost:8765/infer".into(),
+                timeout_ms: 50,
+                ceiling: u64::MAX,
+            }
+        }
+    }
+
+    /// JSON request body sent to the inference endpoint.
+    #[derive(Serialize)]
+    struct InferRequest<'a> {
+        features: &'a [f64],
+        baseline_estimate: u64,
+    }
+
+    /// JSON response body. Extra fields are ignored.
+    #[derive(Deserialize)]
+    struct InferResponse {
+        estimate: u64,
+    }
+
+    /// HTTP-backed foundation-model corrector.
+    ///
+    /// Holds a tiny client config and a base URL. The `ureq` agent is
+    /// constructed per-call: the per-estimate cost is dominated by network
+    /// round-trip, not agent allocation, and per-call agents keep the
+    /// struct cheaply `Send + Sync` without interior mutability.
+    pub struct TabPfnHttpCorrector {
+        options: TabPfnHttpOptions,
+    }
+
+    impl TabPfnHttpCorrector {
+        /// Build a corrector from explicit options.
+        pub fn new(options: TabPfnHttpOptions) -> Self {
+            Self { options }
+        }
+
+        /// Convenience constructor: default options with the supplied URL.
+        pub fn with_url(base_url: impl Into<String>) -> Self {
+            Self {
+                options: TabPfnHttpOptions {
+                    base_url: base_url.into(),
+                    ..TabPfnHttpOptions::default()
+                },
+            }
+        }
+
+        /// Configured options (for diagnostics / logging).
+        pub fn options(&self) -> &TabPfnHttpOptions {
+            &self.options
+        }
+
+        /// Attempt one inference call. Returns `None` on any failure
+        /// (network, parse, non-2xx). The `correct()` trait method wraps
+        /// this and applies the LpBound clamp.
+        fn try_infer(&self, features: &CorrectionFeatures) -> Option<u64> {
+            let feature_vec = features.to_vec();
+            let payload = InferRequest {
+                features: &feature_vec,
+                baseline_estimate: features.baseline_estimate,
+            };
+
+            let timeout = Duration::from_millis(self.options.timeout_ms);
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(timeout)
+                .timeout_read(timeout)
+                .timeout_write(timeout)
+                .build();
+
+            let response = match agent.post(&self.options.base_url).send_json(&payload) {
+                Ok(r) => r,
+                Err(err) => {
+                    // Map every transport error to None and log at debug.
+                    // The Error::Feedback diagnostic carries the URL plus
+                    // the underlying message so callers tailing logs can
+                    // see what failed without us aborting the query.
+                    log::debug!(
+                        "tabpfn_http: request to {} failed: {}",
+                        self.options.base_url,
+                        err
+                    );
+                    return None;
+                }
+            };
+
+            match response.into_json::<InferResponse>() {
+                Ok(body) => Some(body.estimate),
+                Err(err) => {
+                    log::debug!(
+                        "tabpfn_http: response from {} failed to parse: {}",
+                        self.options.base_url,
+                        err
+                    );
+                    None
+                }
+            }
+        }
+    }
+
+    impl Corrector for TabPfnHttpCorrector {
+        fn correct(&self, features: &CorrectionFeatures) -> Result<Option<u64>> {
+            // Safety contract: every failure returns Ok(None), not Err.
+            // The engine then transparently falls back to the native
+            // estimate. We use Result here to honour the trait shape and
+            // to keep a door open for future *non-fallback* error modes
+            // (e.g. a deliberate misconfiguration check), but on the hot
+            // path failures are absorbed.
+            let Some(raw) = self.try_infer(features) else {
+                return Ok(None);
+            };
+            Ok(Some(saturating_clamp(raw as f64, self.options.ceiling)))
+        }
+
+        fn name(&self) -> &'static str {
+            "tabpfn-http"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +682,26 @@ mod tests {
         };
         assert_eq!(corrector.correct(&features).unwrap(), Some(1234));
         assert_eq!(corrector.name(), "identity");
+    }
+
+    #[test]
+    fn tabpfn_stub_always_returns_none() {
+        let corrector = TabPfnStub;
+        let features = CorrectionFeatures {
+            baseline_estimate: 9999,
+            ..Default::default()
+        };
+        assert_eq!(
+            corrector.correct(&features).unwrap(),
+            None,
+            "TabPfnStub must always return Ok(None) — it documents the integration point"
+        );
+        assert_eq!(corrector.name(), "tabpfn-stub");
+
+        // Also exercise an empty feature vector — the stub should still
+        // return None without inspecting the input.
+        let empty = CorrectionFeatures::default();
+        assert_eq!(corrector.correct(&empty).unwrap(), None);
     }
 
     #[test]
@@ -656,5 +937,59 @@ mod additive_tests {
             Ok(_) => panic!("expected error on empty observations"),
             Err(e) => assert!(matches!(e, crate::Error::Feedback(_))),
         }
+    }
+}
+
+#[cfg(all(test, feature = "tabpfn_http"))]
+mod tabpfn_http_tests {
+    use super::tabpfn::{TabPfnHttpCorrector, TabPfnHttpOptions};
+    use super::{CorrectionFeatures, Corrector};
+
+    /// Pointing at port 1 on the loopback interface is the canonical
+    /// "guaranteed-to-refuse-connection" target on Linux/macOS. The
+    /// safety contract says: any transport failure must surface as
+    /// `Ok(None)`, never `Err`, never a panic. We verify that here
+    /// without standing up a real inference server.
+    #[test]
+    fn http_failure_returns_none_not_error() {
+        let corrector = TabPfnHttpCorrector::new(TabPfnHttpOptions {
+            base_url: "http://127.0.0.1:1/infer".into(),
+            timeout_ms: 50,
+            ceiling: u64::MAX,
+        });
+        let features = CorrectionFeatures {
+            baseline_estimate: 1234,
+            ..Default::default()
+        };
+        let result = corrector.correct(&features);
+        assert!(
+            result.is_ok(),
+            "tabpfn-http transport failure must not propagate as Err; got {result:?}"
+        );
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "tabpfn-http transport failure must yield Ok(None) so the engine falls back cleanly"
+        );
+        assert_eq!(corrector.name(), "tabpfn-http");
+    }
+
+    #[test]
+    fn malformed_url_returns_none() {
+        // Not even a valid URL — `ureq` rejects this at request-build
+        // time, which our error path must absorb the same as any other
+        // transport failure.
+        let corrector = TabPfnHttpCorrector::with_url("not a url at all");
+        let features = CorrectionFeatures::default();
+        let result = corrector.correct(&features).expect("never Err");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn options_default_is_localhost() {
+        let opts = TabPfnHttpOptions::default();
+        assert!(opts.base_url.starts_with("http://"));
+        assert!(opts.timeout_ms > 0);
+        assert_eq!(opts.ceiling, u64::MAX);
     }
 }

@@ -25,6 +25,7 @@ use samkhya_core::residual::{CorrectionFeatures, Corrector};
 use samkhya_core::stats::ColumnStats;
 use samkhya_datafusion::SamkhyaTableProvider;
 
+use crate::imdb;
 use crate::puffin_io;
 use crate::queries::{Query, Suite};
 use crate::synthetic;
@@ -36,6 +37,7 @@ pub struct Runner {
     baseline: bool,
     feedback_path: Option<std::path::PathBuf>,
     puffin_dir: Option<std::path::PathBuf>,
+    imdb_dir: Option<std::path::PathBuf>,
 }
 
 /// Per-query result captured during a run.
@@ -69,6 +71,7 @@ impl Runner {
             baseline,
             feedback_path: None,
             puffin_dir: None,
+            imdb_dir: None,
         }
     }
 
@@ -89,6 +92,17 @@ impl Runner {
         self
     }
 
+    /// Point the runner at an unpacked IMDb dump on disk (the directory
+    /// produced by `data/job/README.md`'s download script). When set, the
+    /// `JobSlowReal` suite becomes executable: the SessionContext is built
+    /// from real IMDb CSV/Parquet files via [`crate::imdb::register_imdb_tables`]
+    /// instead of the synthetic in-memory tables. Ignored by every other
+    /// suite.
+    pub fn with_imdb_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.imdb_dir = Some(dir.into());
+        self
+    }
+
     pub fn suite(&self) -> Suite {
         self.suite
     }
@@ -99,10 +113,16 @@ impl Runner {
 
     /// Execute the configured suite.
     pub fn run(&self) -> Result<()> {
-        if !self.suite.is_executable() {
+        if !self.is_runnable() {
+            let extra = if self.suite.is_executable_with_imdb_dir() {
+                " (supply --imdb-dir to enable)"
+            } else {
+                ""
+            };
             println!(
-                "runner: suite {} is not in-process executable yet (needs real dataset); skipping.",
-                self.suite.label()
+                "runner: suite {} is not in-process executable yet (needs real dataset){}; skipping.",
+                self.suite.label(),
+                extra
             );
             for q in self.suite.queries() {
                 println!("  - {} (skipped)", q.name);
@@ -117,13 +137,26 @@ impl Runner {
         rt.block_on(self.run_async())
     }
 
+    /// True if this runner has enough configuration to actually execute the
+    /// configured suite end-to-end. Synthetic always qualifies; JobSlowReal
+    /// qualifies when an IMDb data directory has been supplied.
+    fn is_runnable(&self) -> bool {
+        if self.suite.is_executable() {
+            return true;
+        }
+        if self.suite.is_executable_with_imdb_dir() && self.imdb_dir.is_some() {
+            return true;
+        }
+        false
+    }
+
     async fn run_async(&self) -> Result<()> {
         let mode = if self.baseline {
             "baseline (native plan)"
         } else {
             "samkhya-corrected"
         };
-        let ctx = build_synthetic_context(self.baseline, self.puffin_dir.as_deref()).await?;
+        let ctx = self.build_context().await?;
         let store = match self.feedback_path.as_ref() {
             Some(p) => FeedbackStore::open(p)?,
             None => FeedbackStore::open_in_memory()?,
@@ -144,6 +177,10 @@ impl Runner {
         let template_hash = format!("samkhya-bench-{}", self.suite.label());
         let mut outcomes = Vec::new();
         for q in self.suite.queries() {
+            if is_placeholder_query(q) {
+                println!("{:<6} (placeholder; SQL not yet imported)", q.name);
+                continue;
+            }
             match execute_query(&ctx, q).await {
                 Ok(outcome) => {
                     println!(
@@ -197,7 +234,7 @@ impl Runner {
         &self,
         corrector: &C,
     ) -> Result<Vec<CorrectedOutcome>> {
-        if !self.suite.is_executable() {
+        if !self.is_runnable() {
             println!(
                 "runner: suite {} is not in-process executable yet (needs real dataset); skipping.",
                 self.suite.label()
@@ -216,9 +253,12 @@ impl Runner {
         &self,
         corrector: &C,
     ) -> Result<Vec<CorrectedOutcome>> {
-        let ctx = build_synthetic_context(self.baseline, self.puffin_dir.as_deref()).await?;
+        let ctx = self.build_context().await?;
         let mut outcomes = Vec::new();
         for q in self.suite.queries() {
+            if is_placeholder_query(q) {
+                continue;
+            }
             match execute_query_with_corrector(&ctx, q, corrector).await {
                 Ok(outcome) => outcomes.push(outcome),
                 Err(e) => {
@@ -227,6 +267,25 @@ impl Runner {
             }
         }
         Ok(outcomes)
+    }
+}
+
+impl Runner {
+    /// Dispatch SessionContext construction by suite.
+    ///
+    /// `JobSlowReal` + a configured `imdb_dir` builds against the real
+    /// IMDb dump via [`crate::imdb::register_imdb_tables`]. Everything else
+    /// falls back to the synthetic in-memory context.
+    async fn build_context(&self) -> Result<SessionContext> {
+        if self.suite.is_executable_with_imdb_dir() {
+            if let Some(dir) = self.imdb_dir.as_deref() {
+                imdb::probe_imdb_dir(dir)?;
+                let ctx = SessionContext::new();
+                imdb::register_imdb_tables(&ctx, dir)?;
+                return Ok(ctx);
+            }
+        }
+        build_synthetic_context(self.baseline, self.puffin_dir.as_deref()).await
     }
 }
 
@@ -665,4 +724,12 @@ fn compute_q_error(est: u64, actual: u64) -> f64 {
 
 fn df_err(e: impl std::fmt::Display) -> Error {
     Error::Feedback(format!("datafusion: {e}"))
+}
+
+/// Returns true for entries whose SQL text is still the `PLACEHOLDER_SQL`
+/// sentinel from [`crate::queries::job_slow`]. These rows exist in the
+/// roster so per-query reporting is correct, but they cannot be executed
+/// until the canonical SQL is imported.
+fn is_placeholder_query(q: &Query) -> bool {
+    q.sql.starts_with("-- TODO(v0.6.0)")
 }

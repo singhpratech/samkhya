@@ -1,0 +1,36 @@
+[package]
+name = "samkhya-iceberg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Apache Iceberg snapshot ↔ Puffin sidecar bridge for samkhya"
+keywords = ["iceberg", "puffin", "cardinality", "sketches", "query-optimizer"]
+categories = ["database"]
+
+[dependencies]
+samkhya-core.workspace = true
+# Iceberg crate is heavy (pulls opendal, parquet, arrow, etc.). Gated
+# behind the `iceberg` feature so default `cargo check` stays slim and
+# downstream users opt in explicitly. 0.9.1 is the latest published
+# version at the time of writing and is the one this crate is tested
+# against; it builds cleanly on Rust 1.94 (its declared rust-version
+# is 1.92). The 0.4 version mentioned in the original design note has
+# since been superseded — the snapshot / statistics-file shape is
+# substantively the same, but the module paths differ from what the
+# 0.4 docs documented.
+iceberg = { version = "0.9.1", optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+# Pull in the apache `iceberg` crate and the async snapshot walker that
+# resolves Puffin sidecars from the current snapshot's stats-files
+# entries. Off by default — the iceberg dependency tree is large.
+iceberg = ["dep:iceberg", "dep:tokio"]
+
+[dev-dependencies]
+tempfile = "3"

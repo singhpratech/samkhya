@@ -41,6 +41,13 @@ enum Command {
         /// produced by `build-puffin`). Ignored in baseline mode.
         #[arg(long)]
         puffin_dir: Option<PathBuf>,
+
+        /// Path to an unpacked IMDb dump (see `samkhya-bench/data/job/README.md`).
+        /// When supplied alongside `--suite job-slow-real`, the runner builds
+        /// a DataFusion SessionContext from the real CSVs/Parquets and
+        /// executes the JOB queries end-to-end.
+        #[arg(long)]
+        imdb_dir: Option<PathBuf>,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -97,6 +104,7 @@ enum Command {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum SuiteArg {
     JobSlow,
+    JobSlowReal,
     TpcH,
     StatsCeb,
     Synthetic,
@@ -106,6 +114,7 @@ impl From<SuiteArg> for Suite {
     fn from(value: SuiteArg) -> Self {
         match value {
             SuiteArg::JobSlow => Suite::JobSlow,
+            SuiteArg::JobSlowReal => Suite::JobSlowReal,
             SuiteArg::TpcH => Suite::TpcH,
             SuiteArg::StatsCeb => Suite::StatsCeb,
             SuiteArg::Synthetic => Suite::Synthetic,
@@ -122,6 +131,7 @@ fn main() -> Result<()> {
             baseline,
             feedback,
             puffin_dir,
+            imdb_dir,
         } => {
             let mut runner = Runner::new(suite.into(), baseline);
             if let Some(path) = feedback {
@@ -129,6 +139,9 @@ fn main() -> Result<()> {
             }
             if let Some(dir) = puffin_dir {
                 runner = runner.with_puffin_dir(dir);
+            }
+            if let Some(dir) = imdb_dir {
+                runner = runner.with_imdb_dir(dir);
             }
             runner.run()
         }
@@ -155,6 +168,7 @@ fn main() -> Result<()> {
 fn list_queries() -> Result<()> {
     for suite in [
         Suite::JobSlow,
+        Suite::JobSlowReal,
         Suite::TpcH,
         Suite::StatsCeb,
         Suite::Synthetic,
@@ -162,6 +176,8 @@ fn list_queries() -> Result<()> {
         let queries = suite.queries();
         let exec = if suite.is_executable() {
             "(executable)"
+        } else if suite.is_executable_with_imdb_dir() {
+            "(executable with --imdb-dir)"
         } else {
             "(scaffold)"
         };

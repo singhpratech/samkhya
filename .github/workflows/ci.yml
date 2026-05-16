@@ -53,6 +53,30 @@ jobs:
         run: cargo test --workspace --exclude samkhya-duckdb --exclude samkhya-py
 
   # ---------------------------------------------------------------------------
+  # cargo-deny — supply-chain hygiene. Runs the four checks (bans /
+  # licenses / advisories / sources) configured in `deny.toml` at the
+  # repository root. Lands as part of v0.9.0 per ROADMAP §7.
+  #
+  # Fuzzing is NOT enabled in CI: cargo-fuzz requires a nightly toolchain
+  # and a long-running budget that's incompatible with per-PR feedback.
+  # Fuzz targets live in `samkhya-core/fuzz/` (a standalone workspace) and
+  # are run locally before each release tag.
+  # ---------------------------------------------------------------------------
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # Default `command = "check"` runs all four checks: bans,
+          # licenses, advisories, sources.
+          command: check
+
+  # ---------------------------------------------------------------------------
   # Python wheel build — disabled until the PyO3 surface stabilises and we
   # decide on a wheel-distribution channel. When re-enabling, this job should
   # run maturin on a matrix of {linux, macos, windows} x {3.9..3.12} and

@@ -22,6 +22,15 @@ log.workspace = true
 rusqlite.workspace = true
 zstd = { version = "0.13", optional = true }
 gbdt = { version = "0.1", optional = true }
+# Pure-Rust LP modelling crate. Disable defaults to drop the Coin-CBC
+# backend (which requires a system C++ build); pick `microlp` so no
+# system libraries are needed and the crate compiles cleanly on any
+# Rust 1.94+ toolchain. Pulled in only behind the `lp_solver` feature.
+good_lp = { version = "1.8", default-features = false, features = ["microlp"], optional = true }
+# TabPFN HTTP transport (Layer 5 foundation-model interface). Pure-Rust
+# blocking HTTP client; rustls-only by default so default builds never
+# link OpenSSL. Opt-in via the `tabpfn_http` feature.
+ureq = { version = "2", default-features = false, features = ["json", "tls"], optional = true }
 
 [features]
 zstd = ["dep:zstd"]
@@ -33,6 +42,22 @@ gbt = ["dep:gbdt"]
 # plan-shape features instead of a multiplicative log-ratio, which keeps
 # the corrector useful even when the baseline estimate collapses to zero.
 additive_gbt = ["dep:gbdt"]
+# Real fractional-edge-cover LpBound (see src/lpbound.rs::LpJoinBound).
+# Pulls in `good_lp` with the pure-Rust `microlp` backend. Off by default
+# so the core crate stays slim; turn this on to replace the coarse
+# Product/AGM/Chain bounds with the provable LP-derived ceiling.
+lp_solver = ["dep:good_lp"]
+# TabPFN-over-localhost-HTTP backend (see src/residual.rs::tabpfn).
+# Pulls in `ureq` (pure-Rust, rustls-only) and uses workspace `serde_json`
+# to POST `CorrectionFeatures` to a TabPFN inference server and parse
+# back an `{"estimate": <u64>}` response. Off by default — the core build
+# stays slim and the foundation-model interface is strictly opt-in.
+tabpfn_http = ["dep:ureq"]
+# Umbrella feature for the full TabPFN integration. Today this enables
+# the HTTP transport; a future `tabpfn_subprocess` feature will join it
+# under this umbrella so downstream users can request "TabPFN, however
+# it's deployed" without picking a transport.
+tabpfn = ["tabpfn_http"]
 
 [dev-dependencies]
 proptest.workspace = true
@@ -45,4 +70,11 @@ harness = false
 
 [[bench]]
 name = "puffin"
+harness = false
+
+# v0.9.0 hardening: stress benches that push HLL / Puffin / FeedbackStore
+# an order of magnitude past the microbenches above. Run on release
+# hardware; not part of the regression-tracking suite.
+[[bench]]
+name = "stress"
 harness = false

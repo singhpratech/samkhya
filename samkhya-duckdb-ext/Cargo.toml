@@ -1,0 +1,49 @@
+[package]
+name = "samkhya-duckdb-ext"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Server-side DuckDB extension scaffold for samkhya — loadable .duckdb_extension exposing portable sketches as SQL functions"
+keywords = ["duckdb", "extension", "cardinality", "sketches", "cxx"]
+categories = ["database"]
+
+# Built as a C-ABI dynamic library so DuckDB can `LOAD` it at runtime.
+# DuckDB's loader looks for the `<name>_init` symbol in the resulting
+# .duckdb_extension file (a renamed .so / .dylib / .dll).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+samkhya-core.workspace = true
+
+# cxx is *only* needed when the `extension` feature is on. We still declare
+# it as an optional regular dep (not just a build-dep) because the bridge
+# macro it provides is used in lib.rs and must be visible at compile time.
+cxx = { version = "1", optional = true }
+
+[build-dependencies]
+# cxx-build is invoked from build.rs to compile the generated C++ bridge
+# stubs together with src/extension.cpp. It is only used when the
+# `extension` feature is active; build.rs guards the call with a cfg check.
+cxx-build = { version = "1", optional = true }
+
+[features]
+default = []
+# Enables the cxx bridge and compiles src/extension.cpp.
+#
+# OFF by default on purpose:
+#   * Plain `cargo check --workspace` must work without a C++ toolchain
+#     and without DuckDB headers on disk.
+#   * Turning the feature on requires:
+#       - clang or gcc with C++17 support
+#       - DuckDB extension headers (typically obtained via the
+#         duckdb/extension-template checkout — see README.md)
+#       - the `DUCKDB_INCLUDE_DIR` env var pointing at those headers
+#
+# Build with:
+#   cargo build -p samkhya-duckdb-ext --release --features extension
+extension = ["dep:cxx", "dep:cxx-build"]

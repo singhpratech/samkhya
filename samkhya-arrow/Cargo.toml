@@ -1,0 +1,19 @@
+[package]
+name = "samkhya-arrow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Engine-agnostic Arrow integration for samkhya sketches: array/RecordBatch -> HLL/Bloom/CMS/histogram helpers"
+keywords = ["arrow", "cardinality", "sketches", "hyperloglog", "bloom-filter"]
+categories = ["database"]
+
+[dependencies]
+samkhya-core.workspace = true
+# Pin to the Arrow major DataFusion 46 vendors (54.3.1 in this workspace's
+# resolved graph) so consumers that already pull DataFusion don't end up
+# with two parallel Arrow stacks.
+arrow = "54"

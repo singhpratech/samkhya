@@ -1,0 +1,24 @@
+[package]
+name = "samkhya-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Operator-facing CLI for samkhya: inspect Puffin sidecars, FeedbackStore stats, sketch builders"
+keywords = ["cardinality", "query-optimizer", "cli", "puffin", "sketches"]
+categories = ["database", "command-line-utilities"]
+publish = false
+
+[[bin]]
+name = "samkhya"
+path = "src/main.rs"
+
+[dependencies]
+samkhya-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+csv = "1"
+rusqlite = { workspace = true }
