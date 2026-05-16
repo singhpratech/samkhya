@@ -14,5 +14,8 @@ publish = false
 
 [dependencies]
 samkhya-core.workspace = true
+samkhya-datafusion = { path = "../samkhya-datafusion" }
 clap.workspace = true
 tokio.workspace = true
+datafusion = "46"
+rand = "0.8"

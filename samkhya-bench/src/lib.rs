@@ -6,3 +6,4 @@
 
 pub mod queries;
 pub mod runner;
+pub mod synthetic;

@@ -40,6 +40,7 @@ enum SuiteArg {
     JobSlow,
     TpcH,
     StatsCeb,
+    Synthetic,
 }
 
 impl From<SuiteArg> for Suite {
@@ -48,6 +49,7 @@ impl From<SuiteArg> for Suite {
             SuiteArg::JobSlow => Suite::JobSlow,
             SuiteArg::TpcH => Suite::TpcH,
             SuiteArg::StatsCeb => Suite::StatsCeb,
+            SuiteArg::Synthetic => Suite::Synthetic,
         }
     }
 }
@@ -68,9 +70,19 @@ fn main() -> Result<()> {
 }
 
 fn list_queries() -> Result<()> {
-    for suite in [Suite::JobSlow, Suite::TpcH, Suite::StatsCeb] {
+    for suite in [
+        Suite::JobSlow,
+        Suite::TpcH,
+        Suite::StatsCeb,
+        Suite::Synthetic,
+    ] {
         let queries = suite.queries();
-        println!("{}: {} queries", suite.label(), queries.len());
+        let exec = if suite.is_executable() {
+            "(executable)"
+        } else {
+            "(scaffold)"
+        };
+        println!("{} {}: {} queries", suite.label(), exec, queries.len());
         for q in queries {
             println!("  - {}", q.name);
         }

@@ -7,6 +7,7 @@
 
 pub mod job_slow;
 pub mod stats_ceb;
+pub mod synthetic;
 pub mod tpc_h;
 
 /// A single benchmark query.
@@ -26,6 +27,7 @@ pub enum Suite {
     JobSlow,
     TpcH,
     StatsCeb,
+    Synthetic,
 }
 
 impl Suite {
@@ -35,6 +37,7 @@ impl Suite {
             Suite::JobSlow => "job-slow",
             Suite::TpcH => "tpc-h",
             Suite::StatsCeb => "stats-ceb",
+            Suite::Synthetic => "synthetic",
         }
     }
 
@@ -44,6 +47,15 @@ impl Suite {
             Suite::JobSlow => job_slow::QUERIES,
             Suite::TpcH => tpc_h::QUERIES,
             Suite::StatsCeb => stats_ceb::QUERIES,
+            Suite::Synthetic => synthetic::QUERIES,
         }
+    }
+
+    /// Whether this suite can be executed in-process today.
+    ///
+    /// Only `Synthetic` runs against built-in in-memory tables; the
+    /// others are scaffolding for when real datasets are wired up.
+    pub fn is_executable(self) -> bool {
+        matches!(self, Suite::Synthetic)
     }
 }
