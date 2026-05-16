@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel in-flight runs for the same ref when a new commit lands.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # `rust-toolchain.toml` at the repo root pins the channel (1.94)
+      # and components (rustfmt, clippy). We still specify `stable` here
+      # so the action installs the modern launcher; the toolchain file
+      # takes precedence when invoking cargo from the workspace root.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry, index, and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # We exclude two members from the workspace lint/test pass:
+      #   * samkhya-duckdb — links against DuckDB's C++ via `cxx`; requires
+      #     a configured C++ toolchain and DuckDB headers that are not
+      #     installed on stock `ubuntu-latest` runners.
+      #   * samkhya-py — PyO3 extension module; needs the matching Python
+      #     dev headers and is built end-to-end by `maturin` in a separate
+      #     job (see `build-py` below, currently disabled).
+      - name: Clippy (workspace, deny warnings)
+        run: cargo clippy --workspace --exclude samkhya-duckdb --exclude samkhya-py -- -D warnings
+
+      - name: Test (workspace)
+        run: cargo test --workspace --exclude samkhya-duckdb --exclude samkhya-py
+
+  # ---------------------------------------------------------------------------
+  # Python wheel build — disabled until the PyO3 surface stabilises and we
+  # decide on a wheel-distribution channel. When re-enabling, this job should
+  # run maturin on a matrix of {linux, macos, windows} x {3.9..3.12} and
+  # publish artifacts.
+  # ---------------------------------------------------------------------------
+  # build-py:
+  #   name: build python wheels
+  #   runs-on: ${{ matrix.os }}
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       os: [ubuntu-latest, macos-latest, windows-latest]
+  #       python-version: ["3.9", "3.10", "3.11", "3.12"]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: ${{ matrix.python-version }}
+  #     - uses: Swatinem/rust-cache@v2
+  #     - name: Build wheel with maturin
+  #       run: |
+  #         pip install maturin
+  #         maturin build --release -m samkhya-py/Cargo.toml
+  #     - name: Upload wheel artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: samkhya-py-${{ matrix.os }}-py${{ matrix.python-version }}
+  #         path: target/wheels/*.whl

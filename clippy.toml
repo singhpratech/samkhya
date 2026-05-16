@@ -1,0 +1,8 @@
+# samkhya — clippy configuration.
+#
+# We raise the two complexity thresholds clippy ships with so analytical
+# code paths (sketch math, optimizer rules, encoder/decoder loops) are not
+# auto-flagged before they have a chance to settle. Tighten these as the
+# codebase matures.
+cognitive-complexity-threshold = 30
+type-complexity-threshold = 250
