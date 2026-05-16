@@ -10,3 +10,5 @@
 __pycache__/
 .venv/
 *.egg-info/
+# Coffee-table HTML field guide — kept on disk but never committed (per direction)
+documents/

@@ -6,7 +6,7 @@ still change in backwards-incompatible ways before v1.0. The supply-chain
 guarantees in this document apply regardless of API stability.
 
 Sole author and security contact: **Prateek Singh**
-(`aiexplore369@gmail.com`).
+(`via GitHub Security Advisories on the singhpratech/samkhya repository`).
 
 ## Supported versions
 
@@ -34,7 +34,7 @@ following private channels:
    vulnerability". This is the canonical channel and the one wired into
    the release process.
 
-2. **Fallback: email** `aiexplore369@gmail.com` with subject prefix
+2. **Fallback: email** `via GitHub Security Advisories on the singhpratech/samkhya repository` with subject prefix
    `[samkhya security]`. Plain text is fine; PGP is available on request.
 
 Initial acknowledgement target: **3 business days**. Triage and remediation
