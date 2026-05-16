@@ -9,8 +9,10 @@ members = [
     "samkhya-polars",
     "samkhya-postgres",
     "samkhya-gpudb",
+    "samkhya-iceberg",
     "samkhya-bench",
     "samkhya-cli",
+    "samkhya-arrow",
 ]
 
 [workspace.package]

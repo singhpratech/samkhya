@@ -31,9 +31,7 @@ fn imdb_dir_from_env() -> Option<std::path::PathBuf> {
 #[ignore = "requires IMDB_DIR pointing at an unpacked IMDb dump; see data/job/README.md"]
 fn job_slow_real_runs_against_imdb_dir() {
     let Some(dir) = imdb_dir_from_env() else {
-        eprintln!(
-            "IMDB_DIR not set; skipping. See samkhya-bench/data/job/README.md for setup."
-        );
+        eprintln!("IMDB_DIR not set; skipping. See samkhya-bench/data/job/README.md for setup.");
         return;
     };
 

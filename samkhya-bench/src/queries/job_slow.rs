@@ -37,7 +37,8 @@ use super::Query;
 /// Sentinel inserted as the `sql` field for the 108 queries whose text has
 /// not yet been imported from upstream. The runner treats this as
 /// "scaffold-only" and reports skipped.
-pub const PLACEHOLDER_SQL: &str = "-- TODO(v0.6.0): import SQL from https://github.com/winkyao/join-order-benchmark";
+pub const PLACEHOLDER_SQL: &str =
+    "-- TODO(v0.6.0): import SQL from https://github.com/winkyao/join-order-benchmark";
 
 /// Returns true if `name` belongs to the JOB-Slow subset (the 33 hardest
 /// queries by Leis et al., VLDB 2015).
@@ -395,7 +396,10 @@ mod tests {
     #[test]
     fn smoke_queries_carry_real_sql() {
         for name in ["1a", "2b", "6a", "17a", "29a"] {
-            let q = QUERIES.iter().find(|q| q.name == name).expect("query exists");
+            let q = QUERIES
+                .iter()
+                .find(|q| q.name == name)
+                .expect("query exists");
             assert!(has_sql(q), "{name} should carry real SQL");
         }
     }

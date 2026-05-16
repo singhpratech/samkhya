@@ -56,17 +56,18 @@ pub async fn discover_puffin_sidecars(
 
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
 
-    // `TableMetadata::statistics()` in iceberg 0.9.1 returns an
-    // iterator / slice of `StatisticsFile` entries. Each entry
-    // carries `snapshot_id` and `statistics_path` (the Puffin
-    // sidecar path). We filter by the current snapshot id and
-    // collect the paths.
+    // `TableMetadata::statistics_iter()` in iceberg 0.9.1 returns
+    // an iterator over `&StatisticsFile`. Each entry carries
+    // `snapshot_id` and `statistics_path` (the Puffin sidecar
+    // path). We filter by the current snapshot id and collect the
+    // paths.
     //
-    // We use the public iterator surface here because the exact
-    // return type (slice vs HashMap vs custom iterator) has varied
-    // across versions; `.into_iter()` via `IntoIterator` is the
-    // stable thing.
-    for stats_file in metadata.statistics() {
+    // The accessor name has drifted across iceberg versions
+    // (`statistics()` slice in earlier prototypes,
+    // `statistics_for_snapshot(id)` in another iteration); 0.9.1
+    // settled on `statistics_iter()`. The contract type
+    // `SnapshotPuffinPaths` is independent of this rename.
+    for stats_file in metadata.statistics_iter() {
         if let Some(current_id) = current_snapshot_id {
             if stats_file.snapshot_id != current_id {
                 continue;

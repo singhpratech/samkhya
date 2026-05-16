@@ -25,8 +25,8 @@ use samkhya_core::{Error, Result};
 /// `$arr_ty`, converting each to its little-endian byte representation.
 ///
 /// Implemented as a macro because Arrow's `PrimitiveArray<T>` instances
-/// are distinct generic types — a single generic function would have
-/// to constrain `ArrowPrimitiveType` plumbing more than we need.
+/// are distinct generic types — a single generic function would have to
+/// thread `ArrowPrimitiveType` plumbing more than we need.
 macro_rules! le_walk {
     ($array:expr, $arr_ty:ty, $f:expr) => {{
         let arr = $array
@@ -122,32 +122,46 @@ pub fn ingest_array_into_cms(array: &dyn Array, cms: &mut CountMinSketch, count_
     let _ = for_each_value(array, |bytes| cms.add(bytes, count_per_value));
 }
 
+/// Pull non-null primitive values out of an Arrow array and append them
+/// to `out` after casting to `f64`. Used by the histogram path.
+macro_rules! collect_primitive_as_f64 {
+    ($array:expr, $arr_ty:ty, $out:expr) => {{
+        let arr = $array
+            .as_any()
+            .downcast_ref::<$arr_ty>()
+            .expect("downcast guarded by data_type match arm");
+        for v in arr.iter().flatten() {
+            $out.push(v as f64);
+        }
+    }};
+}
+
 /// Extract non-null numeric values from `array` as `f64`, ready to feed
 /// into [`samkhya_core::sketches::EquiDepthHistogram::from_values`].
 /// Returns an [`Error::InvalidSketch`] for non-numeric arrays — the
 /// histogram has no meaningful interpretation over strings / bytes /
 /// booleans.
 pub fn ingest_array_into_histogram_values(array: &dyn Array) -> Result<Vec<f64>> {
-    let mut out = Vec::with_capacity(array.len());
+    let mut out: Vec<f64> = Vec::with_capacity(array.len());
     match array.data_type() {
-        DataType::Int8 => push_primitive::<Int8Array>(array, &mut out, |v| v as f64),
-        DataType::Int16 => push_primitive::<Int16Array>(array, &mut out, |v| v as f64),
-        DataType::Int32 => push_primitive::<Int32Array>(array, &mut out, |v| v as f64),
-        DataType::Int64 => push_primitive::<Int64Array>(array, &mut out, |v| v as f64),
-        DataType::UInt8 => push_primitive::<UInt8Array>(array, &mut out, |v| v as f64),
-        DataType::UInt16 => push_primitive::<UInt16Array>(array, &mut out, |v| v as f64),
-        DataType::UInt32 => push_primitive::<UInt32Array>(array, &mut out, |v| v as f64),
-        DataType::UInt64 => push_primitive::<UInt64Array>(array, &mut out, |v| v as f64),
-        DataType::Float32 => push_primitive::<Float32Array>(array, &mut out, |v| v as f64),
-        DataType::Float64 => push_primitive::<Float64Array>(array, &mut out, |v| v),
+        DataType::Int8 => collect_primitive_as_f64!(array, Int8Array, out),
+        DataType::Int16 => collect_primitive_as_f64!(array, Int16Array, out),
+        DataType::Int32 => collect_primitive_as_f64!(array, Int32Array, out),
+        DataType::Int64 => collect_primitive_as_f64!(array, Int64Array, out),
+        DataType::UInt8 => collect_primitive_as_f64!(array, UInt8Array, out),
+        DataType::UInt16 => collect_primitive_as_f64!(array, UInt16Array, out),
+        DataType::UInt32 => collect_primitive_as_f64!(array, UInt32Array, out),
+        DataType::UInt64 => collect_primitive_as_f64!(array, UInt64Array, out),
+        DataType::Float32 => collect_primitive_as_f64!(array, Float32Array, out),
+        DataType::Float64 => collect_primitive_as_f64!(array, Float64Array, out),
         // Date / timestamp columns are integer-backed and order-preserving
         // under the f64 cast, so they remain meaningful for range
-        // selectivity. Larger-than-2^53 nanosecond timestamps lose precision,
-        // but the equi-depth histogram is a lossy summary already.
-        DataType::Date32 => push_primitive::<Date32Array>(array, &mut out, |v| v as f64),
-        DataType::Date64 => push_primitive::<Date64Array>(array, &mut out, |v| v as f64),
+        // selectivity. Nanosecond timestamps past 2^53 lose precision,
+        // but the equi-depth histogram is a lossy summary anyway.
+        DataType::Date32 => collect_primitive_as_f64!(array, Date32Array, out),
+        DataType::Date64 => collect_primitive_as_f64!(array, Date64Array, out),
         DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-            push_primitive::<TimestampNanosecondArray>(array, &mut out, |v| v as f64)
+            collect_primitive_as_f64!(array, TimestampNanosecondArray, out)
         }
         other => {
             return Err(Error::InvalidSketch(format!(
@@ -156,20 +170,4 @@ pub fn ingest_array_into_histogram_values(array: &dyn Array) -> Result<Vec<f64>>
         }
     }
     Ok(out)
-}
-
-/// Helper: downcast `array` to `A`, walk non-null values, push each
-/// through `to_f64` into `out`.
-fn push_primitive<A: 'static>(array: &dyn Array, out: &mut Vec<f64>, to_f64: fn(A::Native) -> f64)
-where
-    A: arrow::array::Array,
-    A: for<'a> arrow::array::ArrayAccessor<Item = A::Native>,
-    A::Native: Copy,
-{
-    // Generic path was attractive but requires extra bounds we'd have to
-    // re-prove for every primitive — the indirection is not worth it.
-    // The match in the caller already narrows the type; we just downcast
-    // and iterate via the typed iterator.
-    let _ = (array, out, to_f64);
-    unreachable!("specialized below")
 }

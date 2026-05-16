@@ -29,8 +29,8 @@ use std::path::{Path, PathBuf};
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionContext};
-use samkhya_core::error::Error;
 use samkhya_core::Result;
+use samkhya_core::error::Error;
 
 /// All 21 IMDb tables referenced by the JOB query corpus, in the order
 /// matching the canonical `schema.sql`.
@@ -96,13 +96,9 @@ pub fn register_imdb_tables(ctx: &SessionContext, csv_dir: &Path) -> Result<()> 
 
             if prefer_parquet && parquet_path.exists() {
                 let opts = ParquetReadOptions::default();
-                ctx.register_parquet(
-                    table,
-                    parquet_path.to_string_lossy().as_ref(),
-                    opts,
-                )
-                .await
-                .map_err(df_err)?;
+                ctx.register_parquet(table, parquet_path.to_string_lossy().as_ref(), opts)
+                    .await
+                    .map_err(df_err)?;
             } else if csv_path.exists() {
                 let opts = CsvReadOptions::new()
                     .has_header(false)
@@ -110,13 +106,9 @@ pub fn register_imdb_tables(ctx: &SessionContext, csv_dir: &Path) -> Result<()> 
                     .delimiter(b',')
                     .schema(schema)
                     .newlines_in_values(true);
-                ctx.register_csv(
-                    table,
-                    csv_path.to_string_lossy().as_ref(),
-                    opts,
-                )
-                .await
-                .map_err(df_err)?;
+                ctx.register_csv(table, csv_path.to_string_lossy().as_ref(), opts)
+                    .await
+                    .map_err(df_err)?;
             } else {
                 return Err(Error::Feedback(format!(
                     "imdb: missing source for {table} (looked at {} and {})",
@@ -386,6 +378,10 @@ pub fn default_imdb_dir() -> PathBuf {
     PathBuf::from("samkhya-bench/data/job")
 }
 
+fn df_err(e: impl std::fmt::Display) -> Error {
+    Error::Feedback(format!("datafusion: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,8 +400,4 @@ mod tests {
         let bogus = PathBuf::from("/tmp/samkhya-bench-no-such-dir-xyzzy");
         assert!(probe_imdb_dir(&bogus).is_err());
     }
-}
-
-fn df_err(e: impl std::fmt::Display) -> Error {
-    Error::Feedback(format!("datafusion: {e}"))
 }
