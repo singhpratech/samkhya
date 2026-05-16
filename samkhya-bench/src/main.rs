@@ -44,6 +44,15 @@ enum Command {
         suite: SuiteArg,
     },
 
+    /// Build Puffin sidecars for the Synthetic schema and write them to
+    /// the given directory (one .puffin file per table). Subsequent runs
+    /// can load `ColumnStats` from these sidecars via `--puffin-dir`.
+    BuildPuffin {
+        /// Output directory for the sidecars.
+        #[arg(long)]
+        output: PathBuf,
+    },
+
     /// Run a suite, train a GBT corrector from the observations, re-run with correction applied.
     Calibrate {
         #[arg(long, value_enum)]
@@ -105,6 +114,7 @@ fn main() -> Result<()> {
             runner.run()
         }
         Command::Compare { suite } => samkhya_bench::report::compare(suite.into()),
+        Command::BuildPuffin { output } => samkhya_bench::puffin_io::build_puffin_sidecars(&output),
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
         Command::Train { feedback, template } => {
             samkhya_bench::report::train_stub(&feedback, &template)
