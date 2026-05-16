@@ -6,6 +6,80 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-16
+
+Fifth wave. The workspace widens from 5 to 8 member crates, the q=∞
+correction limitation is unblocked, and the per-community release plan
+goes from sketch to concrete docs.
+
+### Added
+
+- **samkhya-core**
+  - `residual::additive::AdditiveGbtCorrector` behind the
+    `additive_gbt` feature. Predicts the absolute row count directly
+    from `CorrectionFeatures::to_vec()` so a zero baseline no longer
+    traps the prediction at zero. Proof: `baseline_estimate=0 →
+    corrected=1000`.
+  - `sketches::correlated::CorrelatedHistogram2D` — equi-width 2D bins
+    capturing column-pair correlations the four single-column sketches
+    miss. KIND tag `samkhya.correlated2d-v1`. 10 unit tests.
+  - `examples/inspect_puffin.rs` — operator binary that dumps the
+    footer JSON and decodes every known sketch kind inside a Puffin
+    sidecar.
+- **samkhya-bench**
+  - `build-puffin --output <dir>` subcommand — generates real Puffin
+    sidecars from the synthetic schema (one `.puffin` per table, HLL
+    blob per column).
+  - `--puffin-dir <path>` flag threaded through `run` / `compare` /
+    `calibrate`. When supplied, `SamkhyaTableProvider` ColumnStats
+    overrides come from real sidecars instead of hardcoded distinct
+    counts.
+- **samkhya-duckdb** — real Rust-client integration behind the
+  `bundled` feature. `build_hll_from_query` / `build_bloom_from_query` /
+  `capture_observation` against DuckDB 1.x. Default build stays
+  exclusion-friendly (no C++ toolchain required).
+- **samkhya-polars** — real Series→Sketch helpers behind the `engine`
+  feature, on polars 0.44. `hll_from_series` / `bloom_from_series` /
+  `cms_from_series` / `histogram_from_series` + `lazy_collect_with_feedback`.
+- **samkhya-postgres** — new workspace member. Stub matching the
+  postgrespro/aqo prior-art pattern (pgrx planner_hook + ExecutorEnd_hook,
+  libpq sidecar alt path, sketches in a `samkhya` schema).
+- **samkhya-gpudb** — new workspace member. `GpuCorrector` trait +
+  `CpuFallbackCorrector` reference impl. Reserves Layer 4 (batch GPU
+  inference) of the architecture.
+- **Strategic docs at workspace root**:
+  - `ROADMAP.md` — v0.4 → v1.0 plan with kill criteria, CIDR 2027
+    calendar (2026-05-19 → 2026-08-04).
+  - `RELEASE.md` — operator playbook (versioning, cargo-release, publish
+    ordering, branch policy, security channel).
+  - `DISTRIBUTION.md` — per-community launch plan across 14 surfaces.
+  - `SHOW-HN-DRAFT.md` — pre-staged v1.0 launch post (1439 chars).
+  - `CALIBRATE_WORKFLOW.md` — operator guide for the feedback loop.
+- **paper/**
+  - `draft.md` — 3,482-word draft skeleton matching outline 1:1.
+  - `paper.tex` — 782-line LaTeX (article class, 64 \cite calls, 7 figure
+    stubs, 5 table stubs).
+  - `references.bib` — 25 BibTeX entries.
+  - `Makefile` — `make paper` runs pdflatex/bibtex/pdflatex×2.
+- **documents/** — 11-chapter literature-style HTML field guide with
+  inline SVG diagrams (no CDN deps, no webfonts). Sanskrit-manuscript
+  aesthetic: ink + parchment + cinnabar. Devanagari सांख्य flourish on
+  the cover, sticky chapter nav, print-friendly @media print.
+
+### Confirmed
+
+- 8 member crates, all build clean on default.
+- Workspace clippy `-D warnings` clean.
+- `cargo run -p samkhya-bench -- build-puffin --output /tmp/sx` writes
+  four sidecars; `inspect_puffin` reads them back.
+
+### Framing rules added to memory
+
+- "Every TODO becomes a parallel agent — maximum parallelism is the
+  default." (parallel_agent_strategy.md)
+- "Never write 'killed' / 'dead repo' / 'graveyard'. Always frame as
+  limitations we transcend." (feedback_samkhya_naming.md sub-rule)
+
 ## [0.3.0] — 2026-05-16
 
 Fourth wave of the same session. Closes the feedback loop end-to-end:
@@ -344,7 +418,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.4.0
 [0.3.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.3.0
 [0.2.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.2.0
 [0.1.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.1.0
