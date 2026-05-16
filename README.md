@@ -18,24 +18,24 @@ Not a learned cardinality estimator. The ML layer is opt-in. Framing intentional
 
 ## Status
 
-**v0.1.0 (2026-05-16)** — real end-to-end pipeline. The bench actually executes
-queries through DataFusion, captures the optimizer's row estimate vs the actual
-count, and persists observations to a SQLite feedback store. 51 tests pass
-workspace-wide, clippy `-D warnings` clean. See [CHANGELOG.md](CHANGELOG.md) for
-the full v0.1.0 and v0.0.1 notes.
+**v0.3.0 (2026-05-16)** — end-to-end feedback loop with measurable q-error reduction.
+`cargo run -p samkhya-bench -- calibrate --suite synthetic` collects observations,
+trains a GBT residual corrector, re-runs with corrected estimates, and reports
+the q-error improvement. 82 tests pass workspace-wide, clippy `-D warnings` clean,
+4 release tags (v0.0.1 → v0.3.0). See [CHANGELOG.md](CHANGELOG.md) for full notes.
 
 What works today:
 
-- HLL + Bloom sketches with portable serde codec
-- Iceberg Puffin reader/writer (with optional zstd compression behind a feature flag)
-- SQLite-backed feedback recorder + q-error computation
-- LpBound envelope (`ProductBound` + coarse `AgmBound` + clamp helpers)
-- Residual corrector trait + identity baseline; GBT backend behind `gbt` feature (gbdt-rs)
-- DataFusion 46 integration: `SamkhyaTableProvider` wrapper (primary) + `SamkhyaOptimizerRule` (observe-only)
+- Four foundational sketches with portable serde codec: HLL (distinct), Bloom (membership), Count-Min (frequency), EquiDepthHistogram (range)
+- Iceberg Puffin reader/writer with optional zstd compression
+- SQLite-backed feedback recorder with q-error computation
+- LpBound envelope: `ProductBound`, `AgmBound`, `ChainBound` (frequency-moment chain bound), plus clamp helpers
+- Residual corrector trait: `IdentityCorrector` baseline; `GbtCorrector` (gbdt-rs) behind the `gbt` feature
+- DataFusion 46 integration with three-layer stats injection (`SamkhyaTableProvider` + `SamkhyaStatsExec` + `SamkhyaOptimizerRule` for both logical and physical passes) — proven via the `stats_propagation_demo` example
 - PyO3 bindings (HllSketch / BloomFilter / ColumnStats)
-- `samkhya-bench` clap CLI with `run`, `report`, `train`, `list-queries` subcommands
-- Real synthetic-data DataFusion runner — 5 queries, captures (est, actual, q-error, latency) per query
-- GitHub Actions CI + rustfmt + clippy `-D warnings` + criterion microbenches + 9 proptest properties
+- `samkhya-bench` clap CLI: `list-queries`, `run`, `compare` (baseline vs samkhya side-by-side), `report`, `train`, `calibrate` (full feedback loop: collect → train GBT → re-run with correction)
+- 10-query synthetic suite covering single-filter through 4-table joins with correlated predicates
+- GitHub Actions CI + rustfmt + clippy `-D warnings` + criterion microbenches + 13 proptest properties
 
 Demonstrated gap the project targets:
 
