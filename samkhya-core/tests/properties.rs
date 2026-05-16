@@ -12,7 +12,7 @@ use samkhya_core::lpbound::{
     ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp,
 };
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
-use samkhya_core::sketches::{BloomFilter, CountMinSketch, HllSketch, Sketch};
+use samkhya_core::sketches::{BloomFilter, CountMinSketch, EquiDepthHistogram, HllSketch, Sketch};
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -165,6 +165,52 @@ proptest! {
         for (k, _) in &items {
             prop_assert_eq!(cms.estimate(k), cms2.estimate(k));
         }
+    }
+}
+
+// ---- Histogram properties --------------------------------------------------
+
+proptest! {
+    /// EquiDepthHistogram with a whole-range query returns exactly the input count.
+    #[test]
+    fn histogram_full_range_returns_total(
+        values in pvec(-1e6f64..1e6f64, 1..=500usize),
+        buckets in 1usize..=32,
+    ) {
+        let h = EquiDepthHistogram::from_values(&values, buckets).unwrap();
+        prop_assert_eq!(h.total(), values.len() as u64);
+        // Query a range that covers all values
+        let est = h.estimate_range(-1e7, 1e7);
+        prop_assert_eq!(est, values.len() as u64);
+    }
+
+    /// Range estimate is monotone in range width: widening the range never
+    /// decreases the estimate.
+    #[test]
+    fn histogram_range_monotone(
+        values in pvec(-1e3f64..1e3f64, 1..=200usize),
+        center in -500.0f64..500.0,
+        half_width in 0.0f64..500.0,
+    ) {
+        let h = EquiDepthHistogram::from_values(&values, 8).unwrap();
+        let narrow = h.estimate_range(center - half_width * 0.5, center + half_width * 0.5);
+        let wide = h.estimate_range(center - half_width, center + half_width);
+        prop_assert!(wide >= narrow,
+            "wider range estimate {wide} < narrower {narrow} at center {center}, half_width {half_width}");
+    }
+
+    /// Round-trip preserves boundaries, counts, and total.
+    #[test]
+    fn histogram_round_trip(
+        values in pvec(-1e3f64..1e3f64, 1..=200usize),
+        buckets in 1usize..=16,
+    ) {
+        let h = EquiDepthHistogram::from_values(&values, buckets).unwrap();
+        let bytes = h.to_bytes().unwrap();
+        let h2 = EquiDepthHistogram::from_bytes(&bytes).unwrap();
+        prop_assert_eq!(h.total(), h2.total());
+        prop_assert_eq!(h.buckets(), h2.buckets());
+        prop_assert_eq!(h.estimate_range(-1e7, 1e7), h2.estimate_range(-1e7, 1e7));
     }
 }
 
