@@ -176,40 +176,87 @@ async fn build_synthetic_context(baseline: bool) -> Result<SessionContext> {
         ctx.register_table("order_items", order_items)
             .map_err(df_err)?;
     } else {
+        // Provide samkhya-known distinct counts that DataFusion's MemTable
+        // doesn't compute by default — the actual information advantage.
         ctx.register_table(
             "customers",
-            wrap_with_samkhya(customers, synthetic::N_CUSTOMERS),
+            wrap_with_stats(
+                customers,
+                synthetic::N_CUSTOMERS as u64,
+                &[
+                    ("customer_id", synthetic::N_CUSTOMERS as u64),
+                    ("region", 4),
+                    ("segment", 3),
+                ],
+            ),
         )
         .map_err(df_err)?;
         ctx.register_table(
             "products",
-            wrap_with_samkhya(products, synthetic::N_PRODUCTS),
+            wrap_with_stats(
+                products,
+                synthetic::N_PRODUCTS as u64,
+                &[
+                    ("product_id", synthetic::N_PRODUCTS as u64),
+                    ("category", 5),
+                ],
+            ),
         )
         .map_err(df_err)?;
-        ctx.register_table("orders", wrap_with_samkhya(orders, synthetic::N_ORDERS))
-            .map_err(df_err)?;
+        ctx.register_table(
+            "orders",
+            wrap_with_stats(
+                orders,
+                synthetic::N_ORDERS as u64,
+                &[
+                    ("order_id", synthetic::N_ORDERS as u64),
+                    ("customer_id", synthetic::N_CUSTOMERS as u64),
+                    ("status", 5),
+                ],
+            ),
+        )
+        .map_err(df_err)?;
         ctx.register_table(
             "order_items",
-            wrap_with_samkhya(order_items, synthetic::N_ORDER_ITEMS),
+            wrap_with_stats(
+                order_items,
+                synthetic::N_ORDER_ITEMS as u64,
+                &[
+                    ("order_id", synthetic::N_ORDERS as u64),
+                    ("product_id", synthetic::N_PRODUCTS as u64),
+                ],
+            ),
         )
         .map_err(df_err)?;
     }
     Ok(ctx)
 }
 
-/// Wrap a MemTable with a [`SamkhyaTableProvider`] that exposes
-/// ground-truth row counts as `ColumnStats`. For the synthetic schema
-/// we know the cardinality exactly; in production this would be sourced
-/// from Puffin sidecars or the feedback store.
-fn wrap_with_samkhya<T: TableProvider + 'static>(
+/// Wrap a MemTable with samkhya-known row count + per-column distinct
+/// counts. Row count overrides ensure a stable num_rows reaches downstream
+/// physical operators; distinct counts feed DataFusion's equality-predicate
+/// selectivity estimator (1/distinct_count instead of the 1/5 default).
+fn wrap_with_stats<T: TableProvider + 'static>(
     inner: Arc<T>,
-    row_count: usize,
+    row_count: u64,
+    distinct_per_col: &[(&str, u64)],
 ) -> Arc<dyn TableProvider> {
     let schema = inner.schema();
     let mut wrapper = SamkhyaTableProvider::new(inner);
-    for col_idx in 0..schema.fields().len() {
-        wrapper =
-            wrapper.with_column_stats(col_idx, ColumnStats::new().with_row_count(row_count as u64));
+    for (col_name, distinct_count) in distinct_per_col {
+        if let Some((idx, _)) = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name() == col_name)
+        {
+            wrapper = wrapper.with_column_stats(
+                idx,
+                ColumnStats::new()
+                    .with_row_count(row_count)
+                    .with_distinct_count(*distinct_count),
+            );
+        }
     }
     Arc::new(wrapper)
 }
