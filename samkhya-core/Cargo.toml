@@ -20,6 +20,24 @@ byteorder.workspace = true
 twox-hash.workspace = true
 log.workspace = true
 rusqlite.workspace = true
+zstd = { version = "0.13", optional = true }
+gbdt = { version = "0.1", optional = true }
+
+[features]
+zstd = ["dep:zstd"]
+# Gradient-boosted-tree residual corrector backend (see src/residual.rs::gbt).
+# Pulls in the `gbdt` crate; off by default to keep the core build slim.
+gbt = ["dep:gbdt"]
 
 [dev-dependencies]
 proptest.workspace = true
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "sketches"
+harness = false
+
+[[bench]]
+name = "puffin"
+harness = false

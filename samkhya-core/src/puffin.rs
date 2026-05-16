@@ -28,6 +28,35 @@ use crate::{Error, Result};
 
 const MAGIC: &[u8; 4] = b"PFA1";
 
+/// Compression codec applied to a blob payload before it is written to the file.
+///
+/// The codec name is recorded in the blob's `compression-codec` metadata so
+/// readers can decompress lazily without scanning unrelated blobs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompressionCodec {
+    /// Payload is stored verbatim.
+    None,
+    /// Payload is compressed with zstd (default level).
+    Zstd,
+}
+
+impl CompressionCodec {
+    /// Codec name as serialized in blob metadata (Puffin spec convention).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompressionCodec::None => "none",
+            CompressionCodec::Zstd => "zstd",
+        }
+    }
+
+    fn from_meta(meta: Option<&str>) -> Self {
+        match meta {
+            Some("zstd") => CompressionCodec::Zstd,
+            _ => CompressionCodec::None,
+        }
+    }
+}
+
 /// Footer payload (JSON-encoded inside the file).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FooterPayload {
@@ -130,6 +159,47 @@ impl<W: Write + Seek> PuffinWriter<W> {
             properties: blob.properties,
         });
         Ok(())
+    }
+
+    /// Append a blob with payload compressed under `codec`.
+    ///
+    /// `CompressionCodec::None` is equivalent to [`add_blob`].
+    /// `CompressionCodec::Zstd` requires the `zstd` feature; otherwise this
+    /// returns an [`Error::InvalidPuffin`] explaining the missing feature.
+    pub fn add_blob_compressed(&mut self, blob: Blob<'_>, codec: CompressionCodec) -> Result<()> {
+        match codec {
+            CompressionCodec::None => self.add_blob(blob),
+            CompressionCodec::Zstd => self.add_blob_zstd(blob),
+        }
+    }
+
+    #[cfg(feature = "zstd")]
+    fn add_blob_zstd(&mut self, blob: Blob<'_>) -> Result<()> {
+        self.ensure_head()?;
+        let compressed = zstd::encode_all(blob.payload, 0)
+            .map_err(|e| Error::InvalidPuffin(format!("zstd encode: {e}")))?;
+        let offset = self.pos;
+        self.inner.write_all(&compressed)?;
+        let length = compressed.len() as u64;
+        self.pos += length;
+        self.blobs.push(BlobMetadata {
+            kind: blob.kind,
+            fields: blob.fields,
+            snapshot_id: None,
+            sequence_number: None,
+            offset,
+            length,
+            compression_codec: Some(CompressionCodec::Zstd.as_str().to_string()),
+            properties: blob.properties,
+        });
+        Ok(())
+    }
+
+    #[cfg(not(feature = "zstd"))]
+    fn add_blob_zstd(&mut self, _blob: Blob<'_>) -> Result<()> {
+        Err(Error::InvalidPuffin(
+            "zstd codec requested but the `zstd` cargo feature is disabled".into(),
+        ))
     }
 
     /// Finalize the file: write the footer and return the inner writer.
@@ -241,6 +311,27 @@ impl<R: Read + Seek> PuffinReader<R> {
         Ok(buf)
     }
 
+    /// Read a blob's payload by index and decompress it according to the
+    /// blob's `compression_codec` metadata.
+    ///
+    /// Falls back to the raw bytes when the codec is `None` / unset. Returns
+    /// an error if the recorded codec is unsupported in the current build
+    /// (e.g. `zstd` without the `zstd` feature).
+    pub fn read_blob_decompressed(&mut self, idx: usize) -> Result<Vec<u8>> {
+        let codec = {
+            let meta =
+                self.footer.blobs.get(idx).ok_or_else(|| {
+                    Error::InvalidPuffin(format!("blob index {idx} out of range"))
+                })?;
+            CompressionCodec::from_meta(meta.compression_codec.as_deref())
+        };
+        let raw = self.read_blob(idx)?;
+        match codec {
+            CompressionCodec::None => Ok(raw),
+            CompressionCodec::Zstd => decode_zstd(&raw),
+        }
+    }
+
     /// Find the first blob whose `type` (kind) matches `kind`.
     pub fn find_blob(&self, kind: &str) -> Option<(usize, &BlobMetadata)> {
         self.footer
@@ -249,6 +340,18 @@ impl<R: Read + Seek> PuffinReader<R> {
             .enumerate()
             .find(|(_, b)| b.kind == kind)
     }
+}
+
+#[cfg(feature = "zstd")]
+fn decode_zstd(raw: &[u8]) -> Result<Vec<u8>> {
+    zstd::decode_all(raw).map_err(|e| Error::InvalidPuffin(format!("zstd decode: {e}")))
+}
+
+#[cfg(not(feature = "zstd"))]
+fn decode_zstd(_raw: &[u8]) -> Result<Vec<u8>> {
+    Err(Error::InvalidPuffin(
+        "blob is zstd-compressed but the `zstd` cargo feature is disabled".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -338,5 +441,103 @@ mod tests {
         // trailing 4 bytes are not magic
         let result = PuffinReader::open(Cursor::new(buf));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_blob_decompressed_no_codec_is_passthrough() {
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        writer
+            .add_blob(Blob::new("samkhya.test-v1", vec![0], b"plain payload"))
+            .unwrap();
+        let cursor = writer.finish().unwrap();
+
+        let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+        assert_eq!(reader.read_blob_decompressed(0).unwrap(), b"plain payload");
+    }
+
+    #[cfg(not(feature = "zstd"))]
+    #[test]
+    fn requesting_zstd_without_feature_errors() {
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        let err = writer
+            .add_blob_compressed(
+                Blob::new("samkhya.test-v1", vec![0], b"x"),
+                CompressionCodec::Zstd,
+            )
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidPuffin(_)));
+    }
+}
+
+#[cfg(all(test, feature = "zstd"))]
+mod zstd_tests {
+    use std::io::Cursor;
+
+    use super::*;
+    use crate::sketches::{HllSketch, Sketch};
+
+    #[test]
+    fn round_trip_compressed_blob() {
+        // Payload with enough redundancy that zstd visibly shrinks it.
+        let payload = vec![0xABu8; 8192];
+
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        writer
+            .add_blob_compressed(
+                Blob::new("samkhya.test-v1", vec![0], &payload),
+                CompressionCodec::Zstd,
+            )
+            .unwrap();
+        let cursor = writer.finish().unwrap();
+
+        let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+        let meta = &reader.blobs()[0];
+        assert_eq!(meta.compression_codec.as_deref(), Some("zstd"));
+        // Compressed length should be strictly smaller than the original.
+        assert!((meta.length as usize) < payload.len());
+
+        let decoded = reader.read_blob_decompressed(0).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn round_trip_compressed_hll_sketch() {
+        let mut hll = HllSketch::new(14).unwrap();
+        for i in 0..5_000u32 {
+            hll.add(&i.to_le_bytes());
+        }
+        let bytes = hll.to_bytes().unwrap();
+
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        writer
+            .add_blob_compressed(
+                Blob::new(HllSketch::KIND, vec![1], &bytes),
+                CompressionCodec::Zstd,
+            )
+            .unwrap();
+        let cursor = writer.finish().unwrap();
+
+        let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+        let (idx, meta) = reader.find_blob(HllSketch::KIND).unwrap();
+        assert_eq!(meta.compression_codec.as_deref(), Some("zstd"));
+        let decoded = reader.read_blob_decompressed(idx).unwrap();
+        let hll2 = HllSketch::from_bytes(&decoded).unwrap();
+        let err = (hll2.estimate() as f64 - 5_000.0).abs() / 5_000.0;
+        assert!(err < 0.05, "HLL estimate off by {err}");
+    }
+
+    #[test]
+    fn none_codec_via_compressed_api_matches_plain() {
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        writer
+            .add_blob_compressed(
+                Blob::new("samkhya.test-v1", vec![0], b"identity"),
+                CompressionCodec::None,
+            )
+            .unwrap();
+        let cursor = writer.finish().unwrap();
+        let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+        assert!(reader.blobs()[0].compression_codec.is_none());
+        assert_eq!(reader.read_blob_decompressed(0).unwrap(), b"identity");
     }
 }
