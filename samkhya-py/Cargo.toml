@@ -11,5 +11,10 @@ description = "Python bindings for samkhya via PyO3"
 keywords = ["python", "cardinality", "pyo3"]
 categories = ["database"]
 
+[lib]
+name = "samkhya"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 samkhya-core.workspace = true
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }

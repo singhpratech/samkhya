@@ -1,0 +1,41 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "samkhya"
+description = "Portable, feedback-driven cardinality correction for embedded analytical engines (Python bindings)"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Prateek Singh", email = "aiexplore369@gmail.com" },
+]
+keywords = ["cardinality", "sketches", "hyperloglog", "bloom-filter", "query-optimizer"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/singhpratech/samkhya"
+Repository = "https://github.com/singhpratech/samkhya"
+
+[tool.maturin]
+module-name = "samkhya"
+manifest-path = "Cargo.toml"
+features = ["pyo3/extension-module"]
+python-source = "python"
+strip = true
