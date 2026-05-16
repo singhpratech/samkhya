@@ -7,9 +7,17 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "DuckDB extension bindings for samkhya (Rust to C++ via cxx)"
+description = "Client-side DuckDB integration for samkhya — builds portable sketches from DuckDB query results"
 keywords = ["duckdb", "cardinality", "sketches"]
 categories = ["database"]
 
 [dependencies]
 samkhya-core.workspace = true
+duckdb = { version = "1.0", optional = true, features = ["bundled"] }
+
+[features]
+default = []
+# Enable the embedded DuckDB Rust client (pulls in the `duckdb` crate with
+# the `bundled` C++ build). Off by default so a plain
+# `cargo check -p samkhya-duckdb` works without a C++ toolchain.
+bundled = ["dep:duckdb"]
