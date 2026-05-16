@@ -16,6 +16,7 @@ use datafusion::prelude::SessionContext;
 use samkhya_core::Result;
 use samkhya_core::error::Error;
 use samkhya_core::feedback::{FeedbackStore, Observation};
+use samkhya_core::residual::{CorrectionFeatures, Corrector};
 use samkhya_core::stats::ColumnStats;
 use samkhya_datafusion::SamkhyaTableProvider;
 
