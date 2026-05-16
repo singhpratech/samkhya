@@ -5,5 +5,6 @@
 //! analytical engines.
 
 pub mod queries;
+pub mod report;
 pub mod runner;
 pub mod synthetic;

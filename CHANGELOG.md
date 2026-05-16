@@ -6,6 +6,107 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-05-16
+
+Second wave of the same scaffolding session. Real implementations replace
+several v0.0.1 stubs; the architectural skeleton is now an actually-running
+end-to-end pipeline against DataFusion.
+
+### Added
+
+- **samkhya-core**
+  - `residual::gbt` submodule behind the `gbt` cargo feature. `GbtCorrector`
+    trains on `Observation` history; targets `log(actual/est)` regression;
+    predictions clamp via `lpbound::saturating_clamp`. Backed by `gbdt-rs`
+    (Baidu, pure-Rust). 4 additional tests under `--features gbt`.
+  - `puffin` zstd compression behind the `zstd` cargo feature.
+    `CompressionCodec::{None,Zstd}` enum; `add_blob_compressed` /
+    `read_blob_decompressed` methods; metadata-driven codec dispatch.
+    3 additional tests under `--features zstd`.
+  - `CorrectionFeatures::to_vec()` + `FEATURE_LEN` — stable feature
+    vector layout for residual model inputs (append-only).
+  - `benches/sketches.rs` (9 cases) + `benches/puffin.rs` (3 cases) —
+    criterion microbenchmarks. `cargo bench --no-run` compiles cleanly.
+  - `tests/properties.rs` — 9 proptest properties (HLL relative error /
+    merge commutativity / round-trip, Bloom no-FN / round-trip, Puffin
+    round-trip, LpBound monotonicity / clamp invariants).
+  - `tests/integration.rs` — end-to-end pipeline integration test
+    (HLL → Puffin → ColumnStats → FeedbackStore → lpbound).
+  - `examples/sketch_to_puffin.rs` — demo binary that exercises the
+    sketch → Puffin → reopen → recover path and prints relative error.
+- **samkhya-datafusion**
+  - `SamkhyaTableProvider<T>` — primary integration pattern. Wraps any
+    `Arc<dyn TableProvider>` and overrides `statistics()` with samkhya
+    corrections. Builder API: `.with_column_stats(col_idx, ColumnStats)`.
+    `stats_call_count()` test hook. All values marked `Precision::Inexact`.
+  - `tests/wrap_provider.rs` — integration test confirming the wrapper
+    is consulted via the `TableProvider` trait surface.
+  - Documented caveat: DataFusion 46's mainline planner does not yet
+    drive `TableProvider::statistics()`; the hook is shaped for
+    downstream optimizer rules or future DF versions.
+- **samkhya-bench**
+  - Real DataFusion runner. Generates a deterministic synthetic retail
+    OLAP schema (customers/products/orders/order_items at 1k/200/10k/30k
+    rows) and registers it via `SessionContext`. In samkhya-corrected
+    mode, wraps each MemTable with `SamkhyaTableProvider`.
+  - For each query: builds the physical plan to extract the optimizer's
+    row estimate, executes the query, counts actual rows, computes
+    multiplicative q-error, records the observation to a
+    `FeedbackStore`. Prints a per-query comparison table and
+    avg/max q-error.
+  - New `Synthetic` suite with 5 queries (S1–S5) covering single-filter
+    and 2-/3-/4-join shapes with correlated predicates.
+  - `run --feedback <path>` flag to persist observations to SQLite.
+  - `report --feedback <path>` subcommand — summarizes the store
+    per-template; lists every observation with q-error and latency.
+  - `train --feedback <path> --template <hash>` subcommand stub —
+    documents the path to wire the GBT corrector against feedback
+    history once `samkhya-core --features gbt` is enabled in a
+    downstream build.
+
+### Changed
+
+- `samkhya-core/Cargo.toml` grew optional `zstd` and `gbt` features,
+  plus `criterion`, `tempfile`, and `proptest` dev-deps.
+- `samkhya-datafusion/Cargo.toml` added `async-trait` dep.
+- `samkhya-bench/Cargo.toml` added `datafusion 46`, `samkhya-datafusion`,
+  `rand`, and `tokio` deps; the binary is now `#[tokio::main]`-ish
+  (uses a manually-built multi-thread runtime).
+
+### Confirmed (the gap samkhya targets)
+
+Running the synthetic suite against DataFusion 46 reveals:
+
+| query | estimated | actual | q-error |
+|---:|---:|---:|---:|
+| S1 (single-filter) | 2000 | 3925 | 1.96 |
+| S2 (2-join) | 0 | 300 | ∞ |
+| S3 (2-join) | 0 | 6924 | ∞ |
+| S4 (4-join) | 0 | 761 | ∞ |
+| S5 (3-join) | 0 | 5223 | ∞ |
+
+DataFusion 46 returns 0 for the multi-join cardinality estimates — i.e.
+no estimate at all — for queries that actually return hundreds to
+thousands of rows. This is precisely the embedded-engine cardinality
+estimation gap the project targets.
+
+### Tests
+
+- 51 tests pass workspace-wide on the default build.
+- Adding `--features gbt zstd` adds 7 more (4 GBT + 3 zstd).
+- `cargo clippy -- -D warnings` passes.
+
+### Known limitations carried over
+
+- DataFusion 46's mainline planner does not yet propagate
+  `TableProvider::statistics()` into cardinality estimates, so today
+  the baseline and samkhya-wrapped runs report the same numbers.
+  Resolution paths: (a) a custom DataFusion `OptimizerRule` that rewrites
+  scan stats, (b) waiting for a DF release that consumes the hook, or
+  (c) wrapping at the `ExecutionPlan::statistics()` layer instead.
+- LpBound is still the coarse AGM approximation; full LP solver pending.
+- DuckDB extension remains a stub.
+
 ## [0.0.1] — 2026-05-16
 
 Initial scaffolding release. Sets the architectural skeleton; most layers

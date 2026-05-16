@@ -29,10 +29,28 @@ enum Command {
         /// Run the engine's native plan only; skip samkhya correction.
         #[arg(long, default_value_t = false)]
         baseline: bool,
+
+        /// Persist observations to a SQLite file at this path (default: in-memory).
+        #[arg(long)]
+        feedback: Option<std::path::PathBuf>,
     },
 
-    /// Render a report from previous run output.
-    Report,
+    /// Render a report from a feedback store.
+    Report {
+        /// Path to the feedback store (SQLite) to summarize.
+        #[arg(long)]
+        feedback: std::path::PathBuf,
+    },
+
+    /// Train a GBT residual corrector from a feedback store (requires `gbt` feature on samkhya-core).
+    Train {
+        /// Path to the feedback store to train from.
+        #[arg(long)]
+        feedback: std::path::PathBuf,
+        /// Template hash to filter observations by (matches the suite name used during run).
+        #[arg(long)]
+        template: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -58,13 +76,20 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::ListQueries => list_queries(),
-        Command::Run { suite, baseline } => {
-            let runner = Runner::new(suite.into(), baseline);
+        Command::Run {
+            suite,
+            baseline,
+            feedback,
+        } => {
+            let mut runner = Runner::new(suite.into(), baseline);
+            if let Some(path) = feedback {
+                runner = runner.with_feedback_path(path);
+            }
             runner.run()
         }
-        Command::Report => {
-            println!("report: placeholder — will summarise latency and q-error deltas");
-            Ok(())
+        Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
+        Command::Train { feedback, template } => {
+            samkhya_bench::report::train_stub(&feedback, &template)
         }
     }
 }
