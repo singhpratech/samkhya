@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "Polars adapter for samkhya — portable cardinality correction hooks"
-keywords = ["polars", "cardinality", "query-optimizer"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya Polars 0.44 adapter: Series → Sketch helpers"
 
 [dependencies]
 samkhya-core.workspace = true

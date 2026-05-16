@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "DataFusion adapter for samkhya — OptimizerRule + ColumnStatistics consumer"
-keywords = ["datafusion", "cardinality", "query-optimizer"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya DataFusion 46 adapter: SamkhyaTableProvider + SamkhyaStatsExec + SamkhyaOptimizerRule"
 
 [dependencies]
 samkhya-core.workspace = true

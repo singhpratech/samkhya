@@ -42,6 +42,15 @@ pub enum CompressionCodec {
 
 impl CompressionCodec {
     /// Codec name as serialized in blob metadata (Puffin spec convention).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::puffin::CompressionCodec;
+    ///
+    /// assert_eq!(CompressionCodec::None.as_str(), "none");
+    /// assert_eq!(CompressionCodec::Zstd.as_str(), "zstd");
+    /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             CompressionCodec::None => "none",
@@ -96,6 +105,18 @@ pub struct BlobMetadata {
 }
 
 /// A blob to be written to a Puffin file.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::puffin::Blob;
+///
+/// let payload = b"sketch bytes";
+/// let blob = Blob::new("samkhya.hll-v1", vec![7], payload);
+/// assert_eq!(blob.kind, "samkhya.hll-v1");
+/// assert_eq!(blob.fields, vec![7]);
+/// assert_eq!(blob.payload, payload);
+/// ```
 pub struct Blob<'a> {
     pub kind: String,
     pub fields: Vec<i32>,
@@ -104,6 +125,17 @@ pub struct Blob<'a> {
 }
 
 impl<'a> Blob<'a> {
+    /// Build a blob with empty properties. Add metadata afterwards by
+    /// inserting into `blob.properties`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::puffin::Blob;
+    ///
+    /// let blob = Blob::new("samkhya.bloom-v1", vec![1, 2], &[0u8, 1, 2, 3]);
+    /// assert!(blob.properties.is_empty());
+    /// ```
     pub fn new(kind: impl Into<String>, fields: Vec<i32>, payload: &'a [u8]) -> Self {
         Self {
             kind: kind.into(),
@@ -115,6 +147,25 @@ impl<'a> Blob<'a> {
 }
 
 /// Streaming writer for Puffin files.
+///
+/// Wraps any `Write + Seek` sink. The magic header is written lazily on the
+/// first blob (or finish); call [`PuffinWriter::finish`] to flush the footer
+/// and recover the inner writer.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Cursor;
+/// use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
+///
+/// let mut writer = PuffinWriter::new(Cursor::new(Vec::<u8>::new()));
+/// writer.add_blob(Blob::new("samkhya.test-v1", vec![0], b"hello")).unwrap();
+/// let cursor = writer.finish().unwrap();
+///
+/// // Round-trip: open the bytes back as a reader.
+/// let reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+/// assert_eq!(reader.blobs().len(), 1);
+/// ```
 pub struct PuffinWriter<W: Write + Seek> {
     inner: W,
     blobs: Vec<BlobMetadata>,
@@ -142,6 +193,17 @@ impl<W: Write + Seek> PuffinWriter<W> {
     }
 
     /// Append a blob to the file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// use samkhya_core::puffin::{Blob, PuffinWriter};
+    ///
+    /// let mut writer = PuffinWriter::new(Cursor::new(Vec::<u8>::new()));
+    /// writer.add_blob(Blob::new("samkhya.test-v1", vec![0], b"payload")).unwrap();
+    /// let _bytes = writer.finish().unwrap().into_inner();
+    /// ```
     pub fn add_blob(&mut self, blob: Blob<'_>) -> Result<()> {
         self.ensure_head()?;
         let offset = self.pos;
@@ -224,6 +286,23 @@ impl<W: Write + Seek> PuffinWriter<W> {
 }
 
 /// Reader for Puffin files — parses the footer once, lazily loads blob payloads.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Cursor;
+/// use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
+///
+/// // Write a file in memory, then read it back.
+/// let mut w = PuffinWriter::new(Cursor::new(Vec::<u8>::new()));
+/// w.add_blob(Blob::new("samkhya.hll-v1", vec![1], b"sketch bytes")).unwrap();
+/// let bytes = w.finish().unwrap().into_inner();
+///
+/// let mut reader = PuffinReader::open(Cursor::new(bytes)).unwrap();
+/// let (idx, meta) = reader.find_blob("samkhya.hll-v1").unwrap();
+/// assert_eq!(meta.kind, "samkhya.hll-v1");
+/// assert_eq!(reader.read_blob(idx).unwrap(), b"sketch bytes");
+/// ```
 pub struct PuffinReader<R: Read + Seek> {
     inner: R,
     footer: FooterPayload,
@@ -333,6 +412,20 @@ impl<R: Read + Seek> PuffinReader<R> {
     }
 
     /// Find the first blob whose `type` (kind) matches `kind`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
+    ///
+    /// let mut w = PuffinWriter::new(Cursor::new(Vec::<u8>::new()));
+    /// w.add_blob(Blob::new("samkhya.hll-v1", vec![0], b"x")).unwrap();
+    /// let bytes = w.finish().unwrap().into_inner();
+    /// let reader = PuffinReader::open(Cursor::new(bytes)).unwrap();
+    /// assert!(reader.find_blob("samkhya.hll-v1").is_some());
+    /// assert!(reader.find_blob("absent.kind").is_none());
+    /// ```
     pub fn find_blob(&self, kind: &str) -> Option<(usize, &BlobMetadata)> {
         self.footer
             .blobs

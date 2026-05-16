@@ -16,6 +16,24 @@ use serde::{Deserialize, Serialize};
 use crate::sketches::Sketch;
 use crate::{Error, Result};
 
+/// Two-column equi-width joint histogram. Captures cross-column
+/// correlation that single-column stats erase.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::sketches::CorrelatedHistogram2D;
+///
+/// let pairs: Vec<(f64, f64)> = (0..1000)
+///     .map(|i| (i as f64, (i % 50) as f64))
+///     .collect();
+/// let h = CorrelatedHistogram2D::from_pairs(&pairs, 16, 16).unwrap();
+/// assert_eq!(h.total(), 1000);
+/// // Querying the full support recovers the full count.
+/// let (a_lo, a_hi) = h.a_range();
+/// let (b_lo, b_hi) = h.b_range();
+/// assert_eq!(h.estimate_range(a_lo, a_hi, b_lo, b_hi), 1000);
+/// ```
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CorrelatedHistogram2D {
     col_a_bins: u32,
@@ -31,14 +49,18 @@ pub struct CorrelatedHistogram2D {
 }
 
 impl CorrelatedHistogram2D {
-    /// Create an empty 2D histogram with the given bin counts. The min/max
-    /// of each column default to 0.0 and must be populated via
-    /// [`from_pairs`](Self::from_pairs) or [`merge`](Self::merge) before
-    /// estimates are meaningful.
-    pub fn new(col_a_bins: usize, col_b_bins: usize) -> Result<Self> {
+    /// Fallible constructor. Validates `col_a_bins > 0`,
+    /// `col_b_bins > 0`, and that the product fits in `usize` BEFORE
+    /// allocating the cells vector. Preferred public entry point.
+    pub fn try_new(col_a_bins: usize, col_b_bins: usize) -> Result<Self> {
         if col_a_bins == 0 || col_b_bins == 0 {
             return Err(Error::InvalidSketch(
                 "CorrelatedHistogram2D bin counts must be > 0".into(),
+            ));
+        }
+        if col_a_bins > u32::MAX as usize || col_b_bins > u32::MAX as usize {
+            return Err(Error::InvalidSketch(
+                "CorrelatedHistogram2D bin counts must fit in u32".into(),
             ));
         }
         let size = col_a_bins
@@ -56,8 +78,59 @@ impl CorrelatedHistogram2D {
         })
     }
 
+    /// Source-compatible alias for [`try_new`]. Preserved so that
+    /// downstream call sites continue to compile unchanged.
+    pub fn new(col_a_bins: usize, col_b_bins: usize) -> Result<Self> {
+        Self::try_new(col_a_bins, col_b_bins)
+    }
+
+    /// Validate the structural invariants of a deserialised payload.
+    fn validate(&self) -> Result<()> {
+        if self.col_a_bins == 0 || self.col_b_bins == 0 {
+            return Err(Error::InvalidSketch(
+                "CorrelatedHistogram2D decoded bins must both be > 0".into(),
+            ));
+        }
+        let expected = (self.col_a_bins as usize)
+            .checked_mul(self.col_b_bins as usize)
+            .ok_or_else(|| {
+                Error::InvalidSketch("CorrelatedHistogram2D decoded cells overflow".into())
+            })?;
+        if self.cells.len() != expected {
+            return Err(Error::InvalidSketch(format!(
+                "CorrelatedHistogram2D cells.len() {} != col_a_bins*col_b_bins = {}",
+                self.cells.len(),
+                expected
+            )));
+        }
+        for (name, v) in [
+            ("a_min", self.a_min),
+            ("a_max", self.a_max),
+            ("b_min", self.b_min),
+            ("b_max", self.b_max),
+        ] {
+            if v.is_nan() {
+                return Err(Error::InvalidSketch(format!(
+                    "CorrelatedHistogram2D {name} is NaN"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Scan a slice of `(a, b)` pairs, learn each column's min/max, then
     /// equi-width-bin and populate the cell counts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::sketches::CorrelatedHistogram2D;
+    ///
+    /// let pairs = vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)];
+    /// let h = CorrelatedHistogram2D::from_pairs(&pairs, 4, 4).unwrap();
+    /// assert_eq!(h.total(), 4);
+    /// assert_eq!(h.a_range(), (0.0, 3.0));
+    /// ```
     pub fn from_pairs(pairs: &[(f64, f64)], col_a_bins: usize, col_b_bins: usize) -> Result<Self> {
         let mut h = Self::new(col_a_bins, col_b_bins)?;
         if pairs.is_empty() {
@@ -163,6 +236,21 @@ impl CorrelatedHistogram2D {
     /// `[a_lo, a_hi] × [b_lo, b_hi]`. Cells are counted in whole — no
     /// sub-cell interpolation. Returns 0 if the range is empty or
     /// outside the support of either column.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::sketches::CorrelatedHistogram2D;
+    ///
+    /// let pairs: Vec<(f64, f64)> = (0..100).map(|i| (i as f64, i as f64)).collect();
+    /// let h = CorrelatedHistogram2D::from_pairs(&pairs, 8, 8).unwrap();
+    /// // Disjoint query → 0.
+    /// assert_eq!(h.estimate_range(200.0, 300.0, 0.0, 100.0), 0);
+    /// // Whole-support → full row count.
+    /// let (a_lo, a_hi) = h.a_range();
+    /// let (b_lo, b_hi) = h.b_range();
+    /// assert_eq!(h.estimate_range(a_lo, a_hi, b_lo, b_hi), 100);
+    /// ```
     pub fn estimate_range(&self, a_lo: f64, a_hi: f64, b_lo: f64, b_hi: f64) -> u64 {
         if self.total == 0 {
             return 0;
@@ -255,7 +343,9 @@ impl Sketch for CorrelatedHistogram2D {
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        bincode::deserialize(bytes).map_err(Into::into)
+        let s: Self = bincode::deserialize(bytes).map_err(Error::from)?;
+        s.validate()?;
+        Ok(s)
     }
 }
 
@@ -406,6 +496,103 @@ mod tests {
         // a-range must equal marg_a.
         let full_b = h.estimate_range(a_lo, a_hi, full_b_lo, full_b_hi);
         assert_eq!(full_b as f64, marg_a);
+    }
+
+    #[test]
+    fn try_new_rejects_each_zero_dimension() {
+        assert!(CorrelatedHistogram2D::try_new(0, 0).is_err());
+        assert!(CorrelatedHistogram2D::try_new(0, 8).is_err());
+        assert!(CorrelatedHistogram2D::try_new(8, 0).is_err());
+    }
+
+    #[test]
+    fn try_new_accepts_valid_dimensions() {
+        let h = CorrelatedHistogram2D::try_new(4, 6).unwrap();
+        assert_eq!(h.col_a_bins(), 4);
+        assert_eq!(h.col_b_bins(), 6);
+        assert_eq!(h.cell_counts().len(), 24);
+    }
+
+    #[test]
+    fn from_bytes_rejects_all_zero_payload() {
+        // Bincode-decodes everything to 0/empty, which validate()
+        // rejects (col_a_bins == 0).
+        for n in [4usize, 16, 64, 256, 1024, 4096] {
+            let zeros = vec![0u8; n];
+            assert!(
+                CorrelatedHistogram2D::from_bytes(&zeros).is_err(),
+                "all-zero len {n} accepted by from_bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn from_bytes_rejects_cell_length_mismatch() {
+        #[derive(serde::Serialize)]
+        struct Wire {
+            col_a_bins: u32,
+            col_b_bins: u32,
+            a_min: f64,
+            a_max: f64,
+            b_min: f64,
+            b_max: f64,
+            cells: Vec<u64>,
+            total: u64,
+        }
+        let bad = Wire {
+            col_a_bins: 4,
+            col_b_bins: 4,
+            a_min: 0.0,
+            a_max: 1.0,
+            b_min: 0.0,
+            b_max: 1.0,
+            cells: vec![0u64; 7], // should be 16
+            total: 0,
+        };
+        let bytes = bincode::serialize(&bad).unwrap();
+        assert!(
+            CorrelatedHistogram2D::from_bytes(&bytes).is_err(),
+            "cell-length mismatch accepted"
+        );
+    }
+
+    #[test]
+    fn from_bytes_rejects_nan_min_or_max() {
+        #[derive(serde::Serialize)]
+        struct Wire {
+            col_a_bins: u32,
+            col_b_bins: u32,
+            a_min: f64,
+            a_max: f64,
+            b_min: f64,
+            b_max: f64,
+            cells: Vec<u64>,
+            total: u64,
+        }
+        let bad = Wire {
+            col_a_bins: 2,
+            col_b_bins: 2,
+            a_min: f64::NAN,
+            a_max: 1.0,
+            b_min: 0.0,
+            b_max: 1.0,
+            cells: vec![0u64; 4],
+            total: 0,
+        };
+        let bytes = bincode::serialize(&bad).unwrap();
+        assert!(
+            CorrelatedHistogram2D::from_bytes(&bytes).is_err(),
+            "NaN a_min accepted"
+        );
+    }
+
+    #[test]
+    fn from_bytes_accepts_valid_payload() {
+        let pairs: Vec<(f64, f64)> = (0..100).map(|i| (i as f64, i as f64)).collect();
+        let h = CorrelatedHistogram2D::from_pairs(&pairs, 4, 4).unwrap();
+        let bytes = h.to_bytes().unwrap();
+        let decoded = CorrelatedHistogram2D::from_bytes(&bytes).unwrap();
+        assert_eq!(h.total(), decoded.total());
     }
 
     #[test]

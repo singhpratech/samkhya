@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "Client-side DuckDB integration for samkhya — builds portable sketches from DuckDB query results"
-keywords = ["duckdb", "cardinality", "sketches"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya client-side DuckDB integration (Rust crate, bundled feature)"
 
 [dependencies]
 samkhya-core.workspace = true

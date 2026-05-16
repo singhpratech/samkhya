@@ -1,77 +1,201 @@
 //! samkhya-postgres — PostgreSQL adapter for samkhya.
 //!
-//! # Status
+//! # Build modes
 //!
-//! Scaffolding. The PostgreSQL integration shape is well-trodden — the
-//! prior art is [`postgrespro/aqo`][aqo], which hooks into the planner
-//! and executor to capture `(plan, estimated_rows, actual_rows)` tuples
-//! after each query and feed them back into selectivity estimates. The
-//! `pg_qualstats` and `pg_hint_plan` extensions illustrate the two
-//! companion knobs: per-qual statistics collection and explicit hint
-//! injection.
+//! - **Default** (no features): empty `rlib`. Compiles without
+//!   PostgreSQL development headers; suitable for `cargo check
+//!   --workspace` in CI environments that do not have `libpq-dev` /
+//!   `postgresql-server-dev-*` installed.
+//! - **`pg_extension`** feature: pulls in [pgrx] and exposes the
+//!   functions defined below as a loadable PostgreSQL extension.
+//!   Build with `cargo pgrx` — see this crate's README.
 //!
-//! [aqo]: https://github.com/postgrespro/aqo
+//! # Provided SQL functions (when built as an extension)
 //!
-//! # Planned integration patterns
+//! - `samkhya_hll_count(input anyarray) -> bigint` — build a samkhya
+//!   `HllSketch` from the input array and return its estimated
+//!   distinct-element count. Useful as a quick sanity check that the
+//!   in-engine sketch agrees with the portable sketch produced by
+//!   samkhya-core.
+//! - `samkhya_puffin_inspect(path text) -> jsonb` — open a Puffin
+//!   sidecar file on the server filesystem and return per-blob
+//!   metadata (`kind`, `offset`, `length`, `fields`,
+//!   `compression-codec`).
 //!
-//! - **PG extension via [pgrx]**: build samkhya as a first-class
-//!   PostgreSQL extension that registers `planner_hook` and
-//!   `ExecutorEnd_hook` callbacks. The planner hook injects samkhya's
-//!   corrected cardinalities into `RelOptInfo::rows`; the executor hook
-//!   captures actual row counts post-execution and persists them as
-//!   `Observation`s in a `samkhya` schema (mirrors the
-//!   `aqo_data` / `aqo_queries` table layout used by postgrespro/aqo).
-//! - **libpq-driven sidecar**: for deployments that cannot load native
-//!   extensions, a `tokio-postgres` sidecar process scrapes
-//!   `pg_stat_statements` plus `EXPLAIN (ANALYZE, FORMAT JSON)` output
-//!   and writes sketches into a samkhya-managed schema, surfaced back
-//!   to the planner through `pg_hint_plan`-style hints.
-//! - **Sketch storage in a `samkhya` schema**: HLL / Bloom / Count-Min
-//!   / EquiDepthHistogram sketches serialized via
-//!   `samkhya_core::sketches::Sketch` and stored as `bytea` rows keyed
-//!   by `(table_oid, attnum)`, queryable from SQL for debugging.
+//! # Scope
+//!
+//! This is the v1.0 scaffold. A v1.1 target is the operator-side
+//! cardinality hook (replacing `get_relation_info_hook` and friends)
+//! so the planner picks up samkhya's portable, feedback-driven,
+//! self-correcting row estimates without per-query SQL changes. The
+//! `get_relation_info_hook` integration is intentionally deferred
+//! because it requires deeper pgrx hook plumbing than belongs in a
+//! scaffold.
 //!
 //! [pgrx]: https://github.com/pgcentralfoundation/pgrx
-//!
-//! Once the extension surface lands, this crate gains a real
-//! `planner_hook` shim comparable in spirit to
-//! `samkhya_datafusion::SamkhyaTableProvider`.
 
-use samkhya_core::Result;
-use samkhya_core::stats::ColumnStats;
+#![cfg_attr(not(feature = "pg_extension"), deny(rust_2018_idioms))]
 
-/// Placeholder accessor for a future PostgreSQL-side stats provider.
-///
-/// Returns the column statistics that samkhya would inject into a
-/// PostgreSQL planner pass once the pgrx-based `planner_hook` shim is
-/// in place. Looks up by `(table, column)` name pair; the real
-/// implementation will resolve these to `(table_oid, attnum)` via the
-/// extension's catalog access.
-pub fn column_stats_for(_table: &str, _col: &str) -> Result<Option<ColumnStats>> {
-    Ok(None)
-}
+// ---------------------------------------------------------------------
+// Non-extension build: empty rlib.
+// ---------------------------------------------------------------------
 
-/// Install hook for the future PostgreSQL extension entry point.
-///
-/// Stubbed until the pgrx dependency lands; the real version will
-/// register `planner_hook` and `ExecutorEnd_hook` callbacks against
-/// the running PostgreSQL backend and create the `samkhya` schema
-/// with the sketch / observation tables on first load.
-pub fn install_extension_stub() {
-    // Intentionally a no-op until the pgrx integration is wired in.
-}
+#[cfg(not(feature = "pg_extension"))]
+mod stub {
+    //! Stub surface that compiles without pgrx.
+    //!
+    //! The real extension entry points only exist when the
+    //! `pg_extension` feature is enabled. We keep one trivially
+    //! callable stub here so `cargo check` exercises something other
+    //! than an empty crate root, and so downstream tooling that lists
+    //! crate items has at least one symbol to point at.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn placeholder_stats_returns_none() {
-        assert!(column_stats_for("t", "c").unwrap().is_none());
+    /// Returns the samkhya-postgres crate version string.
+    pub fn version() -> &'static str {
+        env!("CARGO_PKG_VERSION")
     }
 
-    #[test]
-    fn install_hook_is_callable() {
-        install_extension_stub();
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn version_is_non_empty() {
+            assert!(!version().is_empty());
+        }
+    }
+}
+
+#[cfg(not(feature = "pg_extension"))]
+pub use stub::version;
+
+// ---------------------------------------------------------------------
+// pgrx-backed extension build.
+// ---------------------------------------------------------------------
+
+#[cfg(feature = "pg_extension")]
+mod extension {
+    use pgrx::prelude::*;
+    use pgrx::{AnyElement, Array, JsonB};
+    use samkhya_core::puffin::PuffinReader;
+    use samkhya_core::sketches::HllSketch;
+    use serde_json::{Map, Value, json};
+    use std::fs::File;
+    use std::io::BufReader;
+
+    pgrx::pg_module_magic!();
+
+    /// Build a samkhya HLL sketch from the input array and return its
+    /// estimated distinct-element count.
+    ///
+    /// `NULL` elements are skipped. The sketch precision is fixed at
+    /// 14 (≈16 KiB of registers, ≈0.81% relative standard error),
+    /// matching the default used elsewhere in samkhya.
+    #[pg_extern(immutable, parallel_safe)]
+    fn samkhya_hll_count(input: Array<'_, AnyElement>) -> i64 {
+        const PRECISION: u8 = 14;
+
+        let mut hll = match HllSketch::new(PRECISION) {
+            Ok(h) => h,
+            Err(e) => error!("samkhya_hll_count: failed to build HLL sketch: {e}"),
+        };
+
+        for elem in input.iter().flatten() {
+            // Hash the raw Datum bytes. This treats two values as
+            // equal iff their on-disk representation is bitwise equal,
+            // which is correct for fixed-width Postgres types and for
+            // canonicalized varlena types. For non-canonical varlena
+            // inputs the caller should pre-canonicalize.
+            let datum = elem.into_datum();
+            let bytes = datum.to_ne_bytes();
+            hll.add(&bytes);
+        }
+
+        hll.estimate() as i64
+    }
+
+    /// Open a Puffin sidecar file at `path` on the server filesystem
+    /// and return per-blob metadata as JSONB.
+    ///
+    /// The returned object has shape:
+    /// ```json
+    /// {
+    ///   "blobs": [
+    ///     {
+    ///       "kind": "samkhya.hll-v1",
+    ///       "fields": [7],
+    ///       "offset": 4,
+    ///       "length": 16384,
+    ///       "compression_codec": null
+    ///     }
+    ///   ]
+    /// }
+    /// ```
+    #[pg_extern(stable, parallel_safe)]
+    fn samkhya_puffin_inspect(path: &str) -> JsonB {
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) => error!("samkhya_puffin_inspect: open {path}: {e}"),
+        };
+        let reader = match PuffinReader::open(BufReader::new(file)) {
+            Ok(r) => r,
+            Err(e) => error!("samkhya_puffin_inspect: parse {path}: {e}"),
+        };
+
+        let blobs: Vec<Value> = reader
+            .blobs()
+            .iter()
+            .map(|b| {
+                let mut entry = Map::new();
+                entry.insert("kind".into(), Value::String(b.kind.clone()));
+                entry.insert(
+                    "fields".into(),
+                    Value::Array(b.fields.iter().map(|f| json!(*f)).collect()),
+                );
+                entry.insert("offset".into(), json!(b.offset));
+                entry.insert("length".into(), json!(b.length));
+                entry.insert(
+                    "compression_codec".into(),
+                    match &b.compression_codec {
+                        Some(c) => Value::String(c.clone()),
+                        None => Value::Null,
+                    },
+                );
+                Value::Object(entry)
+            })
+            .collect();
+
+        JsonB(json!({ "blobs": blobs }))
+    }
+
+    // -----------------------------------------------------------------
+    // pg_test plumbing — exercised by `cargo pgrx test`.
+    // -----------------------------------------------------------------
+
+    #[cfg(any(test, feature = "pg_test"))]
+    #[pg_schema]
+    mod tests {
+        use pgrx::prelude::*;
+
+        #[pg_test]
+        fn hll_count_on_small_array_is_plausible() {
+            let n: Option<i64> = Spi::get_one(
+                "SELECT samkhya_hll_count(ARRAY[1, 2, 3, 4, 5, 5, 5]::int[]::anyarray)",
+            )
+            .expect("Spi::get_one");
+            let n = n.expect("non-null result");
+            // Five distinct ints; HLL at p=14 should land close.
+            assert!((1..=10).contains(&n), "estimate {n} not near 5");
+        }
+    }
+
+    /// pgrx test framework entry point.
+    #[cfg(test)]
+    pub mod pg_test {
+        pub fn setup(_options: Vec<&str>) {}
+
+        pub fn postgresql_conf_options() -> Vec<&'static str> {
+            vec![]
+        }
     }
 }

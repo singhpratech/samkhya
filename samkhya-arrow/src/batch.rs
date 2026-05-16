@@ -7,7 +7,7 @@ use samkhya_core::Result;
 use samkhya_core::sketches::{BloomFilter, EquiDepthHistogram, HllSketch};
 
 use crate::ingest::{
-    ingest_array_into_bloom, ingest_array_into_hll, ingest_array_into_histogram_values,
+    ingest_array_into_bloom, ingest_array_into_histogram_values, ingest_array_into_hll,
 };
 
 /// Build one HLL sketch per column of `batch`, in schema field order.

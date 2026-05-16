@@ -9,6 +9,30 @@
 *.pyc
 __pycache__/
 .venv/
+.venv-acceptance/
 *.egg-info/
-# Coffee-table HTML field guide — kept on disk but never committed (per direction)
+
+# Strategic / internal / pre-approval — NEVER commit without explicit approval
 documents/
+paper/
+ANNOUNCE.md
+BLOG-V1-LAUNCH.md
+CALIBRATE_WORKFLOW.md
+DEFENSE.md
+DISTRIBUTION.md
+KILL_CRITERIA_REPORT.md
+PUBLISH_READINESS.md
+RELEASE.md
+ROADMAP.md
+samkhya.md
+SHOW-HN-DRAFT.md
+V1_RELEASE.md
+QA_GATE_REPORT.md
+ACCEPTANCE_REPORT.md
+EVIDENCE.md
+RESEARCH.md
+PROOF.md
+*/ACCEPTANCE_REPORT.md
+METHODOLOGY.md
+EMPIRICAL_PLAN.md
+bench-results/

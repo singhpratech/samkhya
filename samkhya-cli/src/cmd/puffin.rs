@@ -28,23 +28,27 @@ pub fn pack(
         bytes: Vec<u8>,
     }
     let mut entries: Vec<Entry> = Vec::new();
-    let mut validate_named =
-        |kind: &'static str, paths: &[std::path::PathBuf], validator: fn(&[u8]) -> Result<()>| -> Result<()> {
-            for p in paths {
-                let bytes = fs::read(p)?;
-                validator(&bytes).map_err(|e| {
-                    Error::InvalidPuffin(format!(
-                        "{}: payload at {} failed to decode: {}",
-                        kind,
-                        p.display(),
-                        e
-                    ))
-                })?;
-                entries.push(Entry { kind, bytes });
-            }
-            Ok(())
-        };
-    validate_named(HllSketch::KIND, hll, |b| HllSketch::from_bytes(b).map(|_| ()))?;
+    let mut validate_named = |kind: &'static str,
+                              paths: &[std::path::PathBuf],
+                              validator: fn(&[u8]) -> Result<()>|
+     -> Result<()> {
+        for p in paths {
+            let bytes = fs::read(p)?;
+            validator(&bytes).map_err(|e| {
+                Error::InvalidPuffin(format!(
+                    "{}: payload at {} failed to decode: {}",
+                    kind,
+                    p.display(),
+                    e
+                ))
+            })?;
+            entries.push(Entry { kind, bytes });
+        }
+        Ok(())
+    };
+    validate_named(HllSketch::KIND, hll, |b| {
+        HllSketch::from_bytes(b).map(|_| ())
+    })?;
     validate_named(BloomFilter::KIND, bloom, |b| {
         BloomFilter::from_bytes(b).map(|_| ())
     })?;

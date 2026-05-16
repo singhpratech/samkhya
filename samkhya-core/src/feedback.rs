@@ -39,6 +39,22 @@ pub struct Observation {
 
 impl Observation {
     /// Multiplicative q-error: `max(actual/est, est/actual)`. Returns `f64::INFINITY` if either is 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::feedback::Observation;
+    ///
+    /// // 10× underestimate: est=10, actual=100 → q-error = 10.
+    /// let obs = Observation {
+    ///     template_hash: "t".into(),
+    ///     plan_fingerprint: "p".into(),
+    ///     est_rows: 10,
+    ///     actual_rows: 100,
+    ///     latency_ms: None,
+    /// };
+    /// assert!((obs.q_error() - 10.0).abs() < 1e-9);
+    /// ```
     pub fn q_error(&self) -> f64 {
         if self.est_rows == 0 || self.actual_rows == 0 {
             return f64::INFINITY;
@@ -62,6 +78,15 @@ impl FeedbackStore {
     }
 
     /// Open an in-memory store (test / ephemeral).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::feedback::FeedbackStore;
+    ///
+    /// let store = FeedbackStore::open_in_memory().unwrap();
+    /// assert_eq!(store.count().unwrap(), 0);
+    /// ```
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().map_err(map_sqlite)?;
         conn.execute_batch(SCHEMA_V1).map_err(map_sqlite)?;
@@ -69,6 +94,24 @@ impl FeedbackStore {
     }
 
     /// Record an observation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::feedback::{FeedbackStore, Observation};
+    ///
+    /// let store = FeedbackStore::open_in_memory().unwrap();
+    /// let obs = Observation {
+    ///     template_hash: "tpch-q1".into(),
+    ///     plan_fingerprint: "hash-join#42".into(),
+    ///     est_rows: 1000,
+    ///     actual_rows: 950,
+    ///     latency_ms: Some(12.5),
+    /// };
+    /// let id = store.record(&obs).unwrap();
+    /// assert!(id > 0);
+    /// assert_eq!(store.count().unwrap(), 1);
+    /// ```
     pub fn record(&self, obs: &Observation) -> Result<i64> {
         self.conn
             .execute(

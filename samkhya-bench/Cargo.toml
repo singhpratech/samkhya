@@ -13,9 +13,18 @@ categories = ["database"]
 publish = false
 
 [dependencies]
-samkhya-core = { workspace = true, features = ["gbt"] }
-samkhya-datafusion = { path = "../samkhya-datafusion" }
+samkhya-core = { workspace = true, features = ["gbt", "additive_gbt"] }
+samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.0" }
 clap.workspace = true
 tokio.workspace = true
 datafusion = "46"
 rand = "0.8"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# Used only by the `ablation_runner` binary's L4-v2 retrain path
+# (Wave-4 closing). The crate is already pulled in transitively by
+# samkhya-core's `gbt` feature; declaring it explicitly here lets the
+# binary call the gbdt API directly without going through samkhya-core's
+# `GbtCorrector::train` (which hardcodes `baseline_estimate`-only
+# features). Additive — does not affect any other binary.
+gbdt = "0.1"

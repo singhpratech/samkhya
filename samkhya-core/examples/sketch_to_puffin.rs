@@ -81,7 +81,7 @@ fn main() -> Result<()> {
     for &probe in &[0u64, 1, 42, 4_999, 5_000, 9_999, 1_000_000] {
         let bytes = probe.to_le_bytes();
         let present = bloom_back.contains(&bytes);
-        let truly_present = (probe as u64) < distinct_target;
+        let truly_present = probe < distinct_target;
         println!("  id={probe:>8}  bloom_says={present:<5}  actually_inserted={truly_present}");
     }
 

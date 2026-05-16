@@ -1,3 +1,27 @@
+# =====================================================================
+# samkhya-duckdb-ext
+#
+# v1.0 scaffold for the Rust <-> C++ FFI that bridges samkhya's portable
+# cardinality primitives into DuckDB. This crate ships TWO halves:
+#
+#   1. A cxx::bridge surface (src/lib.rs) that exposes samkhya-core's
+#      HllSketch and PuffinReader through a stable C++ namespace.
+#   2. A C++ wrapper (src/wrapper.cc, src/wrapper.h) that re-exposes
+#      those Rust symbols under a `samkhya::` namespace plus a
+#      forward-declared `samkhya_register(DatabaseInstance &)` hook.
+#
+# What is intentionally NOT here yet (v1.1 target): the DuckDB optimizer
+# extension that consumes the FFI. That work waits on DuckDB Issue
+# #11638, which tracks a stable C++ hook for plan-time cardinality
+# overrides. Until the upstream API lands the cxx layer is the part we
+# can finish today, so we finish it cleanly and ship the rest in v1.1.
+#
+# Crate type is `staticlib + rlib` so the DuckDB build (a C++ binary)
+# can link against the .a archive directly, and so other Rust crates
+# (notably samkhya-bench's planned `--engine duckdb` path) can depend
+# on this crate as a normal Rust library too.
+# =====================================================================
+
 [package]
 name = "samkhya-duckdb-ext"
 version.workspace = true
@@ -7,43 +31,33 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "Server-side DuckDB extension scaffold for samkhya — loadable .duckdb_extension exposing portable sketches as SQL functions"
+description = "v1.0 cxx FFI scaffold linking samkhya's portable sketches into DuckDB; the optimizer hook ships in v1.1 (tracks DuckDB Issue #11638)"
+readme = "README.md"
 keywords = ["duckdb", "extension", "cardinality", "sketches", "cxx"]
 categories = ["database"]
 
-# Built as a C-ABI dynamic library so DuckDB can `LOAD` it at runtime.
-# DuckDB's loader looks for the `<name>_init` symbol in the resulting
-# .duckdb_extension file (a renamed .so / .dylib / .dll).
+# staticlib  -> consumable from the DuckDB C++ build (.a archive).
+# rlib       -> consumable from other workspace crates.
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 samkhya-core.workspace = true
-
-# cxx is *only* needed when the `extension` feature is on. We still declare
-# it as an optional regular dep (not just a build-dep) because the bridge
-# macro it provides is used in lib.rs and must be visible at compile time.
-cxx = { version = "1", optional = true }
+# cxx 1.0 provides the `#[cxx::bridge]` macro used in src/lib.rs.
+cxx = "1.0"
 
 [build-dependencies]
-# cxx-build is invoked from build.rs to compile the generated C++ bridge
-# stubs together with src/extension.cpp. It is only used when the
-# `extension` feature is active; build.rs guards the call with a cfg check.
-cxx-build = { version = "1", optional = true }
+# cxx-build 1.0 generates the C++ side of the bridge and compiles
+# src/wrapper.cc against it. The default build invokes this; the
+# `no_cxx` feature disables it for environments without a C++
+# toolchain (see build.rs and README).
+cxx-build = "1.0"
 
 [features]
 default = []
-# Enables the cxx bridge and compiles src/extension.cpp.
-#
-# OFF by default on purpose:
-#   * Plain `cargo check --workspace` must work without a C++ toolchain
-#     and without DuckDB headers on disk.
-#   * Turning the feature on requires:
-#       - clang or gcc with C++17 support
-#       - DuckDB extension headers (typically obtained via the
-#         duckdb/extension-template checkout — see README.md)
-#       - the `DUCKDB_INCLUDE_DIR` env var pointing at those headers
-#
-# Build with:
-#   cargo build -p samkhya-duckdb-ext --release --features extension
-extension = ["dep:cxx", "dep:cxx-build"]
+# Escape hatch for environments that lack a C++ toolchain (minimal CI
+# images, sandboxed `cargo check` runners). When enabled, build.rs
+# becomes a no-op and the bridge module is excluded from compilation.
+# The Rust API (HllHandle, puffin_inspect) remains visible but is not
+# reachable from C++ in this configuration.
+no_cxx = []

@@ -25,10 +25,44 @@
 //! scaffolding for the full LpBound, not a replacement: prefer
 //! [`LpJoinBound`] in any release build that can afford the `good_lp`
 //! dependency.
+//!
+//! # Empirical bound ordering
+//!
+//! The empirical campaign (`bench-results/07_lpbound_tightness.md`,
+//! 1,080 trials across path/star/cycle/clique topologies × n ∈ {3, 5, 7}
+//! × ℓ_p ∈ {1, 2, ∞}) measured the actual partial order:
+//!
+//! ```text
+//!   ProductBound  ≥  { ChainBound,  AgmBound }  ≥  LpJoinBound
+//! ```
+//!
+//! `ChainBound` and `AgmBound` are **not strictly ordered** — `ChainBound`
+//! is routinely the tighter of the two (it divides by every per-edge
+//! distinct count, while AGM uses a fractional-edge-cover shortcut). The
+//! `LpJoinBound ≤ AgmBound` leg holds in 86.4% of trials; size-7
+//! cyclic/clique under uniform ℓ_p=1 exposes an LP-conditioning corner
+//! (~13.6% violation) where the LP-derived ceiling overshoots AGM's
+//! `min × max` shortcut. The query optimizer should evaluate all three
+//! scaffolding bounds and take the minimum rather than assuming a strict
+//! chain.
 
 use crate::{Error, Result};
 
 /// Trait every upper-bound provider implements.
+///
+/// Implementations return an *inclusive* row-count ceiling that the join
+/// can never exceed. A correction layer must never produce an estimate
+/// above this number.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::lpbound::{ProductBound, UpperBound};
+///
+/// // Cartesian product (sound but very loose).
+/// let bound = ProductBound.ceiling(&[100, 200], &[]);
+/// assert_eq!(bound, 20_000);
+/// ```
 pub trait UpperBound {
     /// Compute the inclusive ceiling for a join.
     ///
@@ -38,6 +72,17 @@ pub trait UpperBound {
 }
 
 /// Cartesian-product upper bound. Sound but very loose.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::lpbound::{ProductBound, UpperBound};
+///
+/// // Empty predicate list: the bound is the unconstrained product.
+/// assert_eq!(ProductBound.ceiling(&[10, 20, 30], &[]), 6000);
+/// // Overflow saturates to u64::MAX rather than wrapping.
+/// assert_eq!(ProductBound.ceiling(&[u64::MAX, 2], &[]), u64::MAX);
+/// ```
 pub struct ProductBound;
 
 impl UpperBound for ProductBound {
@@ -68,6 +113,18 @@ pub struct ChainBound {
 }
 
 impl ChainBound {
+    /// Construct a chain-join bound from per-relation distinct-key counts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::lpbound::{ChainBound, UpperBound};
+    ///
+    /// // Two 1000-row relations, joining on a key with 100 distinct values:
+    /// // ceiling = 1000 * 1000 / max(100, 100) = 10_000.
+    /// let cb = ChainBound::new(vec![100, 100]);
+    /// assert_eq!(cb.ceiling(&[1_000, 1_000], &[(0, 1)]), 10_000);
+    /// ```
     pub fn new(distinct_counts: Vec<u64>) -> Self {
         Self { distinct_counts }
     }
@@ -107,6 +164,17 @@ impl UpperBound for ChainBound {
 /// placeholder approximation; the true AGM / LpBound bound requires
 /// fractional edge cover / LP relaxation — see [`LpJoinBound`] for the
 /// principled construction.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::lpbound::{AgmBound, ProductBound, UpperBound};
+///
+/// let r = [1_000u64, 1_000_000];
+/// let bound = AgmBound.ceiling(&r, &[(0, 1)]);
+/// // AGM is always at least as tight as the cartesian product.
+/// assert!(bound <= ProductBound.ceiling(&r, &[]));
+/// ```
 pub struct AgmBound;
 
 impl UpperBound for AgmBound {
@@ -127,6 +195,17 @@ impl UpperBound for AgmBound {
 /// Clamp an estimate to a ceiling. Returns [`Error::LpBoundExceeded`]
 /// if the estimate exceeds the ceiling — this signals a correction-layer
 /// bug, since corrections must respect the envelope.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::lpbound::clamp_estimate;
+///
+/// // Within the ceiling → Ok(value).
+/// assert_eq!(clamp_estimate(500.0, 1000).unwrap(), 500);
+/// // Exceeding the ceiling → Err signalling a corrector violation.
+/// assert!(clamp_estimate(1500.0, 1000).is_err());
+/// ```
 pub fn clamp_estimate(estimate: f64, ceiling: u64) -> Result<u64> {
     let clamped = estimate.max(0.0).min(u64::MAX as f64) as u64;
     if clamped <= ceiling {
@@ -141,6 +220,17 @@ pub fn clamp_estimate(estimate: f64, ceiling: u64) -> Result<u64> {
 
 /// Clamp without erroring; saturates to `ceiling`. Use this in production
 /// paths where a misbehaving corrector must never crash the engine.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::lpbound::saturating_clamp;
+///
+/// assert_eq!(saturating_clamp(500.0, 1000), 500);
+/// assert_eq!(saturating_clamp(2000.0, 1000), 1000);   // clamps to ceiling
+/// assert_eq!(saturating_clamp(-5.0, 1000), 0);        // negative → 0
+/// assert_eq!(saturating_clamp(f64::NAN, 1000), 0);    // NaN is treated as 0
+/// ```
 pub fn saturating_clamp(estimate: f64, ceiling: u64) -> u64 {
     let clamped = estimate.max(0.0).min(u64::MAX as f64) as u64;
     clamped.min(ceiling)
@@ -362,11 +452,7 @@ impl LpJoinBound {
             // that variable without paying — we clamp the coefficient
             // away from zero with a tiny epsilon so the objective is
             // strictly minimised.
-            let coef = if size_f <= 1.0 {
-                0.0
-            } else {
-                size_f.ln()
-            };
+            let coef = if size_f <= 1.0 { 0.0 } else { size_f.ln() };
             objective.add_mul(coef, v);
         }
 
@@ -395,9 +481,21 @@ impl LpJoinBound {
                 if raw >= u64::MAX as f64 {
                     u64::MAX
                 } else {
-                    // ceil() so we return a true upper bound under
-                    // floating-point rounding noise.
-                    raw.ceil() as u64
+                    // Snap to nearest integer when within a tight
+                    // relative epsilon: `exp(ln(n))` for integer `n`
+                    // can drift to `n + 1e-12` and a blind ceil would
+                    // push the per-component bound a full integer
+                    // above the true AGM optimum, breaking the
+                    // contract that LpJoinBound <= AgmBound. Only
+                    // ceil when the LP value is materially above the
+                    // nearest integer.
+                    let rounded = raw.round();
+                    let snap_eps = 1e-9_f64.max(raw.abs() * 1e-12);
+                    if (raw - rounded).abs() <= snap_eps {
+                        rounded as u64
+                    } else {
+                        raw.ceil() as u64
+                    }
                 }
             }
             Err(_) => self.fallback(relations, &comp_preds, component),
@@ -458,8 +556,7 @@ fn connected_components(n: usize, edges: &[(usize, usize)]) -> Vec<Vec<usize>> {
             parent[ra] = rb;
         }
     }
-    let mut groups: std::collections::HashMap<usize, Vec<usize>> =
-        std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
     for v in 0..n {
         let r = find(&mut parent, v);
         groups.entry(r).or_default().push(v);
@@ -738,10 +835,7 @@ mod lp_tests {
         let unconstrained = LpJoinBound::new();
         let a = with_d.ceiling_with_distinct(&r, &preds);
         let b = unconstrained.ceiling(&r, &preds);
-        assert!(
-            a <= b,
-            "distinct-aware bound {a} must be tighter than {b}"
-        );
+        assert!(a <= b, "distinct-aware bound {a} must be tighter than {b}");
         // With 10 distinct values on each side the bound collapses to 10.
         assert!(a <= 11, "expected ≈10 with D=10, got {a}");
     }

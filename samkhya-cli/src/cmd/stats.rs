@@ -19,6 +19,16 @@ struct TemplateRow {
 }
 
 pub fn run(path: &Path) -> Result<()> {
+    // `Connection::open` happily creates an empty SQLite file on disk
+    // for a non-existent path. The CLI is read-only here, so refuse
+    // explicitly to avoid surprising the operator with a zero-row
+    // store that didn't exist a moment ago.
+    if !path.exists() {
+        return Err(Error::Feedback(format!(
+            "feedback store not found: {}",
+            path.display()
+        )));
+    }
     let conn = Connection::open(path).map_err(map_sqlite)?;
 
     // Total observations.
@@ -66,8 +76,8 @@ pub fn run(path: &Path) -> Result<()> {
         println!("latency:             (no rows with latency_ms)");
     } else {
         let p = |q: f64| -> f64 {
-            let idx = ((q * (latencies.len() as f64 - 1.0)).round() as usize)
-                .min(latencies.len() - 1);
+            let idx =
+                ((q * (latencies.len() as f64 - 1.0)).round() as usize).min(latencies.len() - 1);
             latencies[idx]
         };
         println!(
@@ -130,7 +140,11 @@ pub fn run(path: &Path) -> Result<()> {
                     acc.push(TemplateRow {
                         template_hash: h,
                         n: cur_n,
-                        avg_q: if cur_n > 0 { cur_sum / cur_n as f64 } else { 0.0 },
+                        avg_q: if cur_n > 0 {
+                            cur_sum / cur_n as f64
+                        } else {
+                            0.0
+                        },
                         max_q: cur_max,
                     });
                 }
@@ -145,14 +159,21 @@ pub fn run(path: &Path) -> Result<()> {
         acc.push(TemplateRow {
             template_hash: h,
             n: cur_n,
-            avg_q: if cur_n > 0 { cur_sum / cur_n as f64 } else { 0.0 },
+            avg_q: if cur_n > 0 {
+                cur_sum / cur_n as f64
+            } else {
+                0.0
+            },
             max_q: cur_max,
         });
     }
 
     println!();
     println!("per-template q-error:");
-    println!("  {:<32}  {:>8}  {:>10}  {:>10}", "template_hash", "n", "avg_q", "max_q");
+    println!(
+        "  {:<32}  {:>8}  {:>10}  {:>10}",
+        "template_hash", "n", "avg_q", "max_q"
+    );
     for row in &acc {
         let avg = if row.avg_q.is_finite() {
             format!("{:.3}", row.avg_q)

@@ -11,3 +11,4 @@ pub mod queries;
 pub mod report;
 pub mod runner;
 pub mod synthetic;
+pub mod tpch;

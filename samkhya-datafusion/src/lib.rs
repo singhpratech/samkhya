@@ -17,21 +17,21 @@
 //! samkhya therefore wires corrections in at three layers, which together
 //! form the integration model:
 //!
-//! 1. [`SamkhyaTableProvider`](table_provider::SamkhyaTableProvider) —
+//! 1. [`SamkhyaTableProvider`] —
 //!    a `TableProvider` wrapper that delegates every method to an inner
 //!    provider but overrides `statistics()` with samkhya-corrected
 //!    [`ColumnStatistics`], and — critically — overrides `scan()` to
-//!    return a physical [`SamkhyaStatsExec`](physical_plan::SamkhyaStatsExec)
+//!    return a physical [`SamkhyaStatsExec`]
 //!    wrapping the inner provider's exec. The exec wrapper is what
 //!    makes `physical.statistics()?.num_rows` reflect samkhya's
 //!    corrections, because the mainline planner uses the exec's stats,
 //!    not the table provider's.
-//! 2. [`SamkhyaStatsExec`](physical_plan::SamkhyaStatsExec) — a
+//! 2. [`SamkhyaStatsExec`] — a
 //!    passthrough [`ExecutionPlan`] that overrides `statistics()` to
 //!    return a preset `Statistics`, delegating every other method to the
 //!    inner exec. This is the physical-layer hook the planner actually
 //!    consults.
-//! 3. [`SamkhyaOptimizerRule`](optimizer_rule::SamkhyaOptimizerRule) —
+//! 3. [`SamkhyaOptimizerRule`] —
 //!    implements both `OptimizerRule` (logical, observe-only) and
 //!    `PhysicalOptimizerRule` (physical, validates the wrappers are in
 //!    place and surfaces a diagnostic count of `SamkhyaStatsExec`

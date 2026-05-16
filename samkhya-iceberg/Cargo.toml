@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "Apache Iceberg snapshot ↔ Puffin sidecar bridge for samkhya"
-keywords = ["iceberg", "puffin", "cardinality", "sketches", "query-optimizer"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya Iceberg snapshot walker for Puffin sidecar discovery"
 
 [dependencies]
 samkhya-core.workspace = true
@@ -34,3 +35,4 @@ iceberg = ["dep:iceberg", "dep:tokio"]
 
 [dev-dependencies]
 tempfile = "3"
+serde_json = { workspace = true }

@@ -4,17 +4,27 @@ build-backend = "maturin"
 
 [project]
 name = "samkhya"
-description = "Portable, feedback-driven cardinality correction for embedded analytical engines (Python bindings)"
+version = "1.0.0"
+description = "Portable, feedback-driven cardinality correction"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.9"
 authors = [
     { name = "Prateek Singh" },
 ]
-keywords = ["cardinality", "sketches", "hyperloglog", "bloom-filter", "query-optimizer"]
+keywords = [
+    "cardinality",
+    "sketches",
+    "hyperloglog",
+    "bloom-filter",
+    "count-min-sketch",
+    "histogram",
+    "query-optimizer",
+]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -23,18 +33,26 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Rust",
     "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
     "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/singhpratech/samkhya"
 Repository = "https://github.com/singhpratech/samkhya"
+Issues = "https://github.com/singhpratech/samkhya/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
 
 [tool.maturin]
-module-name = "samkhya"
+# Mixed Rust/Python layout: the Python package lives under `python/`
+# and the compiled extension is installed as `samkhya._native`.
+module-name = "samkhya._native"
 manifest-path = "Cargo.toml"
 features = ["pyo3/extension-module"]
 python-source = "python"

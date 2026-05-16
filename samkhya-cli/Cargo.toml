@@ -6,11 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "Operator-facing CLI for samkhya: inspect Puffin sidecars, FeedbackStore stats, sketch builders"
-keywords = ["cardinality", "query-optimizer", "cli", "puffin", "sketches"]
-categories = ["database", "command-line-utilities"]
-publish = false
+readme = "README.md"
+description = "samkhya command-line tools: inspect, stats, sketch, puffin pack/verify"
 
 [[bin]]
 name = "samkhya"

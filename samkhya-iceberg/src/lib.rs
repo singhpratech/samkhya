@@ -14,7 +14,7 @@
 //!
 //! samkhya already knows how to write Puffin files
 //! ([`samkhya_core::puffin`]) and how to bundle the deserialized
-//! sketches into [`ColumnStats`](samkhya_core::stats::ColumnStats);
+//! sketches into [`ColumnStats`];
 //! what it has been missing is the *snapshot-aware* link that says
 //! "for this current table snapshot, here are the sidecar paths
 //! samkhya should look at". That is the job of this crate.
@@ -179,10 +179,7 @@ mod tests {
 
     #[test]
     fn snapshot_paths_round_trip() {
-        let paths = SnapshotPuffinPaths::from_strings(
-            Some(42),
-            ["/tmp/a.puffin", "/tmp/b.puffin"],
-        );
+        let paths = SnapshotPuffinPaths::from_strings(Some(42), ["/tmp/a.puffin", "/tmp/b.puffin"]);
         assert_eq!(paths.snapshot_id, Some(42));
         assert_eq!(paths.len(), 2);
         assert!(!paths.is_empty());

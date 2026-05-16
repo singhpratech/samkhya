@@ -172,14 +172,7 @@ fn run() -> Result<()> {
                 fp_rate,
                 header,
                 output,
-            } => cmd::sketch::bloom(
-                &input,
-                column,
-                capacity,
-                fp_rate,
-                header,
-                output.as_deref(),
-            ),
+            } => cmd::sketch::bloom(&input, column, capacity, fp_rate, header, output.as_deref()),
             SketchCmd::Cms {
                 input,
                 column,

@@ -1,3 +1,18 @@
+# samkhya-postgres — PostgreSQL extension adapter for samkhya.
+#
+# Design choice: pgrx is opt-in behind the `pg_extension` feature flag.
+#
+# Why: pgrx generates Postgres-extension glue that requires PostgreSQL
+# development headers (`postgresql-server-dev-*`) to be present on the
+# build host. Most CI runners and downstream users of `samkhya-postgres`
+# (as a workspace member or transitive dep) do not have those headers
+# installed, and forcing them on by default would break `cargo check
+# --workspace` everywhere.
+#
+# With `pg_extension` disabled (the default), this crate is an empty
+# `rlib` — no native deps, no link-time requirements, compiles in
+# seconds. Extension builders enable the feature explicitly and run
+# `cargo pgrx` to produce a real `.so`.
 [package]
 name = "samkhya-postgres"
 version.workspace = true
@@ -8,8 +23,36 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 description = "PostgreSQL adapter for samkhya — portable cardinality correction hooks"
+readme = "README.md"
 keywords = ["postgres", "cardinality", "query-optimizer"]
 categories = ["database"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Pull in pgrx and compile the Postgres-side extension entry points.
+# Requires PostgreSQL development headers on the build host. See README.
+pg_extension = ["dep:pgrx"]
+# Per-Postgres-major-version selection passthrough to pgrx. These mirror
+# the standard pgrx feature naming convention so `cargo pgrx run pgNN`
+# picks the right backend version.
+# H09 fix: each pgNN must imply pg_extension, otherwise selecting the
+# Postgres-major version alone activates the optional pgrx dep without
+# the gate that hides pgrx code behind `cfg(feature = "pg_extension")`,
+# which then fails `cargo check` on hosts without PG dev headers.
+pg13 = ["pg_extension", "pgrx/pg13"]
+pg14 = ["pg_extension", "pgrx/pg14"]
+pg15 = ["pg_extension", "pgrx/pg15"]
+pg16 = ["pg_extension", "pgrx/pg16"]
+pg17 = ["pg_extension", "pgrx/pg17"]
+pg_test = []
+
 [dependencies]
 samkhya-core.workspace = true
+pgrx = { version = "0.12", optional = true }
+
+[package.metadata.docs.rs]
+# docs.rs lacks PG headers; build without the extension feature.
+no-default-features = true

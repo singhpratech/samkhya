@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "Engine-agnostic Arrow integration for samkhya sketches: array/RecordBatch -> HLL/Bloom/CMS/histogram helpers"
-keywords = ["arrow", "cardinality", "sketches", "hyperloglog", "bloom-filter"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya integration helpers for the Arrow ecosystem (Series → Sketch builders)"
 
 [dependencies]
 samkhya-core.workspace = true

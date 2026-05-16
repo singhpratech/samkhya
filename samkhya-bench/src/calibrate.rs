@@ -52,10 +52,20 @@ use crate::runner::Runner;
 /// recollect helper) sources its `ColumnStats` overrides from Puffin
 /// sidecars in that directory instead of the hardcoded distinct-count
 /// table.
+///
+/// `imdb_dir` and `tpch_dir` are forwarded to every constructed
+/// [`Runner`] so suites that require a real on-disk dataset
+/// (JOB-Slow against `--imdb-dir`, TPC-H against `--tpch-dir`) can
+/// participate in calibration just like the synthetic suite. They are
+/// mutually exclusive at the CLI layer; this function accepts both so
+/// it can stay generic across suites — the caller is expected to enforce
+/// exclusivity.
 pub fn calibrate(
     suite: Suite,
     feedback_path: Option<&Path>,
     puffin_dir: Option<&Path>,
+    imdb_dir: Option<&Path>,
+    tpch_dir: Option<&Path>,
 ) -> Result<()> {
     println!("=== phase 1: collect observations ===");
     let mut runner = Runner::new(suite, false);
@@ -65,12 +75,23 @@ pub fn calibrate(
     if let Some(dir) = puffin_dir {
         runner = runner.with_puffin_dir(dir.to_path_buf());
     }
+    if let Some(dir) = imdb_dir {
+        runner = runner.with_imdb_dir(dir.to_path_buf());
+    }
+    if let Some(dir) = tpch_dir {
+        runner = runner.with_tpch_dir(dir.to_path_buf());
+    }
     runner.run()?;
 
-    if !suite.is_executable() {
-        // Nothing to train against — `runner.run()` already printed a
-        // skip notice; bail out gracefully so the caller's exit code is
-        // success rather than spurious failure.
+    // The suite must be runnable end-to-end for calibration to have
+    // observations to train on. `Synthetic` is unconditionally
+    // executable; `JobSlowReal` requires `--imdb-dir`; `TpcH` requires
+    // `--tpch-dir`. Anything else is a scaffolding suite that prints
+    // a skip notice from `runner.run()` and exits cleanly here.
+    let suite_runnable = suite.is_executable()
+        || (suite.is_executable_with_imdb_dir() && imdb_dir.is_some())
+        || (suite.is_executable_with_tpch_dir() && tpch_dir.is_some());
+    if !suite_runnable {
         return Ok(());
     }
 
@@ -83,7 +104,7 @@ pub fn calibrate(
             // already been dropped. Re-run silently against a shared
             // store so the corrector has data to train on.
             let store = FeedbackStore::open_in_memory()?;
-            recollect_into(&store, suite, puffin_dir)?;
+            recollect_into(&store, suite, puffin_dir, imdb_dir, tpch_dir)?;
             store
         }
     };
@@ -155,7 +176,13 @@ pub fn calibrate(
 /// repopulate a freshly-opened feedback store. We run the suite once
 /// per phase already, so the cost is a single extra pass and keeps the
 /// CLI surface honest (one call → one full calibration loop).
-fn recollect_into(store: &FeedbackStore, suite: Suite, puffin_dir: Option<&Path>) -> Result<()> {
+fn recollect_into(
+    store: &FeedbackStore,
+    suite: Suite,
+    puffin_dir: Option<&Path>,
+    imdb_dir: Option<&Path>,
+    tpch_dir: Option<&Path>,
+) -> Result<()> {
     use samkhya_core::feedback::Observation;
 
     // We can't share the in-memory store directly with Runner::run
@@ -165,6 +192,12 @@ fn recollect_into(store: &FeedbackStore, suite: Suite, puffin_dir: Option<&Path>
     let mut runner = Runner::new(suite, false);
     if let Some(dir) = puffin_dir {
         runner = runner.with_puffin_dir(dir.to_path_buf());
+    }
+    if let Some(dir) = imdb_dir {
+        runner = runner.with_imdb_dir(dir.to_path_buf());
+    }
+    if let Some(dir) = tpch_dir {
+        runner = runner.with_tpch_dir(dir.to_path_buf());
     }
     let identity = samkhya_core::residual::IdentityCorrector;
     let outcomes = runner.run_with_corrector(&identity)?;

@@ -13,11 +13,13 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::Array;
 use datafusion::datasource::{MemTable, TableProvider};
+use datafusion::prelude::{CsvReadOptions, SessionContext};
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
-use samkhya_core::sketches::{HllSketch, Sketch};
+use samkhya_core::sketches::{BloomFilter, HllSketch, Sketch};
 use samkhya_core::stats::ColumnStats;
 use samkhya_core::{Error, Result};
 
+use crate::imdb::{self, ROW_COUNT_KIND};
 use crate::synthetic;
 
 const HLL_PRECISION: u8 = 12;
@@ -135,6 +137,15 @@ fn collect_batches(
 fn ingest_into_hll(hll: &mut HllSketch, array: &dyn Array) {
     if let Some(arr) = array
         .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int32Array>()
+    {
+        for v in arr.iter().flatten() {
+            hll.add(&v.to_le_bytes());
+        }
+        return;
+    }
+    if let Some(arr) = array
+        .as_any()
         .downcast_ref::<datafusion::arrow::array::Int64Array>()
     {
         for v in arr.iter().flatten() {
@@ -186,4 +197,186 @@ fn build_order_items() -> Result<Arc<MemTable>> {
 
 fn df_err(e: datafusion::error::DataFusionError) -> Error {
     Error::Feedback(format!("datafusion: {e}"))
+}
+
+// ---------- IMDb / JOB sidecar build path ----------
+
+/// Bloom false-positive rate for FK-column bloom filters. Conservative
+/// 1% per Cormode-Muthukrishnan; gives a small payload (~12 KiB for 1e6
+/// items) without false-positive blow-up.
+const BLOOM_FP_RATE: f64 = 0.01;
+
+/// Build Puffin sidecars for the 21 IMDb tables and write them next to
+/// the CSVs at `<imdb_dir>/<table>.puffin`. For every column we compute:
+///
+/// - HLL precision-12 NDV sketch (per [`HLL_PRECISION`])
+/// - For foreign-key columns (column name ends in `_id`, or column name
+///   `id`): Bloom filter at 1% FPR
+/// - Table-level row count is stamped as a [`ROW_COUNT_KIND`] marker blob
+///
+/// Errors on individual tables are logged and the build continues — the
+/// caller picks up whichever sidecars succeeded.
+pub fn build_puffin_sidecars_imdb(imdb_dir: &Path) -> Result<()> {
+    if !imdb_dir.exists() {
+        return Err(Error::Feedback(format!(
+            "build-puffin: imdb_dir {} does not exist",
+            imdb_dir.display()
+        )));
+    }
+    let schemas = imdb::imdb_schemas();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(Error::from)?;
+
+    for &table in imdb::TABLES {
+        let csv_path = imdb_dir.join(format!("{table}.csv"));
+        let out_path = imdb_dir.join(format!("{table}.puffin"));
+        if !csv_path.exists() {
+            println!(
+                "[build-puffin][imdb] skipping {} (no CSV at {})",
+                table,
+                csv_path.display()
+            );
+            continue;
+        }
+        let schema = match schemas.get(table) {
+            Some(s) => Arc::new(s.clone()),
+            None => {
+                println!("[build-puffin][imdb] no schema for {}; skipping", table);
+                continue;
+            }
+        };
+        let start = std::time::Instant::now();
+        let result: Result<()> = rt.block_on(async {
+            let ctx = SessionContext::new();
+            let opts = CsvReadOptions::new()
+                .has_header(false)
+                .escape(b'\\')
+                .delimiter(b',')
+                .schema(schema.as_ref())
+                .newlines_in_values(true);
+            ctx.register_csv(table, csv_path.to_string_lossy().as_ref(), opts)
+                .await
+                .map_err(|e| Error::Feedback(format!("register: {e}")))?;
+            let df = ctx
+                .sql(&format!("SELECT * FROM {table}"))
+                .await
+                .map_err(|e| Error::Feedback(format!("sql: {e}")))?;
+            let batches = df
+                .collect()
+                .await
+                .map_err(|e| Error::Feedback(format!("collect: {e}")))?;
+
+            let n_cols = schema.fields().len();
+            let mut hlls: Vec<HllSketch> = (0..n_cols)
+                .map(|_| HllSketch::new(HLL_PRECISION))
+                .collect::<Result<Vec<_>>>()?;
+            // For FK columns (and the primary key `id`), build a 1% Bloom.
+            // Capacity is unknown ahead of time; we'll insert and accept
+            // the worst-case fp rate growth — Bloom over-insertion just
+            // bumps fp rate, never errors.
+            let mut blooms: Vec<Option<BloomFilter>> = schema
+                .fields()
+                .iter()
+                .map(|f| {
+                    let name = f.name();
+                    if is_fk_column(name) {
+                        // Capacity heuristic: 4 million unique items for
+                        // the largest IMDb tables (cast_info has ~36M
+                        // rows but fewer unique person_ids; this is an
+                        // over-allocation but keeps the bloom under 5 MiB
+                        // per column). Falls back to fp inflation if
+                        // exceeded, which is acceptable for v1.0.
+                        BloomFilter::try_new(4_000_000, BLOOM_FP_RATE).ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let mut total_rows: u64 = 0;
+            for batch in &batches {
+                total_rows = total_rows.saturating_add(batch.num_rows() as u64);
+                for col_idx in 0..n_cols {
+                    let array = batch.column(col_idx);
+                    ingest_into_hll(&mut hlls[col_idx], array.as_ref());
+                    if let Some(bf) = blooms[col_idx].as_mut() {
+                        ingest_into_bloom(bf, array.as_ref());
+                    }
+                }
+            }
+
+            // Write the sidecar.
+            let file = File::create(&out_path)?;
+            let mut writer = PuffinWriter::new(file);
+            // Row-count marker blob first.
+            let mut rc_bytes = vec![0u8; 8];
+            rc_bytes.copy_from_slice(&total_rows.to_le_bytes());
+            writer.add_blob(Blob::new(ROW_COUNT_KIND, vec![], &rc_bytes))?;
+            for (col_idx, hll) in hlls.iter().enumerate() {
+                let payload = hll.to_bytes()?;
+                writer.add_blob(Blob::new(HllSketch::KIND, vec![col_idx as i32], &payload))?;
+            }
+            for (col_idx, bf_opt) in blooms.iter().enumerate() {
+                if let Some(bf) = bf_opt {
+                    let payload = bf.to_bytes()?;
+                    writer.add_blob(Blob::new(
+                        BloomFilter::KIND,
+                        vec![col_idx as i32],
+                        &payload,
+                    ))?;
+                }
+            }
+            writer.finish()?;
+            Ok(())
+        });
+        match result {
+            Ok(()) => {
+                let elapsed = start.elapsed();
+                println!(
+                    "[build-puffin][imdb] wrote {} (rows from CSV scan; {:.2}s)",
+                    out_path.display(),
+                    elapsed.as_secs_f64()
+                );
+            }
+            Err(e) => {
+                println!("[build-puffin][imdb] FAILED {} ({}); continuing", table, e);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_fk_column(name: &str) -> bool {
+    name == "id" || name.ends_with("_id")
+}
+
+fn ingest_into_bloom(bf: &mut BloomFilter, array: &dyn Array) {
+    if let Some(arr) = array
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int32Array>()
+    {
+        for v in arr.iter().flatten() {
+            bf.insert(&v.to_le_bytes());
+        }
+        return;
+    }
+    if let Some(arr) = array
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::Int64Array>()
+    {
+        for v in arr.iter().flatten() {
+            bf.insert(&v.to_le_bytes());
+        }
+        return;
+    }
+    if let Some(arr) = array
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::StringArray>()
+    {
+        for v in arr.iter().flatten() {
+            bf.insert(v.as_bytes());
+        }
+    }
 }

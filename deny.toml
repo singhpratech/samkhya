@@ -32,7 +32,49 @@ no-default-features = false
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+# Each ignored advisory MUST carry a comment explaining (a) which
+# dependency pulls the affected crate in, (b) why the affected code
+# path is not reachable from samkhya, and (c) the upstream condition
+# that retires the ignore. No silent bypass.
+ignore = [
+    # RUSTSEC-2021-0127 — serde_cbor 0.11.2 is unmaintained. Pulled
+    # in transitively by pgrx 0.12.9 (Postgres function metadata is
+    # serialised as CBOR by pgrx internals). Not used by any samkhya
+    # code path. Retires when pgrx >= 0.13 (uses postcard) lands and
+    # samkhya-postgres bumps to match. Operators not enabling
+    # samkhya-postgres do not pull this dep.
+    "RUSTSEC-2021-0127",
+
+    # RUSTSEC-2024-0436 — paste 1.0.15 unmaintained. The author
+    # archived the repository in 2024; v1.0.15 remains the final
+    # release. Pulled in transitively by DataFusion 46
+    # (datafusion-common). No samkhya code uses `paste!` directly.
+    # Retires when DataFusion upstream migrates to `pastey` (the
+    # community-maintained fork) or removes the dep entirely.
+    "RUSTSEC-2024-0436",
+
+    # RUSTSEC-2025-0020 — PyO3 < 0.24.1 PyString::from_object buffer
+    # overflow. samkhya-py uses pyo3 0.22 (abi3-py39), but only
+    # exposes byte buffers through PyBytes — neither PyString nor
+    # from_object appears in samkhya-py source (verified via grep
+    # before adding this ignore). The vulnerable code path is
+    # therefore unreachable. Retires when samkhya-py v1.1 bumps to
+    # pyo3 0.24.1+ (the edition-2024-compatible macro line).
+    "RUSTSEC-2025-0020",
+
+    # RUSTSEC-2025-0141 — bincode 1.3.3 unmaintained. The bincode
+    # team ceased development in 2025 after an off-platform incident;
+    # they state v1.3.3 is a complete release that needs no further
+    # updates ("the team considers version 1.3.3 a complete version
+    # of bincode that is not in need of any updates"). samkhya uses
+    # bincode 1.3.3 ONLY to (de)serialise its own sketch payload
+    # bytes — payloads samkhya itself wrote and validates against
+    # the Puffin KIND tag on read. No untrusted-input deserialization
+    # path. Listed alternatives (postcard, rkyv, bitcode) are noted
+    # for the v1.1 evaluation; for v1.0 the existing bincode wire
+    # format is the published artifact stability guarantee.
+    "RUSTSEC-2025-0141",
+]
 
 # ---------------------------------------------------------------------------
 # licenses — standard Rust-ecosystem allowlist. Everything else is denied by
@@ -108,26 +150,58 @@ deny = []
 # the skip in the same PR.
 skip = [
     # hashbrown — pulled by indexmap 1.x (older deps), DataFusion 46,
-    # std-internal, and the modern direct user. Four versions live in the
-    # graph as of v0.9.0; consolidation is upstream's call.
-    { name = "hashbrown", version = "0.12" },
+    # std-internal, and the modern direct user. As of the 2026-05-16
+    # cleanup the 0.12 arm has dropped out of the graph (upstream
+    # consolidation); 0.14 and 0.15 remain. Re-add an entry only when
+    # a new arm reappears.
     { name = "hashbrown", version = "0.14" },
     { name = "hashbrown", version = "0.15" },
     # bitflags — legacy 1.3 still rooted in clap-2 / rusqlite ffi; we use
     # the modern 2.x line directly.
     { name = "bitflags", version = "1.3" },
-    # syn — legacy 1.0 still required by older proc-macro crates; we use
-    # syn 2 directly. Drop when the laggards (serde_derive_internals etc.)
-    # migrate.
-    { name = "syn", version = "1.0" },
-    # thiserror — DataFusion and PyO3 still on 1.x; we use 1.x directly
-    # via workspace.dependencies. Bump both arms together when DF moves.
+    # syn — legacy 1.0 has dropped out of the graph as of the
+    # 2026-05-16 cleanup; only syn 2.x remains. Re-add a skip if a
+    # future dep reintroduces the 1.0 arm.
+    # thiserror — historically duplicated; current graph has only
+    # the 1.x line. Skip retained because reintroduction of a 2.x
+    # arm (when DataFusion / pyo3 migrate) would re-trip the rule;
+    # cargo-deny warns on unused skips and we accept that warning.
     { name = "thiserror", version = "1.0" },
     # windows-sys — Windows-only target dupes (0.52 / 0.60). The CI matrix
     # currently runs Linux + macOS; these skips keep the rule from tripping
     # if a Windows job is added back.
     { name = "windows-sys", version = "0.52" },
     { name = "windows-sys", version = "0.60" },
+    # cpufeatures — both 0.2 paths exist via different SIMD detection
+    # crates (rand_chacha-old + the modern direct user). Transitive
+    # only; no samkhya code calls cpufeatures directly.
+    { name = "cpufeatures", version = "0.2" },
+    # getrandom — three versions because the std-internal toolchain
+    # pin, rand 0.8 (uses 0.2), and rand 0.9 / newer (uses 0.3) all
+    # coexist in the graph. Consolidation requires every transitive
+    # user to migrate; not on samkhya's critical path.
+    { name = "getrandom", version = "0.2" },
+    { name = "getrandom", version = "0.3" },
+    # itertools — datafusion and gbdt pull 0.13; the older 0.10 arm
+    # has dropped out of the graph as of the 2026-05-16 cleanup.
+    # samkhya itself does not depend on itertools directly.
+    { name = "itertools", version = "0.13" },
+    # r-efi — multiple versions emerge through getrandom's UEFI
+    # support across the two getrandom versions above; same retire
+    # condition as getrandom.
+    { name = "r-efi", version = "5.3.0" },
+    # twox-hash — samkhya-core pins twox-hash 1.6 for the Bloom hash
+    # path (deterministic across releases). DataFusion 46 pulls
+    # twox-hash 2.x. Both versions coexist; the dep is small enough
+    # that the size cost is negligible.
+    { name = "twox-hash", version = "1.6" },
+    # wit-bindgen — wasm-component dep paths pull two versions
+    # (0.51 via wasip3 → getrandom 0.4 → tempfile; 0.57 via the
+    # other getrandom path). Only matters if we ever enable a
+    # wasm target. The skips are forward-looking parity with the
+    # windows-sys entries above.
+    { name = "wit-bindgen", version = "0.51" },
+    { name = "wit-bindgen", version = "0.57" },
 ]
 skip-tree = []
 

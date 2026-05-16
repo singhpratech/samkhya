@@ -29,6 +29,7 @@ use crate::imdb;
 use crate::puffin_io;
 use crate::queries::{Query, Suite};
 use crate::synthetic;
+use crate::tpch;
 
 /// Configuration for a single benchmark run.
 #[derive(Debug, Clone)]
@@ -38,6 +39,7 @@ pub struct Runner {
     feedback_path: Option<std::path::PathBuf>,
     puffin_dir: Option<std::path::PathBuf>,
     imdb_dir: Option<std::path::PathBuf>,
+    tpch_dir: Option<std::path::PathBuf>,
 }
 
 /// Per-query result captured during a run.
@@ -72,6 +74,7 @@ impl Runner {
             feedback_path: None,
             puffin_dir: None,
             imdb_dir: None,
+            tpch_dir: None,
         }
     }
 
@@ -103,6 +106,17 @@ impl Runner {
         self
     }
 
+    /// Point the runner at a TPC-H Parquet dump on disk (the directory
+    /// produced by `tpchgen-cli -s 1 --format=parquet --output-dir=...`
+    /// or by DuckDB's `EXPORT DATABASE` after `CALL dbgen(sf=1)`). When
+    /// set, the `TpcH` suite becomes executable: the SessionContext is
+    /// built by [`crate::tpch::register_tpch_tables`]. Ignored by every
+    /// other suite.
+    pub fn with_tpch_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.tpch_dir = Some(dir.into());
+        self
+    }
+
     pub fn suite(&self) -> Suite {
         self.suite
     }
@@ -116,6 +130,8 @@ impl Runner {
         if !self.is_runnable() {
             let extra = if self.suite.is_executable_with_imdb_dir() {
                 " (supply --imdb-dir to enable)"
+            } else if self.suite.is_executable_with_tpch_dir() {
+                " (supply --tpch-dir to enable)"
             } else {
                 ""
             };
@@ -145,6 +161,9 @@ impl Runner {
             return true;
         }
         if self.suite.is_executable_with_imdb_dir() && self.imdb_dir.is_some() {
+            return true;
+        }
+        if self.suite.is_executable_with_tpch_dir() && self.tpch_dir.is_some() {
             return true;
         }
         false
@@ -235,9 +254,17 @@ impl Runner {
         corrector: &C,
     ) -> Result<Vec<CorrectedOutcome>> {
         if !self.is_runnable() {
+            let extra = if self.suite.is_executable_with_imdb_dir() {
+                " (supply --imdb-dir to enable)"
+            } else if self.suite.is_executable_with_tpch_dir() {
+                " (supply --tpch-dir to enable)"
+            } else {
+                ""
+            };
             println!(
-                "runner: suite {} is not in-process executable yet (needs real dataset); skipping.",
-                self.suite.label()
+                "runner: suite {} is not in-process executable yet (needs real dataset){}; skipping.",
+                self.suite.label(),
+                extra
             );
             return Ok(Vec::new());
         }
@@ -274,15 +301,23 @@ impl Runner {
     /// Dispatch SessionContext construction by suite.
     ///
     /// `JobSlowReal` + a configured `imdb_dir` builds against the real
-    /// IMDb dump via [`crate::imdb::register_imdb_tables`]. Everything else
-    /// falls back to the synthetic in-memory context.
+    /// IMDb dump via [`crate::imdb::register_imdb_tables`]. `TpcH` +
+    /// a configured `tpch_dir` builds against the on-disk Parquet dump
+    /// via [`crate::tpch::register_tpch_tables`]. Everything else falls
+    /// back to the synthetic in-memory context.
     async fn build_context(&self) -> Result<SessionContext> {
         if self.suite.is_executable_with_imdb_dir() {
             if let Some(dir) = self.imdb_dir.as_deref() {
                 imdb::probe_imdb_dir(dir)?;
                 let ctx = SessionContext::new();
-                imdb::register_imdb_tables(&ctx, dir)?;
+                imdb::register_imdb_tables_async_with_baseline(&ctx, dir, self.baseline).await?;
                 return Ok(ctx);
+            }
+        }
+        if self.suite.is_executable_with_tpch_dir() {
+            if let Some(dir) = self.tpch_dir.as_deref() {
+                tpch::probe_tpch_dir(dir)?;
+                return tpch::build_tpch_context(dir).await;
             }
         }
         build_synthetic_context(self.baseline, self.puffin_dir.as_deref()).await

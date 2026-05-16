@@ -55,3 +55,38 @@ path = "fuzz_targets/sketch_decoder.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_hll_parse"
+path = "fuzz_targets/fuzz_hll_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bloom_parse"
+path = "fuzz_targets/fuzz_bloom_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_cms_parse"
+path = "fuzz_targets/fuzz_cms_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_equidepth_parse"
+path = "fuzz_targets/fuzz_equidepth_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_correlated_parse"
+path = "fuzz_targets/fuzz_correlated_parse.rs"
+test = false
+doc = false
+bench = false

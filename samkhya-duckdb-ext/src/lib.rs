@@ -1,183 +1,178 @@
-//! samkhya-duckdb-ext — server-side DuckDB extension scaffold.
+//! samkhya-duckdb-ext — v1.0 Rust <-> C++ FFI scaffold for samkhya
+//! statistics injection into DuckDB.
 //!
-//! This crate produces a `.duckdb_extension` (a renamed cdylib) that
-//! DuckDB loads at runtime via `LOAD 'samkhya_duckdb_ext';`. It is
-//! distinct from the sibling crate `samkhya-duckdb`, which is a Rust
-//! *client* that drives a DuckDB connection from outside the engine.
-//! This crate runs *inside* the engine and exposes samkhya's portable
-//! sketches as DuckDB SQL functions plus a metadata table the planner
-//! consults during cardinality estimation.
+//! # What ships in v1.0
 //!
-//! ## Status
+//! A working cxx bridge with a small, deliberate surface:
 //!
-//! This is **scaffolding** for the v0.7.0 roadmap deliverable. The cxx
-//! bridge surface is declared, the C++ stub exists, and the build
-//! plumbing is in place — but full DuckDB function registration is a
-//! multi-week C++ effort tracked separately. See `README.md` for the
-//! list of work items the next round needs to complete.
+//! * `HllHandle` — opaque Rust wrapper around `samkhya_core::sketches::hll::HllSketch`.
+//! * `hll_new`, `hll_add`, `hll_estimate` — build and query a sketch
+//!   from C++.
+//! * `puffin_inspect` — read a Puffin sidecar from disk and return the
+//!   per-blob metadata (kind/offset/length) as a `Vec<PuffinBlobInfo>`.
 //!
-//! ## Why cxx
+//! From the C++ side (see `src/wrapper.cc`) these are reachable today.
+//! The crate compiles to a `staticlib` so DuckDB's C++ build can link
+//! the archive directly.
 //!
-//! DuckDB's stable extension surface is C++. samkhya's sketches are
-//! Rust. The standard bridge is the [`cxx`] crate, which generates a
-//! mutually-validated FFI between the two: Rust owns the sketch data,
-//! C++ owns DuckDB function registration, and neither side reaches into
-//! the other's allocator.
+//! # What waits for v1.1
 //!
-//! ## Default build is clean
+//! The actual DuckDB optimizer extension — the hook that walks
+//! `LogicalGet` nodes, looks up sketches in a `_samkhya_stats` table,
+//! and overrides the planner's cardinality estimate — depends on
+//! DuckDB Issue #11638 ("OptimizerExtension API for cardinality
+//! overrides"). Until that lands upstream there is no stable C++
+//! surface to plug into. The wrapper's `samkhya_register` function is
+//! forward-declared so v1.1 can fill in the body without touching the
+//! cxx layer below.
 //!
-//! Without the `extension` feature, this crate compiles to an empty
-//! cdylib (no symbols beyond what the Rust runtime requires) and does
-//! not need a C++ toolchain or DuckDB headers. That keeps
-//! `cargo check --workspace` runnable on minimal CI images.
+//! Reference: <https://github.com/duckdb/duckdb/issues/11638>
 //!
-//! [`cxx`]: https://cxx.rs
+//! # Default build vs `no_cxx`
+//!
+//! The default build invokes `cxx_build` (requires a C++17 compiler
+//! but no DuckDB headers). The `no_cxx` Cargo feature disables the
+//! bridge and the C++ compilation step for minimal CI images. Under
+//! `no_cxx` the Rust API is still available; only the C++ surface is
+//! gone.
 
 #![deny(rust_2018_idioms)]
 
 // ---------------------------------------------------------------------
-// Default-feature path: an empty cdylib so the workspace builds clean.
+// Rust-side wrappers around the samkhya-core primitives the bridge
+// exposes. Defined unconditionally so the crate's public Rust API
+// stays stable across the `no_cxx` feature toggle — only the cxx
+// bridge module below is feature-gated.
 // ---------------------------------------------------------------------
 
-#[cfg(not(feature = "extension"))]
-mod stub {
-    //! With the `extension` feature off, the crate exports no symbols.
-    //!
-    //! This keeps `cargo check -p samkhya-duckdb-ext` runnable without
-    //! a C++ toolchain or DuckDB headers, while still validating that
-    //! the workspace member resolves and the crate metadata is
-    //! syntactically correct.
+use samkhya_core::puffin::PuffinReader;
+use samkhya_core::sketches::hll::HllSketch;
+
+/// Opaque handle the C++ side holds via `rust::Box<HllHandle>`.
+///
+/// We wrap rather than re-export so the bridge surface stays decoupled
+/// from samkhya-core's internal type layout; future changes to
+/// `HllSketch` don't propagate into the C++ ABI.
+pub struct HllHandle(HllSketch);
+
+/// Construct a fresh HLL sketch at the requested precision.
+///
+/// Falls back to precision = 12 (~1.6% relative error, 4 KiB state)
+/// when the caller passes something outside `[4, 18]`. Choosing a
+/// fallback rather than surfacing an error keeps the cxx bridge
+/// signature simple; precision-validation is a Rust-side concern.
+pub fn hll_new(p: u8) -> Box<HllHandle> {
+    let inner =
+        HllSketch::new(p).unwrap_or_else(|_| HllSketch::new(12).expect("p=12 is always valid"));
+    Box::new(HllHandle(inner))
 }
 
-// ---------------------------------------------------------------------
-// extension-feature path: cxx bridge + Rust-side sketch wrappers.
-// ---------------------------------------------------------------------
+/// Insert one byte-string item into the sketch.
+pub fn hll_add(h: &mut HllHandle, bytes: &[u8]) {
+    h.0.add(bytes);
+}
 
-#[cfg(feature = "extension")]
-mod bridge_impl {
-    //! Rust side of the cxx bridge. Wraps `samkhya-core` sketches in
-    //! opaque types that the C++ side holds via `Box<T>` and mutates
-    //! through the small set of free functions declared in
-    //! [`ffi`](self::ffi).
-    //!
-    //! Failure modes (allocation errors, deserialization errors) are
-    //! flattened to either empty `Vec<u8>` returns or zeroed estimates
-    //! so the C++ side never sees a Rust panic. A future iteration
-    //! will thread a proper `Result` type through cxx's `Result<T>`
-    //! support.
+/// Return the current cardinality estimate as `f64`.
+///
+/// The core API returns `u64`; we widen to `f64` because the DuckDB
+/// optimizer extension (v1.1) consumes cardinality estimates as
+/// floating-point selectivity multipliers.
+pub fn hll_estimate(h: &HllHandle) -> f64 {
+    h.0.estimate() as f64
+}
 
-    use samkhya_core::sketches::{BloomFilter as CoreBloom, HllSketch as CoreHll};
-
-    // --- Opaque Rust types exposed through the bridge -----------------
-
-    /// Wrapper around the core HLL sketch.
-    ///
-    /// `cxx` requires bridged opaque types live at the crate root of
-    /// the bridge module; we therefore re-export it from `ffi` via a
-    /// `type` alias in the bridge declaration below.
-    pub struct HllSketch {
-        inner: CoreHll,
-    }
-
-    /// Wrapper around the core Bloom filter.
-    pub struct BloomFilter {
-        inner: CoreBloom,
-    }
-
-    // --- Rust-side implementations of the bridged free functions -----
-
-    pub fn hll_new(precision: u8) -> Box<HllSketch> {
-        // The default precision in `samkhya-core` clamps to the legal
-        // range; we fall back to precision=12 (≈1.6% relative error,
-        // 4 KiB state) if the caller hands us something out of range.
-        let inner = CoreHll::new(precision).unwrap_or_else(|_| {
-            CoreHll::new(12).expect("precision=12 is always valid")
-        });
-        Box::new(HllSketch { inner })
-    }
-
-    pub fn hll_add(hll: &mut HllSketch, item: &[u8]) {
-        hll.inner.add(item);
-    }
-
-    pub fn hll_estimate(hll: &HllSketch) -> u64 {
-        hll.inner.estimate()
-    }
-
-    pub fn hll_to_bytes(hll: &HllSketch) -> Vec<u8> {
-        use samkhya_core::sketches::Sketch;
-        hll.inner.to_bytes().unwrap_or_default()
-    }
-
-    pub fn hll_from_bytes(bytes: &[u8]) -> Box<HllSketch> {
-        use samkhya_core::sketches::Sketch;
-        let inner = CoreHll::from_bytes(bytes).unwrap_or_else(|_| {
-            // Deserialization failure: return an empty p=12 sketch.
-            // The C++ side will detect estimate==0 and surface a SQL
-            // NULL, per the function-registration code in extension.cpp.
-            CoreHll::new(12).expect("precision=12 is always valid")
-        });
-        Box::new(HllSketch { inner })
-    }
-
-    pub fn bloom_new(capacity: usize, fp_rate: f64) -> Box<BloomFilter> {
-        Box::new(BloomFilter {
-            inner: CoreBloom::new(capacity, fp_rate),
+/// Inspect a Puffin sidecar at `path`, returning one `PuffinBlobInfo`
+/// per blob. Returns an empty vector on any I/O or parse error — the
+/// C++ side treats "no blobs" and "couldn't read" identically (both
+/// mean "no override available"), so flattening the failure here keeps
+/// the bridge surface ergonomic.
+pub fn puffin_inspect(path: &str) -> Vec<ffi::PuffinBlobInfo> {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let Ok(reader) = PuffinReader::open(file) else {
+        return Vec::new();
+    };
+    reader
+        .blobs()
+        .iter()
+        .map(|b| ffi::PuffinBlobInfo {
+            kind: b.kind.clone(),
+            offset: b.offset,
+            length: b.length,
         })
+        .collect()
+}
+
+// ---------------------------------------------------------------------
+// The cxx bridge. Excluded under `no_cxx` so the crate still compiles
+// on images without a C++ toolchain. Everything reachable from C++
+// goes through this module.
+// ---------------------------------------------------------------------
+
+#[cfg(not(feature = "no_cxx"))]
+#[cxx::bridge(namespace = "samkhya")]
+mod ffi {
+    /// Per-blob view returned by [`puffin_inspect`]. Kept deliberately
+    /// thin: kind tag, byte offset, byte length. Anything richer
+    /// (snapshot ID, properties) ships in v1.1 once the optimizer hook
+    /// actually needs it.
+    struct PuffinBlobInfo {
+        kind: String,
+        offset: u64,
+        length: u64,
     }
 
-    pub fn bloom_insert(bf: &mut BloomFilter, item: &[u8]) {
-        bf.inner.insert(item);
-    }
+    extern "Rust" {
+        type HllHandle;
 
-    pub fn bloom_contains(bf: &BloomFilter, item: &[u8]) -> bool {
-        bf.inner.contains(item)
-    }
+        fn hll_new(p: u8) -> Box<HllHandle>;
+        fn hll_add(h: &mut HllHandle, bytes: &[u8]);
+        fn hll_estimate(h: &HllHandle) -> f64;
 
-    pub fn bloom_to_bytes(bf: &BloomFilter) -> Vec<u8> {
-        use samkhya_core::sketches::Sketch;
-        bf.inner.to_bytes().unwrap_or_default()
-    }
-
-    pub fn bloom_from_bytes(bytes: &[u8]) -> Box<BloomFilter> {
-        use samkhya_core::sketches::Sketch;
-        let inner = CoreBloom::from_bytes(bytes)
-            .unwrap_or_else(|_| CoreBloom::new(1024, 0.01));
-        Box::new(BloomFilter { inner })
-    }
-
-    // --- The cxx bridge ----------------------------------------------
-    //
-    // The `ffi` module is the contract between Rust and C++. Every
-    // type and function listed here gets a matching declaration in
-    // the generated `samkhya_duckdb_ext/src/lib.rs.h` header, which
-    // `src/extension.cpp` then includes.
-
-    #[cxx::bridge(namespace = "samkhya")]
-    pub mod ffi {
-        extern "Rust" {
-            // Opaque Rust types. cxx will emit forward-declarations
-            // on the C++ side; instances are held via `rust::Box<T>`.
-            type HllSketch;
-            type BloomFilter;
-
-            // HLL surface — what the DuckDB scalar / aggregate
-            // functions in extension.cpp will call.
-            fn hll_new(precision: u8) -> Box<HllSketch>;
-            fn hll_add(hll: &mut HllSketch, item: &[u8]);
-            fn hll_estimate(hll: &HllSketch) -> u64;
-            fn hll_to_bytes(hll: &HllSketch) -> Vec<u8>;
-            fn hll_from_bytes(bytes: &[u8]) -> Box<HllSketch>;
-
-            // Bloom surface — same shape, different sketch.
-            fn bloom_new(capacity: usize, fp_rate: f64) -> Box<BloomFilter>;
-            fn bloom_insert(bf: &mut BloomFilter, item: &[u8]);
-            fn bloom_contains(bf: &BloomFilter, item: &[u8]) -> bool;
-            fn bloom_to_bytes(bf: &BloomFilter) -> Vec<u8>;
-            fn bloom_from_bytes(bytes: &[u8]) -> Box<BloomFilter>;
-        }
+        fn puffin_inspect(path: &str) -> Vec<PuffinBlobInfo>;
     }
 }
 
-#[cfg(feature = "extension")]
-pub use bridge_impl::*;
+// Stand-in for the `ffi::PuffinBlobInfo` type when the cxx bridge is
+// disabled. Lets `puffin_inspect` keep the same signature regardless
+// of which build configuration is active.
+#[cfg(feature = "no_cxx")]
+mod ffi {
+    pub struct PuffinBlobInfo {
+        pub kind: String,
+        pub offset: u64,
+        pub length: u64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hll_round_trip_through_handle() {
+        let mut h = hll_new(12);
+        for i in 0..1_000u32 {
+            hll_add(&mut h, &i.to_le_bytes());
+        }
+        let est = hll_estimate(&h);
+        let err = (est - 1_000.0).abs() / 1_000.0;
+        assert!(err < 0.10, "estimate {est} off by {err}");
+    }
+
+    #[test]
+    fn hll_new_clamps_invalid_precision() {
+        // p=3 is out of range; constructor must still return a usable
+        // sketch (the fallback at p=12).
+        let mut h = hll_new(3);
+        hll_add(&mut h, b"x");
+        assert!(hll_estimate(&h) >= 1.0);
+    }
+
+    #[test]
+    fn puffin_inspect_missing_file_returns_empty() {
+        let info = puffin_inspect("/nonexistent/path/should/not/exist.puffin");
+        assert!(info.is_empty());
+    }
+}

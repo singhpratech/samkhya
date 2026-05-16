@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "Portable stats, sketches, Puffin I/O, feedback recorder, LpBound envelope, residual correction"
-keywords = ["cardinality", "query-optimizer", "sketches", "puffin", "iceberg"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya: sketches, LpBound envelopes, Puffin sidecars, and residual correctors for cardinality estimation"
 
 [dependencies]
 serde.workspace = true
@@ -60,7 +61,7 @@ tabpfn_http = ["dep:ureq"]
 tabpfn = ["tabpfn_http"]
 
 [dev-dependencies]
-proptest.workspace = true
+proptest = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"
 

@@ -53,7 +53,7 @@
 //! [`TableProvider::statistics()`]: datafusion::datasource::TableProvider::statistics
 //! [`ExecutionPlan`]: datafusion::physical_plan::ExecutionPlan
 //! [`SamkhyaStatsExec`]: crate::physical_plan::SamkhyaStatsExec
-//! [`SamkhyaTableProvider::scan`]: crate::SamkhyaTableProvider::scan
+//! [`SamkhyaTableProvider::scan`]: crate::SamkhyaTableProvider
 //! [`SessionStateBuilder::with_physical_optimizer_rule`]: datafusion::execution::session_state::SessionStateBuilder::with_physical_optimizer_rule
 
 use std::sync::Arc;
@@ -78,7 +78,7 @@ use crate::stats_provider::to_datafusion_column_statistics;
 /// [`PhysicalOptimizerRule`] (physical validator). The physical pass is
 /// the visible integration point; the actual scan-wrapping that makes
 /// `physical.statistics()?.num_rows` reflect samkhya's corrections is
-/// done by [`crate::SamkhyaTableProvider::scan`] at plan-construction
+/// done by [`crate::SamkhyaTableProvider`]'s `scan()` at plan-construction
 /// time.
 ///
 /// Register with both

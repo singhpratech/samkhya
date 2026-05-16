@@ -6,10 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
-description = "gpudb adapter for samkhya — GPU batch inference of the residual corrector"
-keywords = ["gpudb", "cardinality", "gpu", "cuda", "metal"]
-categories = ["database"]
+readme = "README.md"
+description = "samkhya gpudb engine adapter (CpuFallbackCorrector and GpuCorrector trait)"
 
 [dependencies]
 samkhya-core.workspace = true

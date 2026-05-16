@@ -1,48 +1,38 @@
 //! Build script for samkhya-duckdb-ext.
 //!
-//! Without the `extension` feature, this is a no-op: a plain
-//! `cargo check -p samkhya-duckdb-ext` succeeds without a C++ toolchain
-//! and without DuckDB headers being present on disk.
+//! Default path: invoke `cxx_build::bridge("src/lib.rs")` to generate
+//! the C++ side of the bridge, compile `src/wrapper.cc` against it with
+//! `-std=c++17`, and emit the resulting object code into the crate's
+//! staticlib output. This is the scaffold's working configuration: it
+//! requires a C++17 compiler on PATH (clang++ or g++) but it does NOT
+//! require any DuckDB headers — the wrapper only includes the
+//! cxx-generated bridge header and the crate-local wrapper.h.
 //!
-//! With `--features extension`, we invoke `cxx_build` to:
-//!   1. Generate the C++ side of the bridge from the `#[cxx::bridge]`
-//!      module in `src/lib.rs`.
-//!   2. Compile `src/extension.cpp`, the DuckDB-facing stub that
-//!      registers samkhya's sketches as DuckDB scalar / aggregate
-//!      functions.
-//!   3. Link the result into the final cdylib that DuckDB will load.
+//! Escape-hatch path (`--features no_cxx`): build.rs becomes a no-op
+//! and the bridge module is excluded from compilation. This keeps
+//! `cargo check -p samkhya-duckdb-ext --features no_cxx` runnable on
+//! minimal images that lack a C++ toolchain entirely (some sandboxed
+//! CI runners and the `cargo deny` job in particular).
 //!
-//! DuckDB's own headers are consumed by `extension.cpp` only. We expect
-//! the consumer to have run the standard DuckDB extension-template
-//! workflow (see README.md) so that the include path resolves. If
-//! `DUCKDB_INCLUDE_DIR` is set in the environment we forward it as a
-//! `-I` flag; otherwise we rely on the system include path.
+//! The DuckDB-side optimizer hook (DuckDB Issue #11638) is wired up in
+//! v1.1; this build script intentionally does not look for DuckDB
+//! headers, because nothing in src/wrapper.cc includes them yet.
 
-#[cfg(feature = "extension")]
+#[cfg(not(feature = "no_cxx"))]
 fn main() {
-    use std::env;
-
-    // Tell cargo to rerun the build script if the sources change.
     println!("cargo:rerun-if-changed=src/lib.rs");
-    println!("cargo:rerun-if-changed=src/extension.cpp");
-    println!("cargo:rerun-if-env-changed=DUCKDB_INCLUDE_DIR");
+    println!("cargo:rerun-if-changed=src/wrapper.cc");
+    println!("cargo:rerun-if-changed=src/wrapper.h");
 
-    let mut build = cxx_build::bridge("src/lib.rs");
-    build.file("src/extension.cpp").std("c++17");
-
-    // Forward the DuckDB extension headers if the consumer set the env
-    // var. Without this, compilation of extension.cpp will fail at the
-    // `#include "duckdb.hpp"` line — that failure is intentional and
-    // documented in README.md.
-    if let Ok(duckdb_inc) = env::var("DUCKDB_INCLUDE_DIR") {
-        build.include(duckdb_inc);
-    }
-
-    build.compile("samkhya_duckdb_ext_bridge");
+    cxx_build::bridge("src/lib.rs")
+        .file("src/wrapper.cc")
+        .std("c++17")
+        .compile("samkhya_duckdb_ext_bridge");
 }
 
-#[cfg(not(feature = "extension"))]
+#[cfg(feature = "no_cxx")]
 fn main() {
-    // No-op. The cxx-build dependency is gated behind the `extension`
-    // feature so it isn't even compiled in this configuration.
+    // Escape hatch: skip cxx codegen and C++ compilation entirely.
+    // See module-level doc comment for the reasoning.
+    println!("cargo:rerun-if-changed=src/lib.rs");
 }

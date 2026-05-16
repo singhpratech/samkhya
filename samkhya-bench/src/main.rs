@@ -48,6 +48,14 @@ enum Command {
         /// executes the JOB queries end-to-end.
         #[arg(long)]
         imdb_dir: Option<PathBuf>,
+
+        /// Path to a TPC-H Parquet dump (e.g. produced by
+        /// `tpchgen-cli -s 1 --format=parquet --output-dir=<path>`).
+        /// When supplied alongside `--suite tpc-h`, the runner builds a
+        /// DataFusion SessionContext from the on-disk Parquet files and
+        /// executes the 22 TPC-H queries end-to-end.
+        #[arg(long)]
+        tpch_dir: Option<PathBuf>,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -65,10 +73,21 @@ enum Command {
     /// Build Puffin sidecars for the Synthetic schema and write them to
     /// the given directory (one .puffin file per table). Subsequent runs
     /// can load `ColumnStats` from these sidecars via `--puffin-dir`.
+    ///
+    /// When `--imdb-dir` is supplied INSTEAD of `--output`, the binary
+    /// iterates over the 21 IMDb tables under `<imdb-dir>` and writes
+    /// one `<imdb-dir>/<table>.puffin` sidecar per table (HLL precision-12
+    /// per column + 1% Bloom for FK columns + row-count marker). This is
+    /// the path the JobSlowReal head-to-head consumes.
     BuildPuffin {
-        /// Output directory for the sidecars.
+        /// Output directory for the synthetic-table sidecars. Mutually
+        /// exclusive with `--imdb-dir`.
         #[arg(long)]
-        output: PathBuf,
+        output: Option<PathBuf>,
+        /// Build IMDb-table sidecars next to the CSVs in this directory.
+        /// Mutually exclusive with `--output`.
+        #[arg(long)]
+        imdb_dir: Option<PathBuf>,
     },
 
     /// Run a suite, train a GBT corrector from the observations, re-run with correction applied.
@@ -81,6 +100,17 @@ enum Command {
         /// sidecars in this directory.
         #[arg(long)]
         puffin_dir: Option<PathBuf>,
+        /// Path to an unpacked IMDb dump (see `samkhya-bench/data/job/README.md`).
+        /// When supplied with `--suite job-slow-real`, calibration runs end-to-end
+        /// against real IMDb data. Mutually exclusive with `--tpch-dir`.
+        #[arg(long)]
+        imdb_dir: Option<PathBuf>,
+        /// Path to a TPC-H Parquet dump (e.g. `tpchgen-cli -s 1 --format=parquet
+        /// --output-dir=<path>`). When supplied with `--suite tpc-h`, calibration
+        /// runs end-to-end across the 22 TPC-H queries. Mutually exclusive with
+        /// `--imdb-dir`.
+        #[arg(long)]
+        tpch_dir: Option<PathBuf>,
     },
 
     /// Render a report from a feedback store.
@@ -132,6 +162,7 @@ fn main() -> Result<()> {
             feedback,
             puffin_dir,
             imdb_dir,
+            tpch_dir,
         } => {
             let mut runner = Runner::new(suite.into(), baseline);
             if let Some(path) = feedback {
@@ -143,12 +174,28 @@ fn main() -> Result<()> {
             if let Some(dir) = imdb_dir {
                 runner = runner.with_imdb_dir(dir);
             }
+            if let Some(dir) = tpch_dir {
+                runner = runner.with_tpch_dir(dir);
+            }
             runner.run()
         }
         Command::Compare { suite, puffin_dir } => {
             samkhya_bench::report::compare(suite.into(), puffin_dir.as_deref())
         }
-        Command::BuildPuffin { output } => samkhya_bench::puffin_io::build_puffin_sidecars(&output),
+        Command::BuildPuffin { output, imdb_dir } => match (output, imdb_dir) {
+            (Some(_), Some(_)) => {
+                eprintln!("error: --output and --imdb-dir are mutually exclusive; pass only one");
+                std::process::exit(2);
+            }
+            (Some(dir), None) => samkhya_bench::puffin_io::build_puffin_sidecars(&dir),
+            (None, Some(dir)) => samkhya_bench::puffin_io::build_puffin_sidecars_imdb(&dir),
+            (None, None) => {
+                eprintln!(
+                    "error: build-puffin requires either --output (synthetic) or --imdb-dir (JOB)"
+                );
+                std::process::exit(2);
+            }
+        },
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
         Command::Train { feedback, template } => {
             samkhya_bench::report::train_stub(&feedback, &template)
@@ -157,11 +204,21 @@ fn main() -> Result<()> {
             suite,
             feedback,
             puffin_dir,
-        } => samkhya_bench::calibrate::calibrate(
-            suite.into(),
-            feedback.as_deref(),
-            puffin_dir.as_deref(),
-        ),
+            imdb_dir,
+            tpch_dir,
+        } => {
+            if imdb_dir.is_some() && tpch_dir.is_some() {
+                eprintln!("error: --imdb-dir and --tpch-dir are mutually exclusive; pass only one");
+                std::process::exit(2);
+            }
+            samkhya_bench::calibrate::calibrate(
+                suite.into(),
+                feedback.as_deref(),
+                puffin_dir.as_deref(),
+                imdb_dir.as_deref(),
+                tpch_dir.as_deref(),
+            )
+        }
     }
 }
 
@@ -178,6 +235,8 @@ fn list_queries() -> Result<()> {
             "(executable)"
         } else if suite.is_executable_with_imdb_dir() {
             "(executable with --imdb-dir)"
+        } else if suite.is_executable_with_tpch_dir() {
+            "(executable with --tpch-dir)"
         } else {
             "(scaffold)"
         };

@@ -25,12 +25,19 @@
 //! of how the CSV happens to be sampled.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::datasource::TableProvider;
 use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionContext};
 use samkhya_core::Result;
 use samkhya_core::error::Error;
+use samkhya_core::puffin::PuffinReader;
+use samkhya_core::sketches::{HllSketch, Sketch};
+use samkhya_core::stats::ColumnStats;
+use samkhya_datafusion::SamkhyaTableProvider;
 
 /// All 21 IMDb tables referenced by the JOB query corpus, in the order
 /// matching the canonical `schema.sql`.
@@ -70,7 +77,45 @@ pub const TABLES: &[&str] = &[
 /// The CSV reader is configured with the IMDb dump's quirks:
 /// `has_header = false`, escape `\\`, no header row, comma-separated, and
 /// values containing newlines (a few `movie_info.note` rows trip this).
+///
+/// This is the synchronous (no-runtime-active) entry. If a tokio runtime
+/// is already active (e.g. inside `Runner::run_async`), call
+/// [`register_imdb_tables_async`] instead — nesting a second runtime
+/// panics in tokio.
 pub fn register_imdb_tables(ctx: &SessionContext, csv_dir: &Path) -> Result<()> {
+    if !csv_dir.exists() {
+        return Err(Error::Feedback(format!(
+            "imdb: csv_dir {} does not exist",
+            csv_dir.display()
+        )));
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(Error::from)?;
+    rt.block_on(register_imdb_tables_async(ctx, csv_dir))
+}
+
+/// Async variant of [`register_imdb_tables`]; safe to call from inside an
+/// already-active tokio runtime (the runner's `run_async` path).
+///
+/// Wraps every registered table with a `SamkhyaTableProvider` when a
+/// `<csv_dir>/<table>.puffin` sidecar exists. Pass `baseline=true` to
+/// skip the wrapping entirely (the "native DataFusion 46" head-to-head
+/// arm — sidecars are still expected on disk but ignored).
+pub async fn register_imdb_tables_async(ctx: &SessionContext, csv_dir: &Path) -> Result<()> {
+    register_imdb_tables_async_with_baseline(ctx, csv_dir, false).await
+}
+
+/// Variant of [`register_imdb_tables_async`] that respects a `baseline`
+/// flag: when `baseline=true`, sidecars are NOT applied and the
+/// registered providers are the unmodified DataFusion ListingTable
+/// providers (the head-to-head's native-DataFusion arm).
+pub async fn register_imdb_tables_async_with_baseline(
+    ctx: &SessionContext,
+    csv_dir: &Path,
+    baseline: bool,
+) -> Result<()> {
     if !csv_dir.exists() {
         return Err(Error::Feedback(format!(
             "imdb: csv_dir {} does not exist",
@@ -79,48 +124,150 @@ pub fn register_imdb_tables(ctx: &SessionContext, csv_dir: &Path) -> Result<()> 
     }
     let parquet_dir = csv_dir.join("parquet");
     let prefer_parquet = parquet_dir.exists();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(Error::from)?;
     let schemas = imdb_schemas();
-    rt.block_on(async {
-        for &table in TABLES {
-            let schema = schemas
-                .get(table)
-                .ok_or_else(|| Error::Feedback(format!("imdb: no schema for {table}")))?;
+    for &table in TABLES {
+        let schema = schemas
+            .get(table)
+            .ok_or_else(|| Error::Feedback(format!("imdb: no schema for {table}")))?;
 
-            let parquet_path = parquet_dir.join(format!("{table}.parquet"));
-            let csv_path = csv_dir.join(format!("{table}.csv"));
+        let parquet_path = parquet_dir.join(format!("{table}.parquet"));
+        let csv_path = csv_dir.join(format!("{table}.csv"));
 
-            if prefer_parquet && parquet_path.exists() {
-                let opts = ParquetReadOptions::default();
-                ctx.register_parquet(table, parquet_path.to_string_lossy().as_ref(), opts)
-                    .await
-                    .map_err(df_err)?;
-            } else if csv_path.exists() {
-                let opts = CsvReadOptions::new()
-                    .has_header(false)
-                    .escape(b'\\')
-                    .delimiter(b',')
-                    .schema(schema)
-                    .newlines_in_values(true);
-                ctx.register_csv(table, csv_path.to_string_lossy().as_ref(), opts)
-                    .await
-                    .map_err(df_err)?;
-            } else {
-                return Err(Error::Feedback(format!(
-                    "imdb: missing source for {table} (looked at {} and {})",
-                    parquet_path.display(),
-                    csv_path.display()
-                )));
+        if prefer_parquet && parquet_path.exists() {
+            let opts = ParquetReadOptions::default();
+            ctx.register_parquet(table, parquet_path.to_string_lossy().as_ref(), opts)
+                .await
+                .map_err(df_err)?;
+        } else if csv_path.exists() {
+            let opts = CsvReadOptions::new()
+                .has_header(false)
+                .escape(b'\\')
+                .delimiter(b',')
+                .schema(schema)
+                .newlines_in_values(true);
+            ctx.register_csv(table, csv_path.to_string_lossy().as_ref(), opts)
+                .await
+                .map_err(df_err)?;
+        } else {
+            return Err(Error::Feedback(format!(
+                "imdb: missing source for {table} (looked at {} and {})",
+                parquet_path.display(),
+                csv_path.display()
+            )));
+        }
+
+        // baseline=true short-circuits the wrapping entirely so the
+        // "native DataFusion 46" arm in the head-to-head sees no samkhya
+        // stats injection.
+        if baseline {
+            continue;
+        }
+        // Optional: wrap with SamkhyaTableProvider when a sidecar exists.
+        // Mirrors `samkhya-bench/src/tpch.rs::register_tpch_tables_async`'s
+        // graceful-fallback pattern: corrupt sidecars do not error the whole
+        // registration, they fall back to the default ListingTable.
+        let sidecar = csv_dir.join(format!("{table}.puffin"));
+        if !sidecar.exists() {
+            println!(
+                "[imdb] no samkhya stats sidecar for table {}, falling back to default",
+                table
+            );
+            continue;
+        }
+        match wrap_imdb_table_with_sidecar(ctx, table, &sidecar).await {
+            Ok(()) => {}
+            Err(e) => {
+                println!(
+                    "[imdb] failed to wrap table {} with samkhya sidecar ({}), falling back to default",
+                    table, e
+                );
             }
         }
-        Ok::<_, Error>(())
-    })?;
+    }
     Ok(())
 }
+
+/// Deregister `table` from `ctx`, wrap its provider in a
+/// [`SamkhyaTableProvider`] populated from the Puffin sidecar at
+/// `sidecar_path`, then re-register the wrapped provider under the same
+/// name. The sidecar layout is one HLL blob per column (column index in
+/// the blob metadata's `fields[0]`), as produced by `build-puffin
+/// --imdb-dir`.
+async fn wrap_imdb_table_with_sidecar(
+    ctx: &SessionContext,
+    table: &str,
+    sidecar_path: &Path,
+) -> Result<()> {
+    let overrides = load_imdb_table_sidecar(sidecar_path)?;
+    let inner: Arc<dyn TableProvider> = ctx.table_provider(table).await.map_err(df_err)?;
+
+    let row_count = overrides.iter().filter_map(|(_, s)| s.row_count).max();
+    let n_fields = inner.schema().fields().len();
+
+    let mut wrapper = SamkhyaTableProvider::new(inner);
+    for (col_idx, stats) in overrides {
+        if col_idx >= n_fields {
+            continue;
+        }
+        let merged = match row_count {
+            Some(rc) => stats.with_row_count(rc),
+            None => stats,
+        };
+        wrapper = wrapper.with_column_stats(col_idx, merged);
+    }
+    let wrapped: Arc<dyn TableProvider> = Arc::new(wrapper);
+    ctx.deregister_table(table).map_err(df_err)?;
+    ctx.register_table(table, wrapped).map_err(df_err)?;
+    Ok(())
+}
+
+/// Load a single IMDb Puffin sidecar and return per-column
+/// `(field_index, ColumnStats)` overrides. Mirrors the loop in
+/// `tpch::load_table_sidecar` but the sidecar may carry an additional
+/// `row_count` HLL-marker blob (kind = `"samkhya.imdb.row_count"`) whose
+/// integer payload is stamped into every column's `row_count` field
+/// downstream.
+fn load_imdb_table_sidecar(path: &Path) -> Result<Vec<(usize, ColumnStats)>> {
+    let file = File::open(path)?;
+    let mut reader = PuffinReader::open(file)?;
+    let mut overrides: Vec<(usize, ColumnStats)> = Vec::new();
+    let mut row_count: Option<u64> = None;
+    let metas = reader.blobs().to_vec();
+    // First pass: pick up the row-count marker if present.
+    for (i, meta) in metas.iter().enumerate() {
+        if meta.kind == ROW_COUNT_KIND {
+            let payload = reader.read_blob(i)?;
+            if payload.len() >= 8 {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&payload[..8]);
+                row_count = Some(u64::from_le_bytes(buf));
+            }
+        }
+    }
+    // Second pass: collect HLL-based distinct counts per column.
+    for (i, meta) in metas.iter().enumerate() {
+        if meta.kind != HllSketch::KIND {
+            continue;
+        }
+        let payload = reader.read_blob(i)?;
+        let hll = HllSketch::from_bytes(&payload)?;
+        let distinct = hll.estimate();
+        for field_idx in &meta.fields {
+            let mut s = ColumnStats::new().with_distinct_count(distinct);
+            if let Some(rc) = row_count {
+                s = s.with_row_count(rc);
+            }
+            overrides.push((*field_idx as usize, s));
+        }
+    }
+    Ok(overrides)
+}
+
+/// Custom blob kind used by `build-puffin --imdb-dir` to stamp the
+/// table-level row count into the sidecar. Eight-byte little-endian u64
+/// payload. Kept inline (rather than promoting into `samkhya-core`) so the
+/// v1.0 core surface stays frozen.
+pub const ROW_COUNT_KIND: &str = "samkhya.imdb.row_count";
 
 /// Map of table name → Arrow schema for the JOB IMDb dump.
 ///

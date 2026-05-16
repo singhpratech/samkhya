@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use samkhya_core::Result;
 use samkhya_core::sketches::{BloomFilter, CountMinSketch, EquiDepthHistogram, HllSketch, Sketch};
+use samkhya_core::{Error, Result};
 
 use super::csv_io;
 
@@ -51,6 +51,18 @@ pub fn bloom(
     header: bool,
     output: Option<&Path>,
 ) -> Result<()> {
+    // Guard against pathological inputs that would otherwise drive
+    // `BloomFilter::new` into an `isize::MAX`-sized allocation (and a
+    // process abort). The CLI is the operator boundary; refuse early
+    // with a clean exit-1 error rather than letting the allocator OOM.
+    if capacity == 0 {
+        return Err(Error::InvalidSketch("bloom: --capacity must be > 0".into()));
+    }
+    if !fp_rate.is_finite() || fp_rate <= 0.0 || fp_rate >= 1.0 {
+        return Err(Error::InvalidSketch(format!(
+            "bloom: --fp-rate must be a finite value in (0.0, 1.0), got {fp_rate}"
+        )));
+    }
     let mut sketch = BloomFilter::new(capacity, fp_rate);
     let mut rows: u64 = 0;
     csv_io::for_each_cell(input, column, header, |cell| {

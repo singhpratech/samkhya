@@ -7,16 +7,16 @@
 //! together when the inputs scale up:
 //!
 //!   * `hll_million_inserts`     — 1M items into a p=14 HLL. Reports total
-//!                                  wall time per million; the per-insert
-//!                                  cost has its own bench in `sketches.rs`.
+//!     wall time per million; the per-insert
+//!     cost has its own bench in `sketches.rs`.
 //!   * `puffin_thousand_blobs`   — write 1k blobs of 1KB each, then read
-//!                                  the file back through PuffinReader.
-//!                                  Exercises the JSON-footer scaling path.
+//!     the file back through PuffinReader.
+//!     Exercises the JSON-footer scaling path.
 //!   * `feedback_ten_thousand_observations` — bulk-insert 10k observations
-//!                                  into an in-memory FeedbackStore. The
-//!                                  SQLite path's amortized insert cost is
-//!                                  the load-bearing number for the v0.6.0
-//!                                  JOB-Slow run (113 queries × N runs).
+//!     into an in-memory FeedbackStore. The
+//!     SQLite path's amortized insert cost is
+//!     the load-bearing number for the v0.6.0
+//!     JOB-Slow run (113 queries × N runs).
 //!
 //! Run with:
 //!

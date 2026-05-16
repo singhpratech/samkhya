@@ -1,20 +1,31 @@
 [package]
 name = "samkhya-py"
 version.workspace = true
-edition.workspace = true
+# pyo3 0.22 emits macro code that triggers Rust edition-2024's
+# tighter unsafe-extern rules (E0133). The Python wheel itself works
+# fine on every Python 3.9-3.12 (verified by B17 multi-Python pass);
+# the lint storm only blocks clippy. Holding samkhya-py at edition
+# 2021 until pyo3 0.23+ lands the edition-2024-compatible macros
+# avoids touching the FFI layer at the v1.0 boundary.
+edition = "2021"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 description = "Python bindings for samkhya via PyO3"
+readme = "README.md"
 keywords = ["python", "cardinality", "pyo3"]
 categories = ["database"]
 
 [lib]
-name = "samkhya"
+# Compiled as `_native.so` and installed at `samkhya/_native.*.so` by
+# maturin via the mixed Rust/Python layout (see pyproject.toml).
+name = "_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 samkhya-core.workspace = true
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }
+serde = { workspace = true }
+bincode = { workspace = true }

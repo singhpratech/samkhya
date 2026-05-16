@@ -31,6 +31,11 @@ pub enum Suite {
     /// is built with `--imdb-dir <path>`; otherwise behaves like
     /// [`Suite::JobSlow`].
     JobSlowReal,
+    /// TPC-H — 22-query decision-support benchmark. Executable when the
+    /// runner is built with `--tpch-dir <path>` pointing at a directory
+    /// of Parquet files (e.g. produced by `tpchgen-cli -s 1
+    /// --format=parquet --output-dir=<path>`). Otherwise behaves as
+    /// scaffold-only.
     TpcH,
     StatsCeb,
     Synthetic,
@@ -74,5 +79,12 @@ impl Suite {
     /// to executable in that case.
     pub fn is_executable_with_imdb_dir(self) -> bool {
         matches!(self, Suite::JobSlowReal)
+    }
+
+    /// Whether this suite becomes executable when a TPC-H Parquet
+    /// directory is supplied at runtime. Currently only [`Suite::TpcH`]
+    /// flips to executable in that case.
+    pub fn is_executable_with_tpch_dir(self) -> bool {
+        matches!(self, Suite::TpcH)
     }
 }

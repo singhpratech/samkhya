@@ -114,10 +114,8 @@ pub fn histogram_from_series(series: &Series, buckets: usize) -> Result<EquiDept
         .map_err(|e| Error::InvalidSketch(format!("downcast to f64 failed: {e}")))?;
 
     let mut values: Vec<f64> = Vec::with_capacity(ca.len());
-    for opt in ca.into_iter() {
-        if let Some(v) = opt {
-            values.push(v);
-        }
+    for v in ca.into_iter().flatten() {
+        values.push(v);
     }
     EquiDepthHistogram::from_values(&values, buckets)
 }

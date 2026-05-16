@@ -57,6 +57,22 @@ use crate::Result;
 /// Intentionally minimal at v0.0.1: row count + distinct count + null
 /// count + a small set of operator-level features. Will grow as the
 /// feedback-collection surface widens.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::residual::CorrectionFeatures;
+///
+/// let features = CorrectionFeatures {
+///     baseline_estimate: 1000,
+///     left_input_rows: Some(500),
+///     right_input_rows: Some(2000),
+///     predicate_count: 2,
+///     join_depth: 1,
+///     ..Default::default()
+/// };
+/// assert_eq!(features.to_vec().len(), CorrectionFeatures::FEATURE_LEN);
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct CorrectionFeatures {
     pub baseline_estimate: u64,
@@ -83,6 +99,24 @@ impl CorrectionFeatures {
     /// 4. `right_distinct`   (0 if `None`)
     /// 5. `predicate_count`
     /// 6. `join_depth`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::residual::CorrectionFeatures;
+    ///
+    /// let f = CorrectionFeatures {
+    ///     baseline_estimate: 100,
+    ///     left_input_rows: Some(10),
+    ///     predicate_count: 3,
+    ///     ..Default::default()
+    /// };
+    /// let v = f.to_vec();
+    /// assert_eq!(v[0], 100.0);
+    /// assert_eq!(v[1], 10.0);
+    /// assert_eq!(v[2], 0.0); // None → 0
+    /// assert_eq!(v[5], 3.0);
+    /// ```
     pub fn to_vec(&self) -> Vec<f64> {
         vec![
             self.baseline_estimate as f64,
@@ -101,6 +135,23 @@ impl CorrectionFeatures {
 
 /// A pluggable corrector. Engines call [`correct`] on every estimate that
 /// passes through samkhya's optimizer hook.
+///
+/// Returning `Ok(None)` lets the engine fall back to the baseline estimate;
+/// returning `Ok(Some(_))` overrides it (subject to the LpBound envelope).
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::residual::{CorrectionFeatures, Corrector, IdentityCorrector};
+///
+/// let corrector = IdentityCorrector;
+/// let features = CorrectionFeatures {
+///     baseline_estimate: 42,
+///     ..Default::default()
+/// };
+/// // The identity corrector passes the baseline through unchanged.
+/// assert_eq!(corrector.correct(&features).unwrap(), Some(42));
+/// ```
 pub trait Corrector: Send + Sync {
     /// Return a corrected estimate, or `None` to fall back to the baseline.
     fn correct(&self, features: &CorrectionFeatures) -> Result<Option<u64>>;
@@ -112,7 +163,18 @@ pub trait Corrector: Send + Sync {
 /// Default zero-cost corrector: passes the baseline through unchanged.
 ///
 /// Used when no feedback history exists yet (cold start) or when the
-/// caller opts out of learned correction entirely.
+/// caller opts out of feedback-driven correction entirely.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::residual::{CorrectionFeatures, Corrector, IdentityCorrector};
+///
+/// let c = IdentityCorrector;
+/// let f = CorrectionFeatures { baseline_estimate: 1234, ..Default::default() };
+/// assert_eq!(c.correct(&f).unwrap(), Some(1234));
+/// assert_eq!(c.name(), "identity");
+/// ```
 pub struct IdentityCorrector;
 
 impl Corrector for IdentityCorrector {
@@ -139,6 +201,18 @@ impl Corrector for IdentityCorrector {
 /// [`tabpfn::TabPfnHttpCorrector`] (gated on `tabpfn_http`) or a future
 /// subprocess adapter. The trait contract is identical, so the swap is
 /// a one-line change at the call site.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::residual::{CorrectionFeatures, Corrector, TabPfnStub};
+///
+/// let stub = TabPfnStub;
+/// // Stub always returns Ok(None) — the engine falls back to its native estimate.
+/// let f = CorrectionFeatures { baseline_estimate: 999, ..Default::default() };
+/// assert_eq!(stub.correct(&f).unwrap(), None);
+/// assert_eq!(stub.name(), "tabpfn-stub");
+/// ```
 pub struct TabPfnStub;
 
 impl Corrector for TabPfnStub {
