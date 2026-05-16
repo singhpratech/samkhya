@@ -5,8 +5,8 @@ use std::hash::Hasher;
 use serde::{Deserialize, Serialize};
 use twox_hash::XxHash64;
 
-use crate::sketches::Sketch;
 use crate::Result;
+use crate::sketches::Sketch;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BloomFilter {
@@ -24,7 +24,7 @@ impl BloomFilter {
             .ceil()
             .max(1.0) as u32;
         Self {
-            bits: vec![0u8; ((num_bits + 7) / 8) as usize],
+            bits: vec![0u8; num_bits.div_ceil(8) as usize],
             num_hashes,
             num_bits,
         }

@@ -58,8 +58,7 @@ async fn samkhya_rule_walks_table_scan() {
         ],
     )
     .expect("record batch");
-    let table = MemTable::try_new(Arc::clone(&schema), vec![vec![batch]])
-        .expect("mem table");
+    let table = MemTable::try_new(Arc::clone(&schema), vec![vec![batch]]).expect("mem table");
     ctx.register_table("t", Arc::new(table))
         .expect("register table");
 

@@ -42,7 +42,11 @@ pub struct BlobMetadata {
     #[serde(rename = "type")]
     pub kind: String,
     pub fields: Vec<i32>,
-    #[serde(rename = "snapshot-id", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "snapshot-id",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub snapshot_id: Option<i64>,
     #[serde(
         rename = "sequence-number",
@@ -199,9 +203,7 @@ impl<R: Read + Seek> PuffinReader<R> {
         let mut footer_head = [0u8; 4];
         inner.read_exact(&mut footer_head)?;
         if &footer_head != MAGIC {
-            return Err(Error::InvalidPuffin(
-                "footer head magic missing".into(),
-            ));
+            return Err(Error::InvalidPuffin("footer head magic missing".into()));
         }
 
         // File head magic
@@ -293,7 +295,10 @@ mod tests {
         assert_eq!(reader.blobs().len(), 2);
         assert_eq!(reader.read_blob(0).unwrap(), vec![1, 2, 3, 4, 5]);
         assert_eq!(reader.read_blob(1).unwrap(), vec![10, 20, 30]);
-        assert_eq!(reader.find_blob("samkhya.bloom-v1").map(|(i, _)| i), Some(1));
+        assert_eq!(
+            reader.find_blob("samkhya.bloom-v1").map(|(i, _)| i),
+            Some(1)
+        );
         assert_eq!(reader.find_blob("absent.kind").map(|(i, _)| i), None);
     }
 

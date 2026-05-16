@@ -9,9 +9,9 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
+use samkhya_core::Error as CoreError;
 use samkhya_core::sketches::{BloomFilter as CoreBloom, HllSketch as CoreHll, Sketch};
 use samkhya_core::stats::ColumnStats as CoreColumnStats;
-use samkhya_core::Error as CoreError;
 
 create_exception!(samkhya, SamkhyaError, PyException);
 

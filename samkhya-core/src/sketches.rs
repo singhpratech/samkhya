@@ -3,8 +3,8 @@
 //! All sketches expose a uniform `to_bytes` / `from_bytes` codec so they
 //! round-trip through Iceberg Puffin sidecars without engine-specific glue.
 
-pub mod hll;
 pub mod bloom;
+pub mod hll;
 
 pub use bloom::BloomFilter;
 pub use hll::HllSketch;

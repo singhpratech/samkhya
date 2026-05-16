@@ -65,11 +65,7 @@ impl HllSketch {
             6 => 0.709,
             _ => 0.7213 / (1.0 + 1.079 / m),
         };
-        let sum: f64 = self
-            .registers
-            .iter()
-            .map(|&r| 2f64.powi(-(r as i32)))
-            .sum();
+        let sum: f64 = self.registers.iter().map(|&r| 2f64.powi(-(r as i32))).sum();
         let raw = alpha * m * m / sum;
 
         if raw <= 2.5 * m {

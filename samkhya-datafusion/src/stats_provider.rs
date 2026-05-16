@@ -48,9 +48,7 @@ fn bound_to_precision_scalar(b: Option<&Bound>) -> Precision<ScalarValue> {
         Some(Bound::Int(i)) => Precision::Inexact(ScalarValue::Int64(Some(*i))),
         Some(Bound::Float(f)) => Precision::Inexact(ScalarValue::Float64(Some(*f))),
         Some(Bound::Str(s)) => Precision::Inexact(ScalarValue::Utf8(Some(s.clone()))),
-        Some(Bound::Bytes(bytes)) => {
-            Precision::Inexact(ScalarValue::Binary(Some(bytes.clone())))
-        }
+        Some(Bound::Bytes(bytes)) => Precision::Inexact(ScalarValue::Binary(Some(bytes.clone()))),
         None => Precision::Absent,
     }
 }
