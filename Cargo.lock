@@ -2762,6 +2762,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "samkhya-polars"
+version = "0.0.1"
+dependencies = [
+ "samkhya-core",
+]
+
+[[package]]
 name = "samkhya-py"
 version = "0.0.1"
 dependencies = [

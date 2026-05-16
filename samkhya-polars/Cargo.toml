@@ -1,0 +1,15 @@
+[package]
+name = "samkhya-polars"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Polars adapter for samkhya — portable cardinality correction hooks"
+keywords = ["polars", "cardinality", "query-optimizer"]
+categories = ["database"]
+
+[dependencies]
+samkhya-core.workspace = true

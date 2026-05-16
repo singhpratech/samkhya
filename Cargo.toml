@@ -5,6 +5,7 @@ members = [
     "samkhya-datafusion",
     "samkhya-duckdb",
     "samkhya-py",
+    "samkhya-polars",
     "samkhya-bench",
 ]
 
