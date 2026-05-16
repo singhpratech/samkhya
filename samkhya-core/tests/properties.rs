@@ -8,7 +8,7 @@ use std::io::Cursor;
 use proptest::collection::{hash_set, vec as pvec};
 use proptest::prelude::*;
 
-use samkhya_core::lpbound::{ProductBound, UpperBound, clamp_estimate, saturating_clamp};
+use samkhya_core::lpbound::{ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp};
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
 use samkhya_core::sketches::{BloomFilter, HllSketch, Sketch};
 
@@ -210,5 +210,33 @@ proptest! {
         let clamped = clamp_estimate(estimate, ceiling).unwrap();
         prop_assert_eq!(sat, clamped);
         prop_assert!(clamped <= ceiling);
+    }
+
+    /// ChainBound with any positive distinct counts is at most the product
+    /// of relation sizes (the trivial upper bound).
+    #[test]
+    fn chainbound_never_exceeds_product(
+        relations in pvec(1u64..=10_000, 2..=4),
+        distinct_counts in pvec(1u64..=10_000, 2..=4),
+    ) {
+        // Pair each adjacent relation as an equality predicate.
+        let preds: Vec<(usize, usize)> = (0..relations.len() - 1).map(|i| (i, i + 1)).collect();
+        let cb = ChainBound::new(distinct_counts.clone());
+        let cb_bound = cb.ceiling(&relations, &preds);
+        let pb_bound = ProductBound.ceiling(&relations, &[]);
+        prop_assert!(cb_bound <= pb_bound,
+            "ChainBound {cb_bound} > ProductBound {pb_bound} for relations={relations:?} distinct={distinct_counts:?}");
+    }
+
+    /// ChainBound with no equality predicates falls back to ProductBound exactly.
+    #[test]
+    fn chainbound_no_predicates_equals_product(
+        relations in pvec(1u64..=10_000, 1..=4),
+        distinct_counts in pvec(1u64..=10_000, 0..=4),
+    ) {
+        let cb = ChainBound::new(distinct_counts);
+        let cb_bound = cb.ceiling(&relations, &[]);
+        let pb_bound = ProductBound.ceiling(&relations, &[]);
+        prop_assert_eq!(cb_bound, pb_bound);
     }
 }
