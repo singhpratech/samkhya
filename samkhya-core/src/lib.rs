@@ -4,6 +4,7 @@ pub mod error;
 pub mod feedback;
 pub mod lpbound;
 pub mod puffin;
+pub mod residual;
 pub mod sketches;
 pub mod stats;
 

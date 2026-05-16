@@ -18,7 +18,27 @@ Not a learned cardinality estimator. The ML layer is opt-in. Framing intentional
 
 ## Status
 
-Pre-alpha. Targeting:
+**v0.0.1 (2026-05-16)** — initial scaffolding release. Full architectural skeleton in place, all 6 samkhya-core modules wired with minimal correct implementations, 31 tests passing workspace-wide, CI green. See [CHANGELOG.md](CHANGELOG.md) for the full notes.
+
+What works:
+- HLL + Bloom sketches with portable serde codec
+- Iceberg Puffin reader/writer (round-trips sketches through sidecars)
+- SQLite-backed feedback recorder
+- LpBound envelope (`ProductBound` + coarse `AgmBound` + clamp helpers)
+- `Corrector` trait with identity passthrough
+- DataFusion 46 `OptimizerRule` (observe-only, cold-start-safe)
+- PyO3 bindings (HllSketch / BloomFilter / ColumnStats)
+- clap CLI scaffold for JOB-Slow / TPC-H / STATS-CEB benchmarks
+- GitHub Actions CI + rustfmt + clippy `-D warnings`
+
+What's pending (see `samkhya.md` §4 90-day MVP plan):
+- Full LpBound LP solver (currently a coarse AGM approximation)
+- Real DataFusion stats injection (currently placeholder)
+- Residual GBT / TabPFN backends
+- JOB-Slow baseline-vs-corrected runner + week-13 GO/NO-GO gate
+- DuckDB cxx extension
+
+Tracking toward:
 - CIDR 2027 submission (deadline 2026-08-04)
 - Week-13 GO/NO-GO gate against JOB-Slow worst queries — need ≥3× p95 latency win
 
