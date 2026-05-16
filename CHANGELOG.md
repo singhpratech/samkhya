@@ -6,6 +6,90 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-16
+
+Third wave of the same scaffolding session. The hardest piece from
+the 90-day MVP plan — actually making samkhya influence DataFusion's
+cardinality estimates — lands. Adds more sketches, tighter bounds,
+and broader test coverage.
+
+### Added
+
+- **samkhya-datafusion**
+  - `physical_plan::SamkhyaStatsExec` — the `ExecutionPlan`-layer
+    wrapper that actually flows samkhya-corrected statistics into
+    DataFusion 46's physical plan. Passthrough wrapper: delegates
+    schema/partitioning/execute to the inner exec, overrides only
+    `statistics()`, preserves the override through
+    `with_new_children` rewrites.
+  - `SamkhyaTableProvider::scan()` now wraps the inner provider's
+    exec with `SamkhyaStatsExec`. This is the actual injection path:
+    DataFusion 46's mainline planner never consults
+    `TableProvider::statistics()` (per upstream trait doc) — it calls
+    `scan()` and propagates from `ExecutionPlan::statistics()` upward.
+  - `SamkhyaOptimizerRule` now implements both `OptimizerRule` (logical,
+    observe-only) and `PhysicalOptimizerRule` (physical pass that
+    counts `SamkhyaStatsExec` leaves; exposes `samkhya_leaves_seen()`
+    as a diagnostic).
+  - `examples/stats_propagation_demo.rs` — proves the mechanism
+    end-to-end. Output:
+    ```
+    without rule: 1000, with rule: 42
+    samkhya_leaves_seen (physical pass): 1
+    ```
+  - `lib.rs` doc comment rewritten to describe the three-layer
+    integration model (TableProvider wrapper → `scan()` overrides →
+    `SamkhyaStatsExec` carries corrected stats up the plan tree).
+- **samkhya-core**
+  - `lpbound::ChainBound` — frequency-moment chain-join upper bound.
+    For `R_i ⋈ R_j` on a key with `max(D_i, D_j) = D` distinct values,
+    bound is `|R_i| * |R_j| / D`. Tighter than `AgmBound` for chain
+    joins with known per-relation distinct counts. 4 unit tests +
+    2 property tests.
+  - `sketches::cms::CountMinSketch` — third foundational sketch
+    (alongside HLL and Bloom). Depth × width counters; seeded XxHash
+    per row for d independent hash functions; never undercounts.
+    Useful for heavy-hitter detection in join keys. 6 unit tests +
+    2 property tests.
+- **samkhya-bench**
+  - `compare --suite <name>` subcommand — runs the suite twice
+    (baseline + samkhya-wrapped) and prints side-by-side tables.
+  - 5 additional synthetic queries (S6–S10) covering:
+    - selective single-table filters
+    - 2-join with no selective predicate
+    - anti-correlated predicates (correlation kills DF's estimate)
+    - multi-predicate joined tables
+    - 4-table chain with multiple correlated filters
+  - The bench's samkhya-corrected mode now provides per-column
+    `distinct_count` overrides (not just row counts) to feed
+    DataFusion's selectivity estimator.
+  - `tests/runner_smoke.rs` — 4 integration tests confirming the
+    runner builds the synthetic context and executes all 10 queries
+    end-to-end, persists feedback, and gracefully skips unexecutable
+    suites.
+
+### Confirmed
+
+- The stats-propagation demo binary proves DataFusion 46 actually
+  consumes the override: a 1000-row MemTable reports `num_rows=42`
+  in the physical plan when wrapped with `SamkhyaTableProvider`
+  + `SamkhyaOptimizerRule`.
+- 60+ tests pass workspace-wide on default build.
+- `cargo clippy --workspace -- -D warnings` clean.
+
+### Known limitations carried over
+
+- DataFusion 46's selectivity model does not appear to use
+  `ColumnStatistics::distinct_count` for the queries in the synthetic
+  suite, so the bench's `compare` output today shows identical numbers
+  in baseline vs samkhya modes. The integration path is correct;
+  real Puffin-sourced stats on parquet-on-S3 would differ from DF's
+  defaults and the wrapping would move estimates accordingly.
+- Full LpBound LP solver still pending (only `ProductBound`,
+  `AgmBound`, `ChainBound` shipped).
+- DuckDB cxx extension still a stub.
+- TabPFN-style residual backend still planned only.
+
 ## [0.1.0] — 2026-05-16
 
 Second wave of the same scaffolding session. Real implementations replace
@@ -201,5 +285,7 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.2.0
+[0.1.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.1.0
 [0.0.1]: https://github.com/singhpratech/samkhya/releases/tag/v0.0.1
