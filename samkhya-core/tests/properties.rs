@@ -12,7 +12,7 @@ use samkhya_core::lpbound::{
     ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp,
 };
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
-use samkhya_core::sketches::{BloomFilter, HllSketch, Sketch};
+use samkhya_core::sketches::{BloomFilter, CountMinSketch, HllSketch, Sketch};
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -126,6 +126,44 @@ proptest! {
         for it in &items {
             prop_assert_eq!(bf.contains(it), bf2.contains(it));
             prop_assert!(bf2.contains(it));
+        }
+    }
+}
+
+// ---- CMS properties --------------------------------------------------------
+
+proptest! {
+    /// CMS never undercounts: for any item inserted with frequency `f`, the
+    /// estimate must be ≥ f (Count-Min upper-bounds the true count).
+    #[test]
+    fn cms_never_undercounts(
+        items in pvec((pvec(any::<u8>(), 1..=16usize), 1u32..=100), 1..=100usize),
+    ) {
+        let mut cms = CountMinSketch::new(4, 256).unwrap();
+        let mut truth = std::collections::HashMap::<Vec<u8>, u32>::new();
+        for (k, c) in &items {
+            cms.add(k, *c);
+            *truth.entry(k.clone()).or_default() = truth.get(k).copied().unwrap_or(0).saturating_add(*c);
+        }
+        for (k, t) in &truth {
+            prop_assert!(cms.estimate(k) >= *t,
+                "CMS undercount: estimate={} truth={}", cms.estimate(k), t);
+        }
+    }
+
+    /// CMS round-trip preserves the estimate for every key.
+    #[test]
+    fn cms_round_trip_preserves_estimates(
+        items in pvec((pvec(any::<u8>(), 1..=16usize), 1u32..=50), 1..=50usize),
+    ) {
+        let mut cms = CountMinSketch::new(4, 128).unwrap();
+        for (k, c) in &items {
+            cms.add(k, *c);
+        }
+        let bytes = cms.to_bytes().unwrap();
+        let cms2 = CountMinSketch::from_bytes(&bytes).unwrap();
+        for (k, _) in &items {
+            prop_assert_eq!(cms.estimate(k), cms2.estimate(k));
         }
     }
 }

@@ -54,6 +54,7 @@ use datafusion::logical_expr::{Expr, LogicalPlan, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use samkhya_core::stats::ColumnStats;
 
+use crate::physical_plan::SamkhyaStatsExec;
 use crate::stats_provider::to_datafusion_column_statistics;
 
 /// A [`TableProvider`] wrapper that overrides `statistics()` with
