@@ -1,6 +1,7 @@
 //! samkhya-core — portable cardinality correction primitives.
 
 pub mod error;
+pub mod puffin;
 pub mod sketches;
 pub mod stats;
 
