@@ -13,3 +13,8 @@ categories = ["database"]
 
 [dependencies]
 samkhya-core.workspace = true
+tokio.workspace = true
+datafusion = "46"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
