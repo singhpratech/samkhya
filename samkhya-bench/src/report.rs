@@ -68,13 +68,21 @@ pub fn summarize(path: &Path) -> Result<()> {
 /// Run a suite twice (baseline + samkhya) and print a side-by-side
 /// comparison of each query's estimate, actual rows, and q-error.
 ///
+/// When `puffin_dir` is supplied, the samkhya pass loads its
+/// `ColumnStats` overrides from Puffin sidecars in that directory.
+/// The baseline pass ignores it (the baseline path never wraps tables).
+///
 /// Both runs use in-memory feedback stores; nothing is persisted.
-pub fn compare(suite: Suite) -> Result<()> {
+pub fn compare(suite: Suite, puffin_dir: Option<&Path>) -> Result<()> {
     println!("=== baseline (raw MemTable) ===");
     Runner::new(suite, true).run()?;
     println!();
     println!("=== samkhya-wrapped (SamkhyaTableProvider) ===");
-    Runner::new(suite, false).run()?;
+    let mut samkhya_runner = Runner::new(suite, false);
+    if let Some(dir) = puffin_dir {
+        samkhya_runner = samkhya_runner.with_puffin_dir(dir.to_path_buf());
+    }
+    samkhya_runner.run()?;
     Ok(())
 }
 

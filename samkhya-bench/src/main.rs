@@ -35,6 +35,12 @@ enum Command {
         /// Persist observations to a SQLite file at this path (default: in-memory).
         #[arg(long)]
         feedback: Option<PathBuf>,
+
+        /// Source samkhya-corrected `ColumnStats` overrides from Puffin
+        /// sidecars in this directory (one `.puffin` per table, as
+        /// produced by `build-puffin`). Ignored in baseline mode.
+        #[arg(long)]
+        puffin_dir: Option<PathBuf>,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -42,6 +48,11 @@ enum Command {
         /// Which benchmark suite to run.
         #[arg(long, value_enum)]
         suite: SuiteArg,
+
+        /// Source samkhya-corrected `ColumnStats` overrides from Puffin
+        /// sidecars in this directory. The baseline pass ignores it.
+        #[arg(long)]
+        puffin_dir: Option<PathBuf>,
     },
 
     /// Build Puffin sidecars for the Synthetic schema and write them to
@@ -59,6 +70,10 @@ enum Command {
         suite: SuiteArg,
         #[arg(long)]
         feedback: Option<PathBuf>,
+        /// Source samkhya-corrected `ColumnStats` overrides from Puffin
+        /// sidecars in this directory.
+        #[arg(long)]
+        puffin_dir: Option<PathBuf>,
     },
 
     /// Render a report from a feedback store.
@@ -106,22 +121,34 @@ fn main() -> Result<()> {
             suite,
             baseline,
             feedback,
+            puffin_dir,
         } => {
             let mut runner = Runner::new(suite.into(), baseline);
             if let Some(path) = feedback {
                 runner = runner.with_feedback_path(path);
             }
+            if let Some(dir) = puffin_dir {
+                runner = runner.with_puffin_dir(dir);
+            }
             runner.run()
         }
-        Command::Compare { suite } => samkhya_bench::report::compare(suite.into()),
+        Command::Compare { suite, puffin_dir } => {
+            samkhya_bench::report::compare(suite.into(), puffin_dir.as_deref())
+        }
         Command::BuildPuffin { output } => samkhya_bench::puffin_io::build_puffin_sidecars(&output),
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
         Command::Train { feedback, template } => {
             samkhya_bench::report::train_stub(&feedback, &template)
         }
-        Command::Calibrate { suite, feedback } => {
-            samkhya_bench::calibrate::calibrate(suite.into(), feedback.as_deref())
-        }
+        Command::Calibrate {
+            suite,
+            feedback,
+            puffin_dir,
+        } => samkhya_bench::calibrate::calibrate(
+            suite.into(),
+            feedback.as_deref(),
+            puffin_dir.as_deref(),
+        ),
     }
 }
 

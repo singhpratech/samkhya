@@ -13,9 +13,24 @@
 //!
 //! The corrector is purely residual: it observes the raw DataFusion
 //! row-count estimate and emits a corrected estimate clamped by the
-//! LpBound ceiling baked into `GbtOptions`. Other `CorrectionFeatures`
-//! slots stay at their `None` / 0 defaults — that's an honest reflection
-//! of what the bench currently observes from the plan.
+//! LpBound ceiling baked into `GbtOptions`. At correction time the
+//! bench now walks the physical plan via `runner::extract_features` and
+//! populates `join_depth`, `predicate_count`, and outermost-join input
+//! row / distinct counts on `CorrectionFeatures`. This gives the GBT
+//! plan-shape signal even when DataFusion's baseline row estimate
+//! collapses to zero (multi-join queries on `MemTable` sources).
+//!
+//! Caveat: the on-disk `FeedbackStore` only persists
+//! `(template_hash, plan_fingerprint, est_rows, actual_rows, latency_ms)`
+//! — see `Observation` in samkhya-core. Training therefore only sees
+//! `baseline_estimate` (mapped from `est_rows`); the other feature
+//! slots are zero-filled. Prediction, however, gets all features
+//! populated. The training/prediction feature-space mismatch is a known
+//! limitation: until `Observation` grows plan-shape columns the GBT
+//! learns a one-variable function and applies it to a seven-variable
+//! feature vector — leaf splits on the unseen features can only fire
+//! by accident. Honesty over hype: this lets the corrector at least
+//! emit a non-zero log-ratio for `baseline_estimate == 0` rows.
 
 use std::path::Path;
 
@@ -31,12 +46,25 @@ use crate::runner::Runner;
 /// If `feedback_path` is `Some`, observations are persisted to a SQLite
 /// file at that path; otherwise an in-memory store is used and discarded
 /// at the end of the run.
-pub fn calibrate(suite: Suite, feedback_path: Option<&Path>) -> Result<()> {
+///
+/// When `puffin_dir` is supplied, every Runner constructed in the loop
+/// (phase 1 collect, phase 3 corrected re-run, and the in-memory
+/// recollect helper) sources its `ColumnStats` overrides from Puffin
+/// sidecars in that directory instead of the hardcoded distinct-count
+/// table.
+pub fn calibrate(
+    suite: Suite,
+    feedback_path: Option<&Path>,
+    puffin_dir: Option<&Path>,
+) -> Result<()> {
     println!("=== phase 1: collect observations ===");
-    let runner = match feedback_path {
-        Some(p) => Runner::new(suite, false).with_feedback_path(p),
-        None => Runner::new(suite, false),
-    };
+    let mut runner = Runner::new(suite, false);
+    if let Some(p) = feedback_path {
+        runner = runner.with_feedback_path(p);
+    }
+    if let Some(dir) = puffin_dir {
+        runner = runner.with_puffin_dir(dir.to_path_buf());
+    }
     runner.run()?;
 
     if !suite.is_executable() {
@@ -55,7 +83,7 @@ pub fn calibrate(suite: Suite, feedback_path: Option<&Path>) -> Result<()> {
             // already been dropped. Re-run silently against a shared
             // store so the corrector has data to train on.
             let store = FeedbackStore::open_in_memory()?;
-            recollect_into(&store, suite)?;
+            recollect_into(&store, suite, puffin_dir)?;
             store
         }
     };
@@ -127,14 +155,17 @@ pub fn calibrate(suite: Suite, feedback_path: Option<&Path>) -> Result<()> {
 /// repopulate a freshly-opened feedback store. We run the suite once
 /// per phase already, so the cost is a single extra pass and keeps the
 /// CLI surface honest (one call → one full calibration loop).
-fn recollect_into(store: &FeedbackStore, suite: Suite) -> Result<()> {
+fn recollect_into(store: &FeedbackStore, suite: Suite, puffin_dir: Option<&Path>) -> Result<()> {
     use samkhya_core::feedback::Observation;
 
     // We can't share the in-memory store directly with Runner::run
     // because Runner owns its store. Instead, run the corrector-less
     // path via run_with_corrector + IdentityCorrector to capture
     // outcomes, then record them here.
-    let runner = Runner::new(suite, false);
+    let mut runner = Runner::new(suite, false);
+    if let Some(dir) = puffin_dir {
+        runner = runner.with_puffin_dir(dir.to_path_buf());
+    }
     let identity = samkhya_core::residual::IdentityCorrector;
     let outcomes = runner.run_with_corrector(&identity)?;
     let template = format!("samkhya-bench-{}", suite.label());
