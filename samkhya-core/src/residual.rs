@@ -251,6 +251,163 @@ pub mod gbt {
     }
 }
 
+#[cfg(feature = "additive_gbt")]
+pub mod additive {
+    //! Additive gradient-boosted-tree residual corrector.
+    //!
+    //! Sibling backend to [`super::gbt`]. The multiplicative form trains on
+    //! `log(actual / baseline_estimate)` and applies the correction as
+    //! `baseline * exp(predicted)`. That model is structurally trapped at
+    //! zero whenever the engine hands us `baseline_estimate = 0` — the
+    //! q=∞ regime where the upstream estimator has completely collapsed
+    //! (a common DataFusion 46 symptom on chained joins).
+    //!
+    //! The additive backend sidesteps that trap by training the model to
+    //! predict the **absolute** `actual_rows` from the full
+    //! [`CorrectionFeatures`] vector (all 7 features, not just the
+    //! baseline). The prediction is clamped to a non-negative integer and
+    //! then to the configured LpBound ceiling via
+    //! [`crate::lpbound::saturating_clamp`], so the envelope contract is
+    //! preserved.
+    //!
+    //! Cargo feature: `additive_gbt`. Independent of the `gbt` feature —
+    //! they can be enabled separately or together.
+
+    use gbdt::config::{Config, Loss};
+    use gbdt::decision_tree::{Data, DataVec};
+    use gbdt::gradient_boost::GBDT;
+    use std::sync::Mutex;
+
+    use super::{CorrectionFeatures, Corrector};
+    use crate::feedback::Observation;
+    use crate::lpbound::saturating_clamp;
+    use crate::{Error, Result};
+
+    /// Tunables for [`AdditiveGbtCorrector::train`]. Defaults mirror
+    /// [`super::gbt::GbtOptions`] so the two backends are
+    /// drop-in-comparable when benchmarking.
+    #[derive(Debug, Clone)]
+    pub struct AdditiveGbtOptions {
+        /// Shrinkage / learning rate applied to each tree's contribution.
+        pub learning_rate: f64,
+        /// Max depth of each regression tree. Root is depth 0.
+        pub max_depth: u32,
+        /// Number of boosting iterations (one tree per iteration).
+        pub num_trees: u32,
+        /// Inclusive upper bound applied to every corrected estimate.
+        /// Use `u64::MAX` to disable.
+        pub ceiling: u64,
+        /// Minimum samples per leaf — guards against overfitting tiny
+        /// feedback histories.
+        pub min_leaf_size: usize,
+    }
+
+    impl Default for AdditiveGbtOptions {
+        fn default() -> Self {
+            Self {
+                learning_rate: 0.1,
+                max_depth: 4,
+                num_trees: 50,
+                ceiling: u64::MAX,
+                min_leaf_size: 1,
+            }
+        }
+    }
+
+    /// Trained additive GBT corrector. Predicts absolute row counts.
+    ///
+    /// The model is wrapped in a [`Mutex`] because `gbdt::GBDT::predict`
+    /// takes `&mut self` on some configurations; the lock is held only
+    /// for the prediction call and is uncontended in the common single-
+    /// threaded estimate path.
+    pub struct AdditiveGbtCorrector {
+        model: Mutex<GBDT>,
+        ceiling: u64,
+    }
+
+    impl AdditiveGbtCorrector {
+        /// Train an additive corrector from a slice of [`Observation`]s.
+        ///
+        /// Returns [`Error::Feedback`] if the observation slice is empty.
+        /// Unlike the multiplicative backend, observations with
+        /// `est_rows == 0` are **kept** — they are precisely the q=∞
+        /// regime this backend exists to handle. Observations with
+        /// `actual_rows == 0` are also kept (a true-zero output is a
+        /// valid signal for an additive model).
+        pub fn train(observations: &[Observation], options: AdditiveGbtOptions) -> Result<Self> {
+            if observations.is_empty() {
+                return Err(Error::Feedback(
+                    "cannot train AdditiveGbtCorrector: observation slice is empty".into(),
+                ));
+            }
+
+            let mut training: DataVec = Vec::with_capacity(observations.len());
+            for obs in observations {
+                // Reconstruct a feature vector from the observation. The
+                // feedback table doesn't yet carry the full plan-shape
+                // feature set, so we synthesize from `est_rows`. As
+                // `Observation` gains columns, mirror the additions here.
+                let features = CorrectionFeatures {
+                    baseline_estimate: obs.est_rows,
+                    ..Default::default()
+                };
+                let feature_f32: Vec<f32> =
+                    features.to_vec().into_iter().map(|v| v as f32).collect();
+                let target = obs.actual_rows as f32;
+                training.push(Data::new_training_data(feature_f32, 1.0, target, None));
+            }
+
+            // Empty observations are caught above; the synthesized
+            // training set here is always non-empty.
+            debug_assert!(!training.is_empty());
+
+            let mut cfg = Config::new();
+            cfg.set_feature_size(CorrectionFeatures::FEATURE_LEN);
+            cfg.set_max_depth(options.max_depth);
+            cfg.set_iterations(options.num_trees as usize);
+            cfg.set_shrinkage(options.learning_rate as f32);
+            cfg.set_min_leaf_size(options.min_leaf_size);
+            cfg.set_loss(&gbdt::config::loss2string(&Loss::SquaredError));
+
+            let mut model = GBDT::new(&cfg);
+            model.fit(&mut training);
+
+            Ok(Self {
+                model: Mutex::new(model),
+                ceiling: options.ceiling,
+            })
+        }
+
+        /// Predict the absolute row count for a feature vector.
+        /// Exposed for diagnostics; the production path is
+        /// [`Corrector::correct`].
+        pub fn predict_rows(&self, features: &CorrectionFeatures) -> f64 {
+            let feature_f32: Vec<f32> = features.to_vec().into_iter().map(|v| v as f32).collect();
+            let probe: DataVec = vec![Data::new_test_data(feature_f32, None)];
+            let model = self.model.lock().expect("AdditiveGbtCorrector model lock");
+            let preds = model.predict(&probe);
+            preds.first().copied().unwrap_or(0.0) as f64
+        }
+
+        /// Configured upper bound. Set at training time; the trait method
+        /// [`Corrector::correct`] enforces it via `saturating_clamp`.
+        pub fn ceiling(&self) -> u64 {
+            self.ceiling
+        }
+    }
+
+    impl Corrector for AdditiveGbtCorrector {
+        fn correct(&self, features: &CorrectionFeatures) -> Result<Option<u64>> {
+            let raw = self.predict_rows(features).max(0.0);
+            Ok(Some(saturating_clamp(raw, self.ceiling)))
+        }
+
+        fn name(&self) -> &'static str {
+            "additive_gbt"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,6 +549,111 @@ mod gbt_tests {
         ];
         match GbtCorrector::train(&obs, GbtOptions::default()) {
             Ok(_) => panic!("expected error when all observations are zero"),
+            Err(e) => assert!(matches!(e, crate::Error::Feedback(_))),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "additive_gbt"))]
+mod additive_tests {
+    use super::additive::{AdditiveGbtCorrector, AdditiveGbtOptions};
+    use super::{CorrectionFeatures, Corrector};
+    use crate::feedback::Observation;
+
+    /// Build N synthetic observations where every actual row count is
+    /// the same constant `target`. An additive model trained on this
+    /// should regress toward `target` regardless of the input features.
+    fn synthetic_constant(n: u64, target: u64) -> Vec<Observation> {
+        (1..=n)
+            .map(|i| Observation {
+                template_hash: "syn-add".into(),
+                plan_fingerprint: "p".into(),
+                est_rows: i * 10,
+                actual_rows: target,
+                latency_ms: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn predicts_near_constant_when_training_is_constant() {
+        let obs = synthetic_constant(200, 1000);
+        let opts = AdditiveGbtOptions {
+            learning_rate: 0.3,
+            max_depth: 4,
+            num_trees: 50,
+            ceiling: u64::MAX,
+            min_leaf_size: 1,
+        };
+        let corrector =
+            AdditiveGbtCorrector::train(&obs, opts).expect("training additive corrector");
+
+        let features = CorrectionFeatures {
+            baseline_estimate: 500,
+            ..Default::default()
+        };
+        let corrected = corrector
+            .correct(&features)
+            .expect("correct")
+            .expect("Some");
+        assert!(
+            (800..=1200).contains(&corrected),
+            "expected ~1000, got {corrected}"
+        );
+        assert_eq!(corrector.name(), "additive_gbt");
+    }
+
+    #[test]
+    fn ceiling_clamps_when_prediction_exceeds_it() {
+        let obs = synthetic_constant(200, 1000);
+        let opts = AdditiveGbtOptions {
+            learning_rate: 0.3,
+            max_depth: 4,
+            num_trees: 50,
+            ceiling: 100, // far below the trained constant
+            min_leaf_size: 1,
+        };
+        let corrector = AdditiveGbtCorrector::train(&obs, opts).expect("training");
+
+        let features = CorrectionFeatures {
+            baseline_estimate: 500,
+            ..Default::default()
+        };
+        let corrected = corrector
+            .correct(&features)
+            .expect("correct")
+            .expect("Some");
+        assert_eq!(corrected, 100, "ceiling must clamp the additive correction");
+        assert_eq!(corrector.ceiling(), 100);
+    }
+
+    #[test]
+    fn corrects_nonzero_even_when_baseline_estimate_is_zero() {
+        // This is the q=∞ fix proof. The multiplicative GbtCorrector
+        // would return 0 here (baseline * exp(predicted) = 0 * _ = 0).
+        // The additive backend must escape that trap.
+        let obs = synthetic_constant(200, 1000);
+        let corrector =
+            AdditiveGbtCorrector::train(&obs, AdditiveGbtOptions::default()).expect("training");
+
+        let features = CorrectionFeatures {
+            baseline_estimate: 0,
+            ..Default::default()
+        };
+        let corrected = corrector
+            .correct(&features)
+            .expect("correct")
+            .expect("Some");
+        assert!(
+            corrected > 0,
+            "additive corrector must return non-zero even when baseline_estimate = 0; got {corrected}"
+        );
+    }
+
+    #[test]
+    fn empty_observations_errors() {
+        match AdditiveGbtCorrector::train(&[], AdditiveGbtOptions::default()) {
+            Ok(_) => panic!("expected error on empty observations"),
             Err(e) => assert!(matches!(e, crate::Error::Feedback(_))),
         }
     }

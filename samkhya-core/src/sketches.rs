@@ -5,11 +5,13 @@
 
 pub mod bloom;
 pub mod cms;
+pub mod correlated;
 pub mod histogram;
 pub mod hll;
 
 pub use bloom::BloomFilter;
 pub use cms::CountMinSketch;
+pub use correlated::CorrelatedHistogram2D;
 pub use histogram::EquiDepthHistogram;
 pub use hll::HllSketch;
 

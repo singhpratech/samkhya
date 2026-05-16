@@ -87,7 +87,10 @@ fn run(path: &str) -> Result<()> {
                 }
             }
             other => {
-                println!("  decoded:         (unknown kind '{other}'; raw {} bytes)", payload.len());
+                println!(
+                    "  decoded:         (unknown kind '{other}'; raw {} bytes)",
+                    payload.len()
+                );
             }
         }
     }

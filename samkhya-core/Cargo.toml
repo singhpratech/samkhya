@@ -28,6 +28,11 @@ zstd = ["dep:zstd"]
 # Gradient-boosted-tree residual corrector backend (see src/residual.rs::gbt).
 # Pulls in the `gbdt` crate; off by default to keep the core build slim.
 gbt = ["dep:gbdt"]
+# Additive gradient-boosted-tree residual corrector backend
+# (see src/residual.rs::additive). Predicts the absolute row count from
+# plan-shape features instead of a multiplicative log-ratio, which keeps
+# the corrector useful even when the baseline estimate collapses to zero.
+additive_gbt = ["dep:gbdt"]
 
 [dev-dependencies]
 proptest.workspace = true
