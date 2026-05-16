@@ -4,9 +4,11 @@
 //! round-trip through Iceberg Puffin sidecars without engine-specific glue.
 
 pub mod bloom;
+pub mod cms;
 pub mod hll;
 
 pub use bloom::BloomFilter;
+pub use cms::CountMinSketch;
 pub use hll::HllSketch;
 
 use crate::Result;
