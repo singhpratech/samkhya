@@ -23,6 +23,24 @@ categories = ["database"]
 
 [workspace.dependencies]
 samkhya-core = { path = "samkhya-core", version = "0.0.1" }
+# Foundational
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1.3"
+thiserror = "1"
+byteorder = "1.5"
+# Hashing for sketches
+twox-hash = "1.6"
+# Persistence (feedback recorder)
+rusqlite = { version = "0.31", features = ["bundled"] }
+# Logging / errors
+log = "0.4"
+# CLI (bench)
+clap = { version = "4", features = ["derive"] }
+# Async (for DataFusion / future use)
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Test-only
+proptest = "1"
 
 [profile.release]
 lto = "thin"
