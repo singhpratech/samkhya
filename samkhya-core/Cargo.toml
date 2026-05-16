@@ -19,6 +19,7 @@ thiserror.workspace = true
 byteorder.workspace = true
 twox-hash.workspace = true
 log.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
