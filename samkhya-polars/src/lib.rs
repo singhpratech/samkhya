@@ -2,26 +2,32 @@
 //!
 //! # Status
 //!
-//! Scaffolding. Polars has no public optimizer-rule extension API yet
-//! (tracked upstream in [pola-rs/polars#23345][issue]), so the
-//! integration model differs from `samkhya-datafusion`'s
-//! `TableProvider` wrapper.
+//! Polars has no public optimizer-rule extension API yet (tracked
+//! upstream in [pola-rs/polars#23345][issue]), so the integration model
+//! differs from `samkhya-datafusion`'s `TableProvider` wrapper. Today
+//! this crate ships two pieces, both gated behind the `engine` feature
+//! flag (off by default to keep workspace builds lean):
+//!
+//! - [`sketcher`] — pure-Rust helpers that consume a `polars::Series`
+//!   and produce HLL / Bloom / Count-Min / EquiDepthHistogram sketches
+//!   from `samkhya-core`, ready to serialize via the `Sketch` trait into
+//!   an Iceberg Puffin sidecar.
+//! - [`feedback_wrapper`] — a thin wrapper around `LazyFrame::collect()`
+//!   that records `(template_hash, est_rows, actual_rows, latency_ms)`
+//!   observations into a `samkhya_core::feedback::FeedbackStore`. The
+//!   estimated row count is set to `0` because Polars does not expose
+//!   plan-level row estimates through its public API at this version.
 //!
 //! [issue]: https://github.com/pola-rs/polars/issues/23345
 //!
-//! # Planned integration patterns
-//!
-//! - **Stats sidecar consumer**: load Polars `DataFrame` plus a Puffin
-//!   sidecar built by samkhya-core; expose helper functions that
-//!   inspect a `LazyFrame` plan and return corrected cardinality hints.
-//! - **Feedback wrapper**: wrap `LazyFrame::collect()` to capture
-//!   estimated vs actual row counts into a `FeedbackStore`.
-//! - **Sketch-from-Series builder**: pure-Rust helpers that build HLL
-//!   / Bloom / Count-Min / EquiDepthHistogram sketches directly from a
-//!   `polars::Series`, then serialize via the `Sketch` trait.
-//!
 //! Once Polars exposes optimizer hooks, this crate will gain a real
-//! injection point comparable to `SamkhyaTableProvider`.
+//! injection point comparable to `SamkhyaTableProvider` in
+//! `samkhya-datafusion`.
+
+#[cfg(feature = "engine")]
+pub mod feedback_wrapper;
+#[cfg(feature = "engine")]
+pub mod sketcher;
 
 use samkhya_core::Result;
 use samkhya_core::stats::ColumnStats;
@@ -34,12 +40,13 @@ pub fn column_stats_for(_table: &str, _col: &str) -> Result<Option<ColumnStats>>
     Ok(None)
 }
 
-/// Build samkhya sketches from a Polars `Series`.
+/// Legacy stub kept for backwards compatibility with crates that
+/// pre-date the `engine` feature flag.
 ///
-/// Stubbed until the Polars dependency lands; the signature is shaped
-/// to match how callers will eventually consume the helper.
+/// Real Series → Sketch helpers live in [`sketcher`] behind the
+/// `engine` feature.
 pub fn build_sketches_from_series_stub() {
-    // Intentionally a no-op until Polars is wired in.
+    // Intentionally a no-op; see `sketcher` for the real builders.
 }
 
 #[cfg(test)]
