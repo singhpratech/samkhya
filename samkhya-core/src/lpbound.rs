@@ -31,6 +31,60 @@ impl UpperBound for ProductBound {
     }
 }
 
+/// Frequency-moment chain-join upper bound.
+///
+/// Assumes each equality predicate `(i, j)` joins on a single key whose
+/// distinct-value count is given by `distinct_counts[i]` and
+/// `distinct_counts[j]`. The bound is:
+///
+/// ```text
+/// |R_i ⋈ R_j| ≤ |R_i| * |R_j| / max(D_i, D_j)
+/// ```
+///
+/// (Uniform-distribution worst case; tight in expectation when join
+/// keys are evenly spread.) Applied sequentially across all equality
+/// predicates: the result of each join feeds the next bound.
+///
+/// Tighter than [`AgmBound`] for tree / chain joins where each relation
+/// has a non-trivial distinct-key count. Falls back to [`ProductBound`]
+/// when no equality predicates are supplied.
+pub struct ChainBound {
+    pub distinct_counts: Vec<u64>,
+}
+
+impl ChainBound {
+    pub fn new(distinct_counts: Vec<u64>) -> Self {
+        Self { distinct_counts }
+    }
+}
+
+impl UpperBound for ChainBound {
+    fn ceiling(&self, relations: &[u64], equality_predicates: &[(usize, usize)]) -> u64 {
+        if relations.is_empty() {
+            return 0;
+        }
+        if equality_predicates.is_empty() {
+            return ProductBound.ceiling(relations, &[]);
+        }
+        // Each predicate divides the running product by the larger of
+        // the two endpoint distinct counts (or 1 if unknown).
+        let mut bound: u128 = relations
+            .iter()
+            .fold(1u128, |acc, &n| acc.saturating_mul(n as u128));
+        for &(i, j) in equality_predicates {
+            let d_i = self.distinct_counts.get(i).copied().unwrap_or(1).max(1) as u128;
+            let d_j = self.distinct_counts.get(j).copied().unwrap_or(1).max(1) as u128;
+            let d = d_i.max(d_j);
+            bound /= d;
+        }
+        if bound > u64::MAX as u128 {
+            u64::MAX
+        } else {
+            bound as u64
+        }
+    }
+}
+
 /// Coarse AGM-style upper bound for equi-joins.
 ///
 /// Returns `min(product, |R_min| * |R_max|)` when at least one equality
@@ -123,6 +177,42 @@ mod tests {
             }
             other => panic!("wrong error variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn chain_bound_tighter_than_product() {
+        // Two relations of 1000 rows each, joining on a key with 100 distinct values.
+        // Product = 1_000_000; ChainBound = 1000 * 1000 / 100 = 10_000.
+        let r = [1_000u64, 1_000];
+        let cb = ChainBound::new(vec![100, 100]);
+        let bound = cb.ceiling(&r, &[(0, 1)]);
+        assert_eq!(bound, 10_000);
+        let product = ProductBound.ceiling(&r, &[]);
+        assert!(bound < product);
+    }
+
+    #[test]
+    fn chain_bound_three_table_chain() {
+        // R1(1000) ⋈ R2(2000) ⋈ R3(500), join keys 100 distinct each side.
+        // Product = 1e9. Chain = 1e9 / 100 / 100 = 100_000.
+        let r = [1_000u64, 2_000, 500];
+        let cb = ChainBound::new(vec![100, 100, 100]);
+        let bound = cb.ceiling(&r, &[(0, 1), (1, 2)]);
+        assert_eq!(bound, 100_000);
+    }
+
+    #[test]
+    fn chain_bound_no_predicates_falls_back() {
+        let cb = ChainBound::new(vec![10, 20, 30]);
+        assert_eq!(cb.ceiling(&[10, 20, 30], &[]), 10 * 20 * 30);
+    }
+
+    #[test]
+    fn chain_bound_missing_distinct_count_defaults_to_one() {
+        // No distinct count entry → defaults to 1, meaning no reduction.
+        let cb = ChainBound::new(vec![]);
+        let bound = cb.ceiling(&[100, 100], &[(0, 1)]);
+        assert_eq!(bound, 10_000); // 100 * 100 / max(1, 1) = 10_000
     }
 
     #[test]
