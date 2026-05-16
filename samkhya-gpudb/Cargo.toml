@@ -1,0 +1,22 @@
+[package]
+name = "samkhya-gpudb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "gpudb adapter for samkhya — GPU batch inference of the residual corrector"
+keywords = ["gpudb", "cardinality", "gpu", "cuda", "metal"]
+categories = ["database"]
+
+[dependencies]
+samkhya-core.workspace = true
+
+[features]
+default = []
+# Real CUDA / Metal kernels land behind these flags; default builds never
+# link a GPU runtime. See `src/lib.rs` for the planned wiring.
+cuda = []
+metal = []
