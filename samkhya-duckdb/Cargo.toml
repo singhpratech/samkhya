@@ -1,0 +1,15 @@
+[package]
+name = "samkhya-duckdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "DuckDB extension bindings for samkhya (Rust to C++ via cxx)"
+keywords = ["duckdb", "cardinality", "sketches"]
+categories = ["database"]
+
+[dependencies]
+samkhya-core.workspace = true

@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "samkhya-core",
+    "samkhya-datafusion",
+    "samkhya-duckdb",
+    "samkhya-py",
+    "samkhya-bench",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Prateek Singh <aiexplore369@gmail.com>"]
+repository = "https://github.com/singhpratech/samkhya"
+homepage = "https://github.com/singhpratech/samkhya"
+readme = "README.md"
+rust-version = "1.85"
+description = "Portable cardinality correction for embedded analytical engines"
+keywords = ["database", "cardinality", "query-optimizer", "datafusion", "duckdb"]
+categories = ["database"]
+
+[workspace.dependencies]
+samkhya-core = { path = "samkhya-core", version = "0.0.1" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
