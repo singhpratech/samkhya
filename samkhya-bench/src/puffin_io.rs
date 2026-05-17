@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::Array;
 use datafusion::datasource::{MemTable, TableProvider};
-use datafusion::prelude::{CsvReadOptions, SessionContext};
+use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionContext};
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
 use samkhya_core::sketches::{BloomFilter, HllSketch, Sketch};
 use samkhya_core::stats::ColumnStats;
@@ -21,6 +21,19 @@ use samkhya_core::{Error, Result};
 
 use crate::imdb::{self, ROW_COUNT_KIND};
 use crate::synthetic;
+
+/// Source format for the IMDb sidecar build path. WAVE-5F added a Parquet
+/// input path so the sidecar scan does not pay the CSV re-parse cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImdbFormat {
+    /// Read from `<imdb_dir>/<table>.csv` (the original WAVE-4D path).
+    Csv,
+    /// Read from `<imdb_dir>/<table>.parquet` (the WAVE-5F path; expects
+    /// [`crate::csv_to_parquet::convert_imdb_csvs_to_parquet`] to have
+    /// produced the files). Sidecars are named `<table>.parquet.puffin`
+    /// so they coexist with the CSV-built `<table>.puffin` files.
+    Parquet,
+}
 
 const HLL_PRECISION: u8 = 12;
 
@@ -209,7 +222,7 @@ const BLOOM_FP_RATE: f64 = 0.01;
 /// Build Puffin sidecars for the 21 IMDb tables and write them next to
 /// the CSVs at `<imdb_dir>/<table>.puffin`. For every column we compute:
 ///
-/// - HLL precision-12 NDV sketch (per [`HLL_PRECISION`])
+/// - HLL precision-12 NDV sketch (per the internal `HLL_PRECISION` constant)
 /// - For foreign-key columns (column name ends in `_id`, or column name
 ///   `id`): Bloom filter at 1% FPR
 /// - Table-level row count is stamped as a [`ROW_COUNT_KIND`] marker blob
@@ -217,6 +230,15 @@ const BLOOM_FP_RATE: f64 = 0.01;
 /// Errors on individual tables are logged and the build continues — the
 /// caller picks up whichever sidecars succeeded.
 pub fn build_puffin_sidecars_imdb(imdb_dir: &Path) -> Result<()> {
+    build_puffin_sidecars_imdb_with_format(imdb_dir, ImdbFormat::Csv)
+}
+
+/// WAVE-5F variant that dispatches on [`ImdbFormat`]. The CSV path
+/// preserves the original WAVE-4D behaviour exactly (sidecar named
+/// `<table>.puffin`); the Parquet path reads from `<table>.parquet`
+/// via DataFusion's Parquet reader and writes to `<table>.parquet.puffin`
+/// so both sidecar sets coexist (audit trail).
+pub fn build_puffin_sidecars_imdb_with_format(imdb_dir: &Path, format: ImdbFormat) -> Result<()> {
     if !imdb_dir.exists() {
         return Err(Error::Feedback(format!(
             "build-puffin: imdb_dir {} does not exist",
@@ -230,13 +252,25 @@ pub fn build_puffin_sidecars_imdb(imdb_dir: &Path) -> Result<()> {
         .map_err(Error::from)?;
 
     for &table in imdb::TABLES {
-        let csv_path = imdb_dir.join(format!("{table}.csv"));
-        let out_path = imdb_dir.join(format!("{table}.puffin"));
-        if !csv_path.exists() {
+        let (src_path, out_path) = match format {
+            ImdbFormat::Csv => (
+                imdb_dir.join(format!("{table}.csv")),
+                imdb_dir.join(format!("{table}.puffin")),
+            ),
+            ImdbFormat::Parquet => (
+                imdb_dir.join(format!("{table}.parquet")),
+                imdb_dir.join(format!("{table}.parquet.puffin")),
+            ),
+        };
+        if !src_path.exists() {
             println!(
-                "[build-puffin][imdb] skipping {} (no CSV at {})",
+                "[build-puffin][imdb] skipping {} (no {} source at {})",
                 table,
-                csv_path.display()
+                match format {
+                    ImdbFormat::Csv => "CSV",
+                    ImdbFormat::Parquet => "Parquet",
+                },
+                src_path.display()
             );
             continue;
         }
@@ -250,15 +284,25 @@ pub fn build_puffin_sidecars_imdb(imdb_dir: &Path) -> Result<()> {
         let start = std::time::Instant::now();
         let result: Result<()> = rt.block_on(async {
             let ctx = SessionContext::new();
-            let opts = CsvReadOptions::new()
-                .has_header(false)
-                .escape(b'\\')
-                .delimiter(b',')
-                .schema(schema.as_ref())
-                .newlines_in_values(true);
-            ctx.register_csv(table, csv_path.to_string_lossy().as_ref(), opts)
-                .await
-                .map_err(|e| Error::Feedback(format!("register: {e}")))?;
+            match format {
+                ImdbFormat::Csv => {
+                    let opts = CsvReadOptions::new()
+                        .has_header(false)
+                        .escape(b'\\')
+                        .delimiter(b',')
+                        .schema(schema.as_ref())
+                        .newlines_in_values(true);
+                    ctx.register_csv(table, src_path.to_string_lossy().as_ref(), opts)
+                        .await
+                        .map_err(|e| Error::Feedback(format!("register: {e}")))?;
+                }
+                ImdbFormat::Parquet => {
+                    let opts = ParquetReadOptions::default();
+                    ctx.register_parquet(table, src_path.to_string_lossy().as_ref(), opts)
+                        .await
+                        .map_err(|e| Error::Feedback(format!("register: {e}")))?;
+                }
+            }
             let df = ctx
                 .sql(&format!("SELECT * FROM {table}"))
                 .await
@@ -335,8 +379,12 @@ pub fn build_puffin_sidecars_imdb(imdb_dir: &Path) -> Result<()> {
             Ok(()) => {
                 let elapsed = start.elapsed();
                 println!(
-                    "[build-puffin][imdb] wrote {} (rows from CSV scan; {:.2}s)",
+                    "[build-puffin][imdb] wrote {} (rows from {} scan; {:.2}s)",
                     out_path.display(),
+                    match format {
+                        ImdbFormat::Csv => "CSV",
+                        ImdbFormat::Parquet => "Parquet",
+                    },
                     elapsed.as_secs_f64()
                 );
             }

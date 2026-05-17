@@ -107,6 +107,68 @@ pub async fn register_imdb_tables_async(ctx: &SessionContext, csv_dir: &Path) ->
     register_imdb_tables_async_with_baseline(ctx, csv_dir, false).await
 }
 
+/// WAVE-5F: register the 21 IMDb tables from sibling `<imdb_dir>/<table>.parquet`
+/// files (as produced by [`crate::csv_to_parquet::convert_imdb_csvs_to_parquet`]),
+/// and wrap each provider with the per-table `<table>.parquet.puffin` sidecar
+/// when present.
+///
+/// Mirrors [`register_imdb_tables_async_with_baseline`]'s contract:
+/// `baseline=true` short-circuits the wrapping. Errors per-table sidecar
+/// load fall back to the unwrapped Parquet provider (graceful-fallback
+/// matches `tpch::register_tpch_tables_async`).
+///
+/// Distinct from the legacy `parquet/` subdirectory probe inside
+/// [`register_imdb_tables_async_with_baseline`]: this entry forces the
+/// Parquet path and consumes the WAVE-5F sidecar naming convention.
+pub async fn register_imdb_parquet_async_with_baseline(
+    ctx: &SessionContext,
+    imdb_dir: &Path,
+    baseline: bool,
+) -> Result<()> {
+    if !imdb_dir.exists() {
+        return Err(Error::Feedback(format!(
+            "imdb: imdb_dir {} does not exist",
+            imdb_dir.display()
+        )));
+    }
+    for &table in TABLES {
+        let parquet_path = imdb_dir.join(format!("{table}.parquet"));
+        if !parquet_path.exists() {
+            return Err(Error::Feedback(format!(
+                "imdb: missing Parquet source for {table} at {}",
+                parquet_path.display()
+            )));
+        }
+        let opts = ParquetReadOptions::default();
+        ctx.register_parquet(table, parquet_path.to_string_lossy().as_ref(), opts)
+            .await
+            .map_err(df_err)?;
+
+        if baseline {
+            continue;
+        }
+        let sidecar = imdb_dir.join(format!("{table}.parquet.puffin"));
+        if !sidecar.exists() {
+            println!(
+                "[imdb] no samkhya stats sidecar for table {} (looked at {}), falling back to default",
+                table,
+                sidecar.display()
+            );
+            continue;
+        }
+        match wrap_imdb_table_with_sidecar(ctx, table, &sidecar).await {
+            Ok(()) => {}
+            Err(e) => {
+                println!(
+                    "[imdb] failed to wrap table {} with samkhya sidecar ({}), falling back to default",
+                    table, e
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Variant of [`register_imdb_tables_async`] that respects a `baseline`
 /// flag: when `baseline=true`, sidecars are NOT applied and the
 /// registered providers are the unmodified DataFusion ListingTable
@@ -508,8 +570,10 @@ pub fn probe_imdb_dir(csv_dir: &Path) -> Result<()> {
     let parquet_dir = csv_dir.join("parquet");
     for &t in TABLES {
         let csv = csv_dir.join(format!("{t}.csv"));
-        let parq = parquet_dir.join(format!("{t}.parquet"));
-        if csv.exists() || parq.exists() {
+        let parq_sub = parquet_dir.join(format!("{t}.parquet"));
+        // WAVE-5F additionally accepts sibling-level <table>.parquet.
+        let parq_sibling = csv_dir.join(format!("{t}.parquet"));
+        if csv.exists() || parq_sub.exists() || parq_sibling.exists() {
             return Ok(());
         }
     }

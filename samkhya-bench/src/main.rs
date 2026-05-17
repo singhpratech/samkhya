@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use samkhya_bench::puffin_io::ImdbFormat;
 use samkhya_bench::{queries::Suite, runner::Runner};
 use samkhya_core::Result;
 
@@ -56,6 +57,44 @@ enum Command {
         /// executes the 22 TPC-H queries end-to-end.
         #[arg(long)]
         tpch_dir: Option<PathBuf>,
+
+        /// WAVE-5F: source format for IMDb tables under `--imdb-dir`.
+        /// `csv` (default) reads `<imdb_dir>/<table>.csv`; `parquet` reads
+        /// the sibling-level `<imdb_dir>/<table>.parquet` produced by
+        /// `convert-imdb-csv-to-parquet` and sources sidecars from
+        /// `<table>.parquet.puffin`. Ignored unless `--suite job-slow-real`
+        /// and `--imdb-dir` are both supplied.
+        #[arg(long, value_enum, default_value_t = ImdbFormatArg::Csv)]
+        imdb_format: ImdbFormatArg,
+
+        /// WAVE-5J: emit a structured JSON report of every per-query
+        /// outcome (including the per-join q-error vector and trial id)
+        /// at this path after the run finishes. The existing stdout
+        /// reporting path is preserved verbatim.
+        #[arg(long)]
+        json_out: Option<PathBuf>,
+
+        /// WAVE-5J: number of full-suite trials (replicates) to execute
+        /// in one process. Defaults to 1. Each trial's outcomes are
+        /// tagged with `trial_id` in the JSON output.
+        #[arg(long, default_value_t = 1)]
+        trials: usize,
+
+        /// WAVE-5J: per-query wall-clock timeout in seconds. Queries
+        /// exceeding the timeout are recorded as TIMEOUT entries (not
+        /// dropped from aggregates per [[feedback-empirical-methodology]]).
+        /// 0 disables the timeout.
+        #[arg(long, default_value_t = 0)]
+        query_timeout_s: u64,
+
+        /// WAVE-5M: enable cold-cache discipline. Before each trial the
+        /// runner advises the kernel to drop page-cache pages backing
+        /// every `*.parquet` file under `--imdb-dir`/`--tpch-dir` via
+        /// `posix_fadvise(POSIX_FADV_DONTNEED)` (no root required). Off
+        /// by default (warm-cache; backward-compatible). Citation: Leis
+        /// et al. VLDB 2015 §3.
+        #[arg(long, default_value_t = false)]
+        cold_cache: bool,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -88,6 +127,25 @@ enum Command {
         /// Mutually exclusive with `--output`.
         #[arg(long)]
         imdb_dir: Option<PathBuf>,
+        /// WAVE-5F: source format for the IMDb sidecar build path. `csv`
+        /// (default) reads `<imdb_dir>/<table>.csv` and writes
+        /// `<table>.puffin`; `parquet` reads `<table>.parquet` and writes
+        /// `<table>.parquet.puffin`. Ignored unless `--imdb-dir` is set.
+        #[arg(long, value_enum, default_value_t = ImdbFormatArg::Csv)]
+        format: ImdbFormatArg,
+    },
+
+    /// WAVE-5F: convert every `<imdb_dir>/<table>.csv` (21 IMDb tables) to
+    /// a sibling `<table>.parquet` using arrow-csv + parquet (Snappy
+    /// compression, default page/row-group sizes). The CSV files are not
+    /// touched (audit trail).
+    ConvertImdbCsvToParquet {
+        /// Directory containing the 21 IMDb `<table>.csv` files (see
+        /// `samkhya-bench/data/job/README.md`). Parquet outputs are
+        /// written as siblings; existing `<table>.parquet` files are
+        /// overwritten.
+        #[arg(long)]
+        imdb_dir: PathBuf,
     },
 
     /// Run a suite, train a GBT corrector from the observations, re-run with correction applied.
@@ -140,6 +198,23 @@ enum SuiteArg {
     Synthetic,
 }
 
+/// WAVE-5F: CLI-facing IMDb source format. Maps 1:1 to
+/// [`samkhya_bench::puffin_io::ImdbFormat`].
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ImdbFormatArg {
+    Csv,
+    Parquet,
+}
+
+impl From<ImdbFormatArg> for ImdbFormat {
+    fn from(value: ImdbFormatArg) -> Self {
+        match value {
+            ImdbFormatArg::Csv => ImdbFormat::Csv,
+            ImdbFormatArg::Parquet => ImdbFormat::Parquet,
+        }
+    }
+}
+
 impl From<SuiteArg> for Suite {
     fn from(value: SuiteArg) -> Self {
         match value {
@@ -163,6 +238,11 @@ fn main() -> Result<()> {
             puffin_dir,
             imdb_dir,
             tpch_dir,
+            imdb_format,
+            json_out,
+            trials,
+            query_timeout_s,
+            cold_cache,
         } => {
             let mut runner = Runner::new(suite.into(), baseline);
             if let Some(path) = feedback {
@@ -177,18 +257,32 @@ fn main() -> Result<()> {
             if let Some(dir) = tpch_dir {
                 runner = runner.with_tpch_dir(dir);
             }
+            runner = runner.with_imdb_format(imdb_format.into());
+            if let Some(path) = json_out {
+                runner = runner.with_json_out(path);
+            }
+            runner = runner.with_trials(trials);
+            runner = runner.with_query_timeout_s(query_timeout_s);
+            runner = runner.with_cold_cache(cold_cache);
             runner.run()
         }
         Command::Compare { suite, puffin_dir } => {
             samkhya_bench::report::compare(suite.into(), puffin_dir.as_deref())
         }
-        Command::BuildPuffin { output, imdb_dir } => match (output, imdb_dir) {
+        Command::BuildPuffin {
+            output,
+            imdb_dir,
+            format,
+        } => match (output, imdb_dir) {
             (Some(_), Some(_)) => {
                 eprintln!("error: --output and --imdb-dir are mutually exclusive; pass only one");
                 std::process::exit(2);
             }
             (Some(dir), None) => samkhya_bench::puffin_io::build_puffin_sidecars(&dir),
-            (None, Some(dir)) => samkhya_bench::puffin_io::build_puffin_sidecars_imdb(&dir),
+            (None, Some(dir)) => samkhya_bench::puffin_io::build_puffin_sidecars_imdb_with_format(
+                &dir,
+                format.into(),
+            ),
             (None, None) => {
                 eprintln!(
                     "error: build-puffin requires either --output (synthetic) or --imdb-dir (JOB)"
@@ -196,6 +290,17 @@ fn main() -> Result<()> {
                 std::process::exit(2);
             }
         },
+        Command::ConvertImdbCsvToParquet { imdb_dir } => {
+            let start = std::time::Instant::now();
+            let converted = samkhya_bench::csv_to_parquet::convert_imdb_csvs_to_parquet(&imdb_dir)?;
+            let elapsed = start.elapsed();
+            println!(
+                "convert-imdb-csv-to-parquet: wrote {} table(s) in {:.2}s",
+                converted.len(),
+                elapsed.as_secs_f64()
+            );
+            Ok(())
+        }
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
         Command::Train { feedback, template } => {
             samkhya_bench::report::train_stub(&feedback, &template)

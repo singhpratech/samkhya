@@ -5,6 +5,8 @@
 //! analytical engines.
 
 pub mod calibrate;
+pub mod cold_cache;
+pub mod csv_to_parquet;
 pub mod imdb;
 pub mod puffin_io;
 pub mod queries;

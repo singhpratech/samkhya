@@ -14,7 +14,7 @@ publish = false
 
 [dependencies]
 samkhya-core = { workspace = true, features = ["gbt", "additive_gbt"] }
-samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.0" }
+samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.0.0-rc.1" }
 clap.workspace = true
 tokio.workspace = true
 datafusion = "46"
@@ -28,3 +28,18 @@ serde_json.workspace = true
 # `GbtCorrector::train` (which hardcodes `baseline_estimate`-only
 # features). Additive — does not affect any other binary.
 gbdt = "0.1"
+# WAVE-5M: cold-cache eviction via posix_fadvise(POSIX_FADV_DONTNEED).
+# libc is already transitively in tree (datafusion → arrow → ...); the
+# explicit dep here makes the cold_cache module's unsafe FFI call
+# auditable. Unix-gated at use site.
+libc = "0.2"
+# WAVE-5L: tabpfn_latency client (file 14). Pure-Rust rustls HTTP client,
+# matches the transport used by samkhya-core::residual::tabpfn so the
+# wire-level overhead is comparable to production. Only the bin needs
+# this; library code is unchanged.
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+
+[dev-dependencies]
+# Used by the cold_cache unit test to create a 100 MiB synthetic
+# parquet-shaped file in a self-cleaning temp directory.
+tempfile = "3"
