@@ -27,6 +27,16 @@ CREATE INDEX IF NOT EXISTS idx_obs_template ON observations(template_hash);
 CREATE INDEX IF NOT EXISTS idx_obs_plan ON observations(plan_fingerprint);
 "#;
 
+/// Schema version stamped into SQLite's `PRAGMA user_version`.
+///
+/// Bumped only when the on-disk schema changes in a backwards-incompatible
+/// way. Stores written by an older binary (with `user_version = 0`,
+/// i.e. unset) are silently upgraded by writing the current value;
+/// stores written by a newer binary (with a strictly larger version)
+/// are rejected so we never silently truncate forward-versioned data.
+/// See `documents/SECURITY-REVIEW-2026-05-17.md` item L3.
+const SCHEMA_USER_VERSION: i32 = 1;
+
 /// A single observation captured at query end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Observation {
@@ -75,6 +85,7 @@ impl FeedbackStore {
         let path_ref = path.as_ref();
         let conn = Connection::open(path_ref).map_err(map_sqlite)?;
         conn.execute_batch(SCHEMA_V1).map_err(map_sqlite)?;
+        check_or_stamp_schema_version(&conn)?;
         // SECURITY-REVIEW-2026-05-17.md (M2): the feedback store records
         // plan fingerprints which may carry schema details or filter
         // values. Tighten the file mode to 0o600 (owner-only) so a
@@ -111,6 +122,7 @@ impl FeedbackStore {
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().map_err(map_sqlite)?;
         conn.execute_batch(SCHEMA_V1).map_err(map_sqlite)?;
+        check_or_stamp_schema_version(&conn)?;
         Ok(Self { conn })
     }
 
@@ -189,6 +201,42 @@ fn map_sqlite(e: rusqlite::Error) -> Error {
     Error::Feedback(e.to_string())
 }
 
+/// Read the SQLite `user_version` PRAGMA and either stamp it (if unset)
+/// or reject the store (if it carries a strictly larger version).
+///
+/// See `documents/SECURITY-REVIEW-2026-05-17.md` item L3: a previously
+/// malicious or simply newer-schema `.db` opened by an older samkhya
+/// would silently mismatch row shape on read; the new PRAGMA check
+/// makes that visible.
+fn check_or_stamp_schema_version(conn: &Connection) -> Result<()> {
+    let on_disk: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(map_sqlite)?;
+    if on_disk == 0 {
+        // Fresh / pre-versioning store. Stamp the current version so
+        // future opens see a match. Using `execute_batch` because
+        // `PRAGMA user_version = N` is not a parameterised statement
+        // (SQLite refuses bind params on PRAGMA writes).
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_USER_VERSION}"))
+            .map_err(map_sqlite)?;
+        return Ok(());
+    }
+    if on_disk > SCHEMA_USER_VERSION {
+        return Err(Error::Feedback(format!(
+            "feedback store schema version {on_disk} is newer than this build supports \
+             ({SCHEMA_USER_VERSION}); refuse to open to avoid data truncation"
+        )));
+    }
+    if on_disk < SCHEMA_USER_VERSION {
+        // Older but compatible. No migrations yet (we are on v1), so
+        // just bump the marker. Future versions will run migration
+        // SQL here before bumping.
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_USER_VERSION}"))
+            .map_err(map_sqlite)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +270,46 @@ mod tests {
         let t1 = store.history("t1").unwrap();
         assert_eq!(t1.len(), 2);
         assert!(t1.iter().all(|o| o.template_hash == "t1"));
+    }
+
+    #[test]
+    fn schema_version_stamped_on_fresh_store() {
+        let store = FeedbackStore::open_in_memory().unwrap();
+        let v: i32 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_USER_VERSION);
+    }
+
+    #[test]
+    fn refuses_forward_versioned_store() {
+        // Open once to stamp the schema, then manually bump the
+        // user_version past what this binary supports and re-open.
+        let tmp = std::env::temp_dir().join(format!(
+            "samkhya-feedback-forward-{}.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&tmp);
+        {
+            let store = FeedbackStore::open(&tmp).unwrap();
+            store
+                .conn
+                .execute_batch(&format!(
+                    "PRAGMA user_version = {}",
+                    SCHEMA_USER_VERSION + 99
+                ))
+                .unwrap();
+        }
+        match FeedbackStore::open(&tmp) {
+            Ok(_) => panic!("expected forward-version rejection, got Ok"),
+            Err(Error::Feedback(msg)) => assert!(
+                msg.contains("newer than this build"),
+                "expected forward-version rejection, got: {msg}"
+            ),
+            Err(other) => panic!("expected Error::Feedback, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

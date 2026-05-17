@@ -200,9 +200,22 @@ async function backendOpenai(userPrompt: string, baseline: bigint): Promise<Back
 async function backendLocal(userPrompt: string, baseline: bigint): Promise<BackendResult> {
   const url = state.localUrl!;
   const model = state.model;
+  // SECURITY-REVIEW-2026-05-17.md (M5): we want the overall request
+  // bounded AND the read phase bounded per-chunk so a hung upstream
+  // doesn't burn the full overall budget waiting on a stalled socket.
+  //  - HARD_DEADLINE_MS is the absolute ceiling.
+  //  - IDLE_DEADLINE_MS resets on every chunk we receive; if the
+  //    upstream goes silent for longer than this we abort early.
+  const HARD_DEADLINE_MS = 55_000;
+  const IDLE_DEADLINE_MS = 15_000;
+  const controller = new AbortController();
+  const hard = setTimeout(() => controller.abort(), HARD_DEADLINE_MS);
+  let idle = setTimeout(() => controller.abort(), IDLE_DEADLINE_MS);
+  const bumpIdle = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => controller.abort(), IDLE_DEADLINE_MS);
+  };
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 55_000);
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -217,16 +230,60 @@ async function backendLocal(userPrompt: string, baseline: bigint): Promise<Backe
       }),
       signal: controller.signal,
     });
-    clearTimeout(timeout);
+    bumpIdle();
     if (!resp.ok) {
+      clearTimeout(hard);
+      clearTimeout(idle);
       logLine('local', model, 0.0, 'api_err');
       return [baseline, `<api_err: HTTP ${resp.status}>`];
     }
-    const body = (await resp.json()) as { response?: string };
-    const raw = body.response ?? '';
-    const parsed = parseFirstInteger(raw);
-    return [parsed ?? baseline, raw];
+    // Read the body in chunks so the idle timer can fire if the
+    // upstream stalls mid-response. Cap the total read at BODY_MAX_BYTES
+    // so a malicious local backend can't echo back a multi-GB body.
+    const reader = resp.body?.getReader();
+    let raw = '';
+    if (reader) {
+      const decoder = new TextDecoder('utf-8');
+      let total = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        bumpIdle();
+        if (done) break;
+        if (value) {
+          total += value.byteLength;
+          if (total > BODY_MAX_BYTES) {
+            try {
+              await reader.cancel();
+            } catch {
+              /* ignore */
+            }
+            clearTimeout(hard);
+            clearTimeout(idle);
+            logLine('local', model, 0.0, 'api_err');
+            return [baseline, '<api_err: BodyTooLarge>'];
+          }
+          raw += decoder.decode(value, { stream: true });
+        }
+      }
+      raw += decoder.decode();
+    } else {
+      raw = await resp.text();
+    }
+    clearTimeout(hard);
+    clearTimeout(idle);
+    let body: { response?: string };
+    try {
+      body = JSON.parse(raw) as { response?: string };
+    } catch {
+      logLine('local', model, 0.0, 'api_err');
+      return [baseline, '<api_err: SyntaxError>'];
+    }
+    const text = body.response ?? '';
+    const parsed = parseFirstInteger(text);
+    return [parsed ?? baseline, text];
   } catch (exc) {
+    clearTimeout(hard);
+    clearTimeout(idle);
     process.stderr.write(`[llm] local api_err: ${String(exc)}\n`);
     logLine('local', model, 0.0, 'api_err');
     const name = (exc as { constructor?: { name?: string } })?.constructor?.name ?? 'Error';

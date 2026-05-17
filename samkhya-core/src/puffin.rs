@@ -46,6 +46,16 @@ const MAX_BLOB_LEN: u64 = 2 * 1024 * 1024 * 1024;
 /// values that would force a multi-GiB allocation for the footer alone.
 const MAX_FOOTER_LEN: u64 = 16 * 1024 * 1024;
 
+/// Maximum number of blob entries enumerated in a single footer.
+///
+/// Caps the `blobs` array length after JSON parse so an attacker cannot
+/// stage a footer with millions of trivially-sized blob records that
+/// each individually pass the per-blob length cap. Legitimate samkhya
+/// sidecars carry one blob per stat per column — even a wide table with
+/// one HLL + one Bloom + one CMS + two histograms per column tops out
+/// well under this limit.
+const MAX_BLOB_COUNT: usize = 65_536;
+
 /// Compression codec applied to a blob payload before it is written to the file.
 ///
 /// The codec name is recorded in the blob's `compression-codec` metadata so
@@ -390,6 +400,13 @@ impl<R: Read + Seek> PuffinReader<R> {
         let footer: FooterPayload = serde_json::from_slice(&payload)
             .map_err(|e| Error::InvalidPuffin(format!("footer JSON decode: {e}")))?;
 
+        if footer.blobs.len() > MAX_BLOB_COUNT {
+            return Err(Error::InvalidPuffin(format!(
+                "footer enumerates {} blobs; exceeds MAX_BLOB_COUNT {MAX_BLOB_COUNT}",
+                footer.blobs.len()
+            )));
+        }
+
         Ok(Self { inner, footer })
     }
 
@@ -465,30 +482,50 @@ impl<R: Read + Seek> PuffinReader<R> {
     }
 }
 
+/// Bounded streaming decompression helper shared across compression
+/// codecs.
+///
+/// Reads from `reader` into a fresh `Vec<u8>` whose final length is at
+/// most `max_bytes`. The `+1` sentinel byte distinguishes "decompressed
+/// exactly max_bytes" (legitimate boundary) from "would have produced
+/// more than max_bytes" (attacker-controlled). `codec_label` appears in
+/// the error message so the caller can identify which codec tripped.
+///
+/// Centralising this here means a future LZ4 / Brotli / Snappy codec
+/// only needs to construct a `Read` and call this function; the cap is
+/// not re-derived per codec. See `documents/SECURITY-REVIEW-2026-05-17.md`
+/// item M6. Currently used only by the zstd path; broaden the cfg gate
+/// when a new codec lands.
 #[cfg(feature = "zstd")]
-fn decode_zstd(raw: &[u8]) -> Result<Vec<u8>> {
+fn decompress_bounded<R: std::io::Read>(
+    mut reader: R,
+    max_bytes: usize,
+    codec_label: &'static str,
+) -> Result<Vec<u8>> {
     use std::io::Read as _;
 
-    // Stream into a bounded buffer so a high-ratio compression bomb
-    // cannot force a multi-GiB allocation. We read at most
-    // `MAX_BLOB_LEN + 1` bytes and reject anything that fills the
-    // sentinel byte — the +1 lets us distinguish "decompressed exactly
-    // MAX_BLOB_LEN" (legitimate boundary) from "would have produced
-    // more than MAX_BLOB_LEN" (attacker-controlled).
-    let mut decoder = zstd::stream::Decoder::new(raw)
-        .map_err(|e| Error::InvalidPuffin(format!("zstd decoder init: {e}")))?;
-    let cap = MAX_BLOB_LEN as usize;
-    let mut out = Vec::with_capacity(usize::min(raw.len().saturating_mul(4), cap));
-    let mut limited = (&mut decoder).take(cap as u64 + 1);
-    limited
+    let mut out = Vec::with_capacity(max_bytes.min(256 * 1024));
+    let n = (&mut reader)
+        .take(max_bytes as u64 + 1)
         .read_to_end(&mut out)
-        .map_err(|e| Error::InvalidPuffin(format!("zstd decode: {e}")))?;
-    if out.len() > cap {
+        .map_err(|e| Error::InvalidPuffin(format!("{codec_label} decode: {e}")))?;
+    let _ = n; // silence unused-binding when read_to_end's return is not used
+    if out.len() > max_bytes {
         return Err(Error::InvalidPuffin(format!(
-            "zstd decompressed size exceeds MAX_BLOB_LEN {MAX_BLOB_LEN}"
+            "{codec_label} decompressed size exceeds {max_bytes}"
         )));
     }
     Ok(out)
+}
+
+#[cfg(feature = "zstd")]
+fn decode_zstd(raw: &[u8]) -> Result<Vec<u8>> {
+    // Stream into a bounded buffer so a high-ratio compression bomb
+    // cannot force a multi-GiB allocation. The cap and the sentinel
+    // logic live in `decompress_bounded`.
+    let decoder = zstd::stream::Decoder::new(raw)
+        .map_err(|e| Error::InvalidPuffin(format!("zstd decoder init: {e}")))?;
+    decompress_bounded(decoder, MAX_BLOB_LEN as usize, "zstd")
 }
 
 #[cfg(not(feature = "zstd"))]
