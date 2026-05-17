@@ -47,6 +47,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 FEATURE_LEN = 7
 U64_MAX = (1 << 64) - 1
 
+# SECURITY-REVIEW-2026-05-17.md (H4 + M1).
+BODY_MAX_BYTES = 8 * 1024 * 1024
+MAX_INFER_BATCHES = 1024
+
 
 class Handler(BaseHTTPRequestHandler):
     """One-shot HTTP handler — minimal correctness, maximal stability."""
@@ -68,10 +72,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(400, "invalid Content-Length")
+            return
+        if length > BODY_MAX_BYTES:
+            self.send_error(413, f"body {length} exceeds {BODY_MAX_BYTES}")
+            return
+        try:
             raw = self.rfile.read(length)
             body = json.loads(raw)
         except Exception as exc:
-            self.send_error(400, f"bad json: {exc}")
+            # See SECURITY-REVIEW-2026-05-17.md (C3): log full detail to
+            # stderr but echo only the exception class on the wire.
+            print(f"[llm-dummy] /infer parse err: {exc!r}", file=sys.stderr, flush=True)
+            self.send_error(400, f"bad json: {type(exc).__name__}")
             return
 
         features = body.get("features")
@@ -86,6 +100,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(
                 400, f"features length {len(features)} not a multiple of {FEATURE_LEN}"
             )
+            return
+        batches = len(features) // FEATURE_LEN
+        if batches > MAX_INFER_BATCHES:
+            self.send_error(413, f"features batch count {batches} exceeds {MAX_INFER_BATCHES}")
             return
 
         estimate = max(0, min(int(baseline), U64_MAX - 1))
@@ -121,6 +139,20 @@ def main() -> int:
         default=int(os.environ.get("SAMKHYA_LLM_PORT", "8766")),
     )
     args = parser.parse_args()
+    # SECURITY-REVIEW-2026-05-17.md (H1): the dummy backend is harmless
+    # (it doesn't reach upstream LLMs) but the warning still helps the
+    # operator notice that an unauthenticated server is exposed.
+    if args.host not in ("127.0.0.1", "::1", "localhost"):
+        banner = "=" * 70
+        print(
+            f"\n{banner}\n"
+            f"[WARN] samkhya LLM dummy server bound to non-loopback ({args.host}).\n"
+            f"[WARN] This server has NO authentication. Ensure network isolation\n"
+            f"[WARN] before exposing the address.\n"
+            f"{banner}\n",
+            file=sys.stderr,
+            flush=True,
+        )
     print(
         f"[llm-dummy] listening on http://{args.host}:{args.port} "
         f"(GET /health, POST /infer)",

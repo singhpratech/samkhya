@@ -94,6 +94,18 @@ from fastapi.responses import JSONResponse
 FEATURE_LEN = 7
 U64_MAX = (1 << 64) - 1
 
+# SECURITY-REVIEW-2026-05-17.md (H3): cap env-var prompt templates so a
+# malicious or accidental env-var injection cannot OOM the server or
+# blow up upstream API cost.
+PROMPT_MAX_BYTES = 16 * 1024
+
+# SECURITY-REVIEW-2026-05-17.md (H4 + M1): HTTP body + batch caps.
+# 8 MiB is well above any legitimate `features` payload (256 batches of
+# 7 f64 values + JSON overhead is < 100 KiB); 1024 batches is more than
+# any real samkhya batch and stops upstream cost amplification.
+BODY_MAX_BYTES = 8 * 1024 * 1024
+MAX_INFER_BATCHES = 1024
+
 # Defaults baked in. Caller can override via env.
 DEFAULT_SYSTEM_PROMPT = (
     "You are a cardinality estimator for SQL query optimizers. "
@@ -194,8 +206,13 @@ def _backend_anthropic(user_prompt: str, baseline_estimate: int) -> tuple[Option
         text_blocks = [b.text for b in msg.content if getattr(b, "type", None) == "text"]
         raw = text_blocks[0] if text_blocks else ""
     except Exception as exc:  # pragma: no cover — depends on API key
+        # Log the full exception locally for operator diagnosis but only
+        # echo the exception class name on the wire so credentials,
+        # stack traces, and upstream-API error bodies cannot leak via a
+        # probing request. See SECURITY-REVIEW-2026-05-17.md (C3).
+        print(f"[llm] anthropic api_err: {exc!r}", file=sys.stderr, flush=True)
         _log("anthropic", model, 0.0, "api_err")
-        return baseline_estimate, f"<api_err: {exc}>"
+        return baseline_estimate, f"<api_err: {type(exc).__name__}>"
     parsed = _parse_first_integer(raw)
     return parsed if parsed is not None else baseline_estimate, raw
 
@@ -216,8 +233,9 @@ def _backend_openai(user_prompt: str, baseline_estimate: int) -> tuple[Optional[
         )
         raw = resp.choices[0].message.content or ""
     except Exception as exc:  # pragma: no cover — depends on API key
+        print(f"[llm] openai api_err: {exc!r}", file=sys.stderr, flush=True)
         _log("openai", model, 0.0, "api_err")
-        return baseline_estimate, f"<api_err: {exc}>"
+        return baseline_estimate, f"<api_err: {type(exc).__name__}>"
     parsed = _parse_first_integer(raw)
     return parsed if parsed is not None else baseline_estimate, raw
 
@@ -247,8 +265,9 @@ def _backend_local(user_prompt: str, baseline_estimate: int) -> tuple[Optional[i
             body = json.loads(resp.read().decode("utf-8"))
         raw = body.get("response", "")
     except Exception as exc:  # pragma: no cover — depends on ollama
+        print(f"[llm] local api_err: {exc!r}", file=sys.stderr, flush=True)
         _log("local", model, 0.0, "api_err")
-        return baseline_estimate, f"<api_err: {exc}>"
+        return baseline_estimate, f"<api_err: {type(exc).__name__}>"
     parsed = _parse_first_integer(raw)
     return parsed if parsed is not None else baseline_estimate, raw
 
@@ -266,6 +285,23 @@ _BACKENDS = {
 # ---------------------------------------------------------------------------
 
 
+def _load_prompt_env(var: str, default: str) -> str:
+    """Read a prompt template from env, capped at PROMPT_MAX_BYTES.
+
+    See SECURITY-REVIEW-2026-05-17.md (H3): rejects an env-var-injected
+    prompt larger than 16 KiB so a shared-env adversary cannot OOM the
+    server or amplify upstream API cost.
+    """
+    val = os.environ.get(var)
+    if val is None:
+        return default
+    if len(val.encode("utf-8")) > PROMPT_MAX_BYTES:
+        raise SystemExit(
+            f"[llm] {var} exceeds {PROMPT_MAX_BYTES} bytes; refusing to start."
+        )
+    return val
+
+
 def load_backend(name: str) -> None:
     """Initialize the chosen backend; populate ``_state``."""
     name = name.lower().strip()
@@ -276,10 +312,10 @@ def load_backend(name: str) -> None:
         )
 
     _state["backend"] = name
-    _state["system_prompt"] = os.environ.get(
+    _state["system_prompt"] = _load_prompt_env(
         "SAMKHYA_LLM_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT
     )
-    _state["user_prompt"] = os.environ.get(
+    _state["user_prompt"] = _load_prompt_env(
         "SAMKHYA_LLM_USER_PROMPT", DEFAULT_USER_PROMPT
     )
     _state["temperature"] = float(os.environ.get("SAMKHYA_LLM_TEMPERATURE", "0.0"))
@@ -367,11 +403,35 @@ def health() -> dict[str, Any]:
 
 @app.post("/infer")
 async def infer(request: Request) -> dict[str, Any]:
+    # SECURITY-REVIEW-2026-05-17.md (H4): reject on Content-Length up
+    # front so we never buffer a multi-GiB body. Some clients omit the
+    # header; for those we still cap the bytes we read.
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            declared = int(cl)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid Content-Length")
+        if declared > BODY_MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"request body {declared} exceeds {BODY_MAX_BYTES}",
+            )
     body_bytes = await request.body()
+    if len(body_bytes) > BODY_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"request body {len(body_bytes)} exceeds {BODY_MAX_BYTES}",
+        )
     try:
         body = json.loads(body_bytes)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid json: {exc!s}")
+        # See SECURITY-REVIEW-2026-05-17.md (C3): only the exception
+        # class name goes on the wire; full detail stays in stderr.
+        print(f"[llm] /infer parse err: {exc!r}", file=sys.stderr, flush=True)
+        raise HTTPException(
+            status_code=400, detail=f"invalid json: {type(exc).__name__}"
+        ) from exc
 
     features = body.get("features")
     baseline = body.get("baseline_estimate")
@@ -386,6 +446,15 @@ async def infer(request: Request) -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail=f"features length {len(features)} not a multiple of {FEATURE_LEN}",
+        )
+    # SECURITY-REVIEW-2026-05-17.md (M1): cap per-request batch so a
+    # well-formed but huge `features` cannot fan out into thousands of
+    # upstream API calls.
+    batches = len(features) // FEATURE_LEN
+    if batches > MAX_INFER_BATCHES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"features batch count {batches} exceeds {MAX_INFER_BATCHES}",
         )
 
     user_prompt = _render_user_prompt(features, int(baseline))
@@ -432,9 +501,34 @@ def main() -> int:
     # force a backend choice without exporting env at every call site.
     os.environ["SAMKHYA_LLM_BACKEND"] = args.backend
 
+    # SECURITY-REVIEW-2026-05-17.md (H1): warn loudly if the operator
+    # binds to a non-loopback address. This server has no auth; an
+    # unauthenticated remote can drive arbitrary upstream API calls
+    # using the operator's API keys.
+    _warn_if_non_loopback_bind(args.host)
+
     load_backend(args.backend)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _warn_if_non_loopback_bind(host: str) -> None:
+    if host in _LOOPBACK_HOSTS:
+        return
+    banner = "=" * 70
+    msg = (
+        f"\n{banner}\n"
+        f"[WARN] samkhya LLM server bound to a non-loopback address ({host}).\n"
+        f"[WARN] This server has NO authentication. API keys (anthropic /\n"
+        f"[WARN] openai) in your environment will be used for ALL inbound\n"
+        f"[WARN] requests. Ensure network isolation (firewall, VPN, or\n"
+        f"[WARN] reverse-proxy with auth) before exposing this address.\n"
+        f"{banner}\n"
+    )
+    print(msg, file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

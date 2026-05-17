@@ -62,5 +62,5 @@ in sibling crates.
 
 ---
 
-*By submitting this PR you agree to dual Apache-2.0 OR MIT licensing
-of your contribution.*
+*By submitting this PR you agree to Apache-2.0 licensing of your
+contribution (per the project license; see [`LICENSE-APACHE`](../LICENSE-APACHE)).*

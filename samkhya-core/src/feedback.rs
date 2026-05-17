@@ -72,8 +72,29 @@ pub struct FeedbackStore {
 impl FeedbackStore {
     /// Open or create a store at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open(path).map_err(map_sqlite)?;
+        let path_ref = path.as_ref();
+        let conn = Connection::open(path_ref).map_err(map_sqlite)?;
         conn.execute_batch(SCHEMA_V1).map_err(map_sqlite)?;
+        // SECURITY-REVIEW-2026-05-17.md (M2): the feedback store records
+        // plan fingerprints which may carry schema details or filter
+        // values. Tighten the file mode to 0o600 (owner-only) so a
+        // shared-system reader cannot snapshot the store. Best-effort:
+        // a failure here (e.g., the file does not exist because we are
+        // running against an in-memory or VFS-special path) is logged
+        // but not promoted to an error — the store is still usable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(err) =
+                std::fs::set_permissions(path_ref, std::fs::Permissions::from_mode(0o600))
+            {
+                log::debug!(
+                    "feedback store: could not tighten perms on {}: {}",
+                    path_ref.display(),
+                    err
+                );
+            }
+        }
         Ok(Self { conn })
     }
 

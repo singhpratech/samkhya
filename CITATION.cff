@@ -15,9 +15,7 @@ authors:
     given-names: Prateek
 version: "1.0.0"
 date-released: "2026-05-17"
-license:
-  - Apache-2.0
-  - MIT
+license: Apache-2.0
 repository-code: "https://github.com/singhpratech/samkhya"
 url: "https://github.com/singhpratech/samkhya"
 keywords:
@@ -43,9 +41,7 @@ preferred-citation:
   version: "1.0.0"
   date-released: "2026-05-17"
   url: "https://github.com/singhpratech/samkhya"
-  license:
-    - Apache-2.0
-    - MIT
+  license: Apache-2.0
 references:
   - type: article
     authors:

@@ -39,7 +39,9 @@
 #   SAMKHYA_USE_TSX       (default 1 — run TS directly via tsx; set 0 to
 #                          require a `npm run build` first and use dist/)
 
+# SECURITY-REVIEW-2026-05-17.md (M3): see run-llm-bench.sh for rationale.
 set -u
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"

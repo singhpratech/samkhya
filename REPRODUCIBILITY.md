@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-17 (UTC) *Updated WAVE5-Q*
 **Sole author:** Prateek Singh
-**License:** Apache-2.0 OR MIT
+**License:** Apache-2.0
 **Standard:** ACM Artifact Review and Badging v1.1
 ([acm.org/publications/policies/artifact-review-and-badging-current](https://www.acm.org/publications/policies/artifact-review-and-badging-current))
 **Companion:** [`bench-results/METHODOLOGY.md`](./bench-results/METHODOLOGY.md),
@@ -57,11 +57,10 @@ acceptance for the foundation-model backend.
 - **Registry:** crates.io (`samkhya-core`, `samkhya-datafusion`, `samkhya-duckdb`,
   `samkhya-polars`, `samkhya-postgres`, `samkhya-gpudb`, `samkhya-iceberg`,
   `samkhya-arrow`, `samkhya-cli`, `samkhya-bench`); PyPI (`samkhya`).
-- **License:** Apache-2.0 OR MIT (dual-licensed; files at
-  [`LICENSE-APACHE`](./LICENSE-APACHE) and [`LICENSE-MIT`](./LICENSE-MIT);
-  matches the surrounding ecosystem — DataFusion, Arrow, Iceberg,
-  DataSketches — so adopters can vendor samkhya without
-  license-compatibility analysis).
+- **License:** Apache-2.0 (single license; explicit patent grant per §3;
+  file at [`LICENSE-APACHE`](./LICENSE-APACHE); matches DataFusion,
+  Iceberg, Arrow, ClickHouse — every downstream user gets the same
+  patent grant rather than making it optional via a dual-license toggle).
 
 ### Hardware requirements
 

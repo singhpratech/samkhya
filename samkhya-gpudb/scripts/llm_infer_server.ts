@@ -61,6 +61,13 @@ import { URL } from 'node:url';
 const FEATURE_LEN = 7;
 const U64_MAX = (1n << 64n) - 1n;
 
+// SECURITY-REVIEW-2026-05-17.md (H3 + H4 + M1): env-var prompt cap,
+// HTTP body cap, and per-request batch cap. Tuned identically to the
+// Python server so behaviour is portable across transports.
+const PROMPT_MAX_BYTES = 16 * 1024;
+const BODY_MAX_BYTES = 8 * 1024 * 1024;
+const MAX_INFER_BATCHES = 1024;
+
 const DEFAULT_SYSTEM_PROMPT =
   'You are a cardinality estimator for SQL query optimizers. ' +
   'Given a feature vector describing a join, you reply with a single ' +
@@ -155,8 +162,14 @@ async function backendAnthropic(userPrompt: string, baseline: bigint): Promise<B
     const parsed = parseFirstInteger(raw);
     return [parsed ?? baseline, raw];
   } catch (exc) {
+    // See SECURITY-REVIEW-2026-05-17.md (C3): full exception detail is
+    // logged locally for operator diagnosis, but only the constructor
+    // name goes on the wire so credentials / stack traces / upstream
+    // API error bodies cannot be probed through malformed requests.
+    process.stderr.write(`[llm] anthropic api_err: ${String(exc)}\n`);
     logLine('anthropic', model, 0.0, 'api_err');
-    return [baseline, `<api_err: ${String(exc)}>`];
+    const name = (exc as { constructor?: { name?: string } })?.constructor?.name ?? 'Error';
+    return [baseline, `<api_err: ${name}>`];
   }
 }
 
@@ -177,8 +190,10 @@ async function backendOpenai(userPrompt: string, baseline: bigint): Promise<Back
     const parsed = parseFirstInteger(raw);
     return [parsed ?? baseline, raw];
   } catch (exc) {
+    process.stderr.write(`[llm] openai api_err: ${String(exc)}\n`);
     logLine('openai', model, 0.0, 'api_err');
-    return [baseline, `<api_err: ${String(exc)}>`];
+    const name = (exc as { constructor?: { name?: string } })?.constructor?.name ?? 'Error';
+    return [baseline, `<api_err: ${name}>`];
   }
 }
 
@@ -212,8 +227,10 @@ async function backendLocal(userPrompt: string, baseline: bigint): Promise<Backe
     const parsed = parseFirstInteger(raw);
     return [parsed ?? baseline, raw];
   } catch (exc) {
+    process.stderr.write(`[llm] local api_err: ${String(exc)}\n`);
     logLine('local', model, 0.0, 'api_err');
-    return [baseline, `<api_err: ${String(exc)}>`];
+    const name = (exc as { constructor?: { name?: string } })?.constructor?.name ?? 'Error';
+    return [baseline, `<api_err: ${name}>`];
   }
 }
 
@@ -228,6 +245,19 @@ const BACKENDS: Record<BackendName, (p: string, b: bigint) => Promise<BackendRes
 // Setup
 // ---------------------------------------------------------------------------
 
+function loadPromptEnv(varName: string, defaultValue: string): string {
+  // See SECURITY-REVIEW-2026-05-17.md (H3): reject prompt overrides
+  // larger than PROMPT_MAX_BYTES so a shared-env adversary cannot OOM
+  // the server or amplify upstream API cost.
+  const val = process.env[varName];
+  if (val === undefined) return defaultValue;
+  if (Buffer.byteLength(val, 'utf8') > PROMPT_MAX_BYTES) {
+    process.stderr.write(`[llm] ${varName} exceeds ${PROMPT_MAX_BYTES} bytes; refusing to start.\n`);
+    process.exit(3);
+  }
+  return val;
+}
+
 async function loadBackend(name: string): Promise<void> {
   const n = name.toLowerCase().trim() as BackendName;
   if (!(n in BACKENDS)) {
@@ -238,8 +268,8 @@ async function loadBackend(name: string): Promise<void> {
   }
 
   state.backend = n;
-  state.systemPrompt = process.env.SAMKHYA_LLM_SYSTEM_PROMPT ?? DEFAULT_SYSTEM_PROMPT;
-  state.userPrompt = process.env.SAMKHYA_LLM_USER_PROMPT ?? DEFAULT_USER_PROMPT;
+  state.systemPrompt = loadPromptEnv('SAMKHYA_LLM_SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT);
+  state.userPrompt = loadPromptEnv('SAMKHYA_LLM_USER_PROMPT', DEFAULT_USER_PROMPT);
   state.temperature = Number(process.env.SAMKHYA_LLM_TEMPERATURE ?? '0.0');
   state.maxTokens = Number(process.env.SAMKHYA_LLM_MAX_TOKENS ?? '32');
 
@@ -319,22 +349,55 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(buf);
 }
 
-async function readBody(req: http.IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
+async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer | null> {
+  // SECURITY-REVIEW-2026-05-17.md (H4): refuse upfront on
+  // Content-Length and also enforce a streaming cap so chunked /
+  // missing-header requests cannot OOM us. Returns null when the body
+  // exceeds the cap; the caller must respond 413.
+  const declared = req.headers['content-length'];
+  if (declared !== undefined) {
+    const n = Number(declared);
+    if (Number.isFinite(n) && n > maxBytes) {
+      return null;
+    }
+  }
+  return new Promise<Buffer | null>((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    let total = 0;
+    let aborted = false;
+    req.on('data', (c: Buffer) => {
+      if (aborted) return;
+      total += c.byteLength;
+      if (total > maxBytes) {
+        aborted = true;
+        req.destroy();
+        resolve(null);
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!aborted) resolve(Buffer.concat(chunks));
+    });
     req.on('error', reject);
   });
 }
 
 async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const bodyBytes = await readBody(req);
+  const bodyBytes = await readBody(req, BODY_MAX_BYTES);
+  if (bodyBytes === null) {
+    sendJson(res, 413, { detail: `request body exceeds ${BODY_MAX_BYTES}` });
+    return;
+  }
   let body: any;
   try {
     body = JSON.parse(bodyBytes.toString('utf8'));
   } catch (exc) {
-    sendJson(res, 400, { detail: `invalid json: ${String(exc)}` });
+    // See SECURITY-REVIEW-2026-05-17.md (C3): full parse detail to
+    // stderr, only the exception class on the wire.
+    process.stderr.write(`[llm] /infer parse err: ${String(exc)}\n`);
+    const name = (exc as { constructor?: { name?: string } })?.constructor?.name ?? 'Error';
+    sendJson(res, 400, { detail: `invalid json: ${name}` });
     return;
   }
 
@@ -351,6 +414,14 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
   if (features.length % FEATURE_LEN !== 0) {
     sendJson(res, 400, {
       detail: `features length ${features.length} not a multiple of ${FEATURE_LEN}`,
+    });
+    return;
+  }
+  // SECURITY-REVIEW-2026-05-17.md (M1): per-request batch cap.
+  const batches = features.length / FEATURE_LEN;
+  if (batches > MAX_INFER_BATCHES) {
+    sendJson(res, 413, {
+      detail: `features batch count ${batches} exceeds ${MAX_INFER_BATCHES}`,
     });
     return;
   }
@@ -442,9 +513,28 @@ function parseArgs(argv: string[]): { host: string; port: number; backend: strin
   return { host, port, backend };
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+function warnIfNonLoopbackBind(host: string): void {
+  if (LOOPBACK_HOSTS.has(host)) return;
+  const banner = '='.repeat(70);
+  process.stderr.write(
+    `\n${banner}\n` +
+      `[WARN] samkhya LLM server bound to a non-loopback address (${host}).\n` +
+      `[WARN] This server has NO authentication. API keys (anthropic /\n` +
+      `[WARN] openai) in your environment will be used for ALL inbound\n` +
+      `[WARN] requests. Ensure network isolation (firewall, VPN, or\n` +
+      `[WARN] reverse-proxy with auth) before exposing this address.\n` +
+      `${banner}\n`,
+  );
+}
+
 async function main(): Promise<void> {
   const { host, port, backend } = parseArgs(process.argv.slice(2));
   process.env.SAMKHYA_LLM_BACKEND = backend;
+  // SECURITY-REVIEW-2026-05-17.md (H1): warn before bind so the
+  // message appears even if loadBackend fails fast.
+  warnIfNonLoopbackBind(host);
   await loadBackend(backend);
 
   const server = makeServer();

@@ -43,6 +43,74 @@ Post-rc.1 stabilization. The rc.2 work re-diagnosed the
   DataFusion would have chosen on its own. Unit-tested with a mock
   `TableProvider` that returns a known native row count.
 
+### Security
+
+Deep security review (`documents/SECURITY-REVIEW-2026-05-17.md`, internal)
+surfaced 3 CRITICAL + 4 HIGH + 3 MEDIUM items relevant to the rc.2
+release gate. All landed:
+
+- **C1 — Puffin reader unbounded blob allocation.**
+  `read_blob()` allocated `vec![0u8; meta.length as usize]` where
+  `meta.length: u64` was untrusted (read from the attacker-controllable
+  JSON footer). Trivial DoS via a tiny sidecar declaring a 16 EiB blob.
+  Fixed by adding a `MAX_BLOB_LEN = 2 GiB` cap and a
+  `MAX_FOOTER_LEN = 16 MiB` cap on the JSON payload length. Two new
+  tests (`read_blob_rejects_oversized_length`,
+  `open_rejects_oversized_footer_payload_len`) tamper with the footer
+  bytes and assert rejection before allocation.
+- **C2 — Puffin zstd decompression bomb.** `decode_zstd` used
+  `zstd::decode_all` with no output cap. Replaced with a streaming
+  `zstd::stream::Decoder` reading into a `Vec<u8>` bounded to
+  `MAX_BLOB_LEN`. A high-ratio attacker-controlled compressed blob is
+  now rejected with `Error::InvalidPuffin` instead of OOM.
+- **C3 — LLM server error messages leaked exception text.** Both the
+  Python FastAPI server (`llm_infer_server.py`) and TypeScript port
+  (`llm_infer_server.ts`) included the raw SDK exception in the
+  `<api_err: ...>` reply. Sanitized to only emit the exception class
+  name on the wire; full exception is still logged to stderr for
+  operator diagnosis. Applies to anthropic, openai, local, and the
+  parse-error path in both transports plus the two `_dummy_backend`
+  scripts.
+- **H1 — `--host 0.0.0.0` accepted without warning.** Both LLM server
+  transports now emit a prominent stderr banner when bound to a
+  non-loopback address, warning the operator that the server has no
+  authentication and that API keys in env will be used for all inbound
+  requests.
+- **H2 — Plaintext HTTP to remote host warning.** Added
+  `warn_if_remote_plaintext_http` in `samkhya-core/src/residual.rs`
+  invoked from `TabPfnHttpCorrector::new`/`with_url` and
+  `LlmHttpCorrector::new`. Emits `log::warn!` when the configured
+  `base_url` is `http://` (plaintext) to a non-loopback host. Silence
+  via `SAMKHYA_ALLOW_REMOTE_HTTP=1`.
+- **H3 — `SAMKHYA_LLM_SYSTEM_PROMPT` / `SAMKHYA_LLM_USER_PROMPT`
+  capped at 16 KiB.** Both transports refuse to start with a larger
+  value, eliminating env-var-injection OOM and upstream-API cost
+  amplification.
+- **H4 — HTTP body size limit (8 MiB).** All four HTTP servers
+  (`llm_infer_server.py`, `llm_infer_server.ts`,
+  `llm_dummy_backend.py`, `llm_dummy_backend.ts`) reject on
+  `Content-Length` up front and enforce a streaming cap so chunked or
+  header-less POSTs cannot OOM the host. HTTP 413 on exceedance.
+- **M1 — Per-request features batch cap (1024 batches).** Even
+  well-formed `features` payloads cannot fan out into thousands of
+  upstream LLM calls; HTTP 413 above the cap.
+- **M2 — SQLite feedback store tightened to 0o600 on Unix.**
+  `FeedbackStore::open` calls `set_permissions(0o600)` so plan
+  fingerprints and observation rows are not world-readable on shared
+  systems. Best-effort (logged at debug if it fails).
+- **M3 — `set -o pipefail` in `run-llm-bench.sh` and
+  `run-llm-bench-ts.sh`.** A `curl` failure piped into `grep -q` no
+  longer silently passes the health-poll gate.
+
+### Changed
+
+- **License consolidated to Apache-2.0 only** (was `Apache-2.0 OR
+  MIT`). Every downstream user now gets the same explicit §3 patent
+  grant rather than having it optional behind the MIT branch. Matches
+  DataFusion / Iceberg / Arrow / ClickHouse posture. `LICENSE-MIT`
+  removed; `deny.toml` still allows MIT/BSD/etc. for *transitive*
+  dependencies.
+
 ### Open / deferred
 
 Tracked for rc.3 / v1.1 (not blockers for rc.2):
@@ -53,6 +121,11 @@ Tracked for rc.3 / v1.1 (not blockers for rc.2):
 - **pyo3 ≥ 0.23 migration** (pinned at 0.22).
 - **pgrx ≥ 0.13 migration** (pinned at 0.12 + double-gated).
 - **DuckDB runtime `LOAD`** — blocked on upstream Issue #11638.
+- **Security review M4–M6 + L1–L4** — path canonicalisation,
+  AbortController per-chunk deadline, codec helper unification, TOCTOU
+  + symlink hardening on Puffin sidecars, schema-version validation on
+  the SQLite store. Documented in
+  `documents/SECURITY-REVIEW-2026-05-17.md` (internal).
 
 ## [1.0.0-rc.1] — 2026-05-17
 

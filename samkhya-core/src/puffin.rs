@@ -28,6 +28,24 @@ use crate::{Error, Result};
 
 const MAGIC: &[u8; 4] = b"PFA1";
 
+/// Maximum permitted size for a single blob payload, in bytes.
+///
+/// Caps untrusted `length` and decompressed-size values read from the
+/// JSON footer of a Puffin sidecar. A Bloom filter sized for 1B keys at
+/// 1% FPR fits comfortably under this limit (~1.2 GiB); legitimate
+/// HLL/CMS/histogram payloads are sub-MiB. Attacker-controlled sidecars
+/// declaring larger sizes are rejected before allocation, eliminating
+/// the trivial DoS surface where a small file claims a multi-EiB blob.
+const MAX_BLOB_LEN: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Maximum permitted size for the JSON footer payload, in bytes.
+///
+/// The footer is a `serde_json` blob enumerating every per-blob metadata
+/// record. 16 MiB accommodates pathologically large numbers of blobs
+/// while still letting the reader reject attacker-controlled `payload_len`
+/// values that would force a multi-GiB allocation for the footer alone.
+const MAX_FOOTER_LEN: u64 = 16 * 1024 * 1024;
+
 /// Compression codec applied to a blob payload before it is written to the file.
 ///
 /// The codec name is recorded in the blob's `compression-codec` metadata so
@@ -334,6 +352,12 @@ impl<R: Read + Seek> PuffinReader<R> {
         inner.seek(SeekFrom::End(-12))?;
         let payload_len = inner.read_u32::<LittleEndian>()? as u64;
 
+        if payload_len > MAX_FOOTER_LEN {
+            return Err(Error::InvalidPuffin(format!(
+                "footer payload length {payload_len} exceeds MAX_FOOTER_LEN {MAX_FOOTER_LEN}"
+            )));
+        }
+
         let footer_total = 16u64 + payload_len; // head magic + payload + len + flags + trailing magic
         if file_len < footer_total {
             return Err(Error::InvalidPuffin(
@@ -384,6 +408,12 @@ impl<R: Read + Seek> PuffinReader<R> {
             .blobs
             .get(idx)
             .ok_or_else(|| Error::InvalidPuffin(format!("blob index {idx} out of range")))?;
+        if meta.length > MAX_BLOB_LEN {
+            return Err(Error::InvalidPuffin(format!(
+                "blob {idx} length {} exceeds MAX_BLOB_LEN {MAX_BLOB_LEN}",
+                meta.length
+            )));
+        }
         self.inner.seek(SeekFrom::Start(meta.offset))?;
         let mut buf = vec![0u8; meta.length as usize];
         self.inner.read_exact(&mut buf)?;
@@ -437,7 +467,28 @@ impl<R: Read + Seek> PuffinReader<R> {
 
 #[cfg(feature = "zstd")]
 fn decode_zstd(raw: &[u8]) -> Result<Vec<u8>> {
-    zstd::decode_all(raw).map_err(|e| Error::InvalidPuffin(format!("zstd decode: {e}")))
+    use std::io::Read as _;
+
+    // Stream into a bounded buffer so a high-ratio compression bomb
+    // cannot force a multi-GiB allocation. We read at most
+    // `MAX_BLOB_LEN + 1` bytes and reject anything that fills the
+    // sentinel byte — the +1 lets us distinguish "decompressed exactly
+    // MAX_BLOB_LEN" (legitimate boundary) from "would have produced
+    // more than MAX_BLOB_LEN" (attacker-controlled).
+    let mut decoder = zstd::stream::Decoder::new(raw)
+        .map_err(|e| Error::InvalidPuffin(format!("zstd decoder init: {e}")))?;
+    let cap = MAX_BLOB_LEN as usize;
+    let mut out = Vec::with_capacity(usize::min(raw.len().saturating_mul(4), cap));
+    let mut limited = (&mut decoder).take(cap as u64 + 1);
+    limited
+        .read_to_end(&mut out)
+        .map_err(|e| Error::InvalidPuffin(format!("zstd decode: {e}")))?;
+    if out.len() > cap {
+        return Err(Error::InvalidPuffin(format!(
+            "zstd decompressed size exceeds MAX_BLOB_LEN {MAX_BLOB_LEN}"
+        )));
+    }
+    Ok(out)
 }
 
 #[cfg(not(feature = "zstd"))]
@@ -546,6 +597,76 @@ mod tests {
 
         let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
         assert_eq!(reader.read_blob_decompressed(0).unwrap(), b"plain payload");
+    }
+
+    #[test]
+    fn read_blob_rejects_oversized_length() {
+        // Build a minimal valid Puffin file then tamper with the JSON
+        // footer to claim a blob length of MAX_BLOB_LEN + 1. The reader
+        // must reject the read_blob call before allocating.
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        writer
+            .add_blob(Blob::new("samkhya.test-v1", vec![0], b"x"))
+            .unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+
+        // Locate the JSON footer payload (between footer-head magic and
+        // the payload-len trailer). The header is the first 4 bytes; the
+        // last 12 bytes are payload-len(4) + flags(4) + trailing-magic(4).
+        let file_len = bytes.len();
+        let payload_len =
+            u32::from_le_bytes(bytes[file_len - 12..file_len - 8].try_into().unwrap()) as usize;
+        let payload_start = file_len - 12 - payload_len;
+        let payload_end = file_len - 12;
+        let json = std::str::from_utf8(&bytes[payload_start..payload_end])
+            .unwrap()
+            .to_string();
+        // Replace the legitimate length:1 with an oversized value. The
+        // payload was `b"x"` so the field reads `"length":1`.
+        let bogus_len = MAX_BLOB_LEN + 1;
+        let tampered_json = json.replacen("\"length\":1", &format!("\"length\":{bogus_len}"), 1);
+        assert_ne!(tampered_json, json, "tamper failed — payload schema drift?");
+
+        // Rebuild the file with the tampered footer. Adjust payload_len
+        // to match the new JSON byte length.
+        let mut tampered = Vec::with_capacity(file_len + 32);
+        tampered.extend_from_slice(&bytes[..payload_start]);
+        tampered.extend_from_slice(tampered_json.as_bytes());
+        let new_payload_len = tampered_json.len() as u32;
+        tampered.write_u32::<LittleEndian>(new_payload_len).unwrap();
+        tampered.write_u32::<LittleEndian>(0).unwrap();
+        tampered.extend_from_slice(MAGIC);
+
+        let mut reader = PuffinReader::open(Cursor::new(tampered)).unwrap();
+        let err = reader.read_blob(0).unwrap_err();
+        match err {
+            Error::InvalidPuffin(msg) => assert!(
+                msg.contains("MAX_BLOB_LEN"),
+                "expected MAX_BLOB_LEN rejection, got: {msg}"
+            ),
+            other => panic!("expected InvalidPuffin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_rejects_oversized_footer_payload_len() {
+        // Build a minimal file then rewrite its payload-len field to a
+        // value that exceeds MAX_FOOTER_LEN. Reader must reject before
+        // allocating a footer-sized buffer.
+        let writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        let bytes = writer.finish().unwrap().into_inner();
+        let mut tampered = bytes.clone();
+        let oversized = (MAX_FOOTER_LEN as u32).saturating_add(1);
+        let len_offset = tampered.len() - 12;
+        tampered[len_offset..len_offset + 4].copy_from_slice(&oversized.to_le_bytes());
+        match PuffinReader::open(Cursor::new(tampered)) {
+            Ok(_) => panic!("expected MAX_FOOTER_LEN rejection, got Ok"),
+            Err(Error::InvalidPuffin(msg)) => assert!(
+                msg.contains("MAX_FOOTER_LEN"),
+                "expected MAX_FOOTER_LEN rejection, got: {msg}"
+            ),
+            Err(other) => panic!("expected InvalidPuffin, got {other:?}"),
+        }
     }
 
     #[cfg(not(feature = "zstd"))]

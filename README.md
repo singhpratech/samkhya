@@ -5,7 +5,7 @@
 [![CI](https://github.com/singhpratech/samkhya/workflows/CI/badge.svg)](https://github.com/singhpratech/samkhya/actions)
 [![crates.io](https://img.shields.io/crates/v/samkhya-core.svg)](https://crates.io/crates/samkhya-core)
 [![docs.rs](https://img.shields.io/docsrs/samkhya-core)](https://docs.rs/samkhya-core)
-[![License: Apache-2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
 
 The name is the Sanskrit word सांख्य — *"enumeration / counting"* — a classical
 darshana whose discipline is counting reality's constituents honestly. The
@@ -84,8 +84,9 @@ corrected stats reached the physical plan.
 
 ## What's in 1.0
 
-**Thirteen crates** in one Cargo workspace. Dual-licensed Apache-2.0 OR MIT.
-Edition 2024. MSRV Rust 1.85; CI tests on 1.94 (the pinned project toolchain).
+**Thirteen crates** in one Cargo workspace. Licensed under Apache-2.0
+(explicit patent grant per §3). Edition 2024. MSRV Rust 1.85; CI tests
+on 1.94 (the pinned project toolchain).
 
 Layer 1 — portable stats foundation:
 - `samkhya-core` — portable stats layer, feedback recorder, LpBound envelope,
@@ -252,13 +253,14 @@ list of supported versions are documented in [SECURITY.md](./SECURITY.md).
 
 ## License
 
-Dual-licensed **Apache-2.0 OR MIT** at the user's choice. Sole author:
-Prateek Singh.
+Licensed under **Apache License 2.0** (single license, explicit patent
+grant per §3). Sole author: Prateek Singh.
 
-Matches the licensing posture of the surrounding ecosystem — DataFusion,
-Arrow, Iceberg, DataSketches — so adopters can vendor samkhya without
-license-compatibility analysis. Full text in [LICENSE-APACHE](./LICENSE-APACHE)
-and [LICENSE-MIT](./LICENSE-MIT).
+Matches the licensing posture of the surrounding analytical-engine
+ecosystem — DataFusion, Iceberg, ClickHouse, Apache Arrow itself — and
+gives every downstream user the same explicit patent grant rather than
+making it optional via a dual-license toggle. Full text in
+[LICENSE-APACHE](./LICENSE-APACHE).
 
 ## Citations (industry-standard anchors)
 

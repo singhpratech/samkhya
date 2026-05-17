@@ -16,6 +16,9 @@ import * as http from 'node:http';
 import { URL } from 'node:url';
 
 const FEATURE_LEN = 7;
+// SECURITY-REVIEW-2026-05-17.md (H4 + M1).
+const BODY_MAX_BYTES = 8 * 1024 * 1024;
+const MAX_INFER_BATCHES = 1024;
 
 interface DummyState {
   startedAtNs: bigint;
@@ -38,11 +41,32 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(buf);
 }
 
-async function readBody(req: http.IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
+async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer | null> {
+  // SECURITY-REVIEW-2026-05-17.md (H4): same body-size guard as the
+  // primary llm_infer_server.ts. Returns null on overflow.
+  const declared = req.headers['content-length'];
+  if (declared !== undefined) {
+    const n = Number(declared);
+    if (Number.isFinite(n) && n > maxBytes) return null;
+  }
+  return new Promise<Buffer | null>((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    let total = 0;
+    let aborted = false;
+    req.on('data', (c: Buffer) => {
+      if (aborted) return;
+      total += c.byteLength;
+      if (total > maxBytes) {
+        aborted = true;
+        req.destroy();
+        resolve(null);
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!aborted) resolve(Buffer.concat(chunks));
+    });
     req.on('error', reject);
   });
 }
@@ -58,12 +82,20 @@ function handleHealth(_req: http.IncomingMessage, res: http.ServerResponse): voi
 }
 
 async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const bodyBytes = await readBody(req);
+  const bodyBytes = await readBody(req, BODY_MAX_BYTES);
+  if (bodyBytes === null) {
+    sendJson(res, 413, { detail: `request body exceeds ${BODY_MAX_BYTES}` });
+    return;
+  }
   let body: any;
   try {
     body = JSON.parse(bodyBytes.toString('utf8'));
   } catch (exc) {
-    sendJson(res, 400, { detail: `invalid json: ${String(exc)}` });
+    // See SECURITY-REVIEW-2026-05-17.md (C3): log full detail to stderr
+    // but echo only the exception class on the wire.
+    process.stderr.write(`[llm-dummy] /infer parse err: ${String(exc)}\n`);
+    const name = (exc as { constructor?: { name?: string } })?.constructor?.name ?? 'Error';
+    sendJson(res, 400, { detail: `invalid json: ${name}` });
     return;
   }
   const features = body.features;
@@ -79,6 +111,13 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
   if (features.length % FEATURE_LEN !== 0) {
     sendJson(res, 400, {
       detail: `features length ${features.length} not a multiple of ${FEATURE_LEN}`,
+    });
+    return;
+  }
+  const batches = features.length / FEATURE_LEN;
+  if (batches > MAX_INFER_BATCHES) {
+    sendJson(res, 413, {
+      detail: `features batch count ${batches} exceeds ${MAX_INFER_BATCHES}`,
     });
     return;
   }
@@ -103,11 +142,25 @@ function parseArgs(argv: string[]): { host: string; port: number } {
   return { host, port };
 }
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
 function main(): void {
   const { host, port } = parseArgs(process.argv.slice(2));
   state.host = host;
   state.port = port;
   state.startedAtNs = process.hrtime.bigint();
+
+  // SECURITY-REVIEW-2026-05-17.md (H1): warn on non-loopback bind.
+  if (!LOOPBACK_HOSTS.has(host)) {
+    const banner = '='.repeat(70);
+    process.stderr.write(
+      `\n${banner}\n` +
+        `[WARN] samkhya LLM dummy server bound to non-loopback (${host}).\n` +
+        `[WARN] This server has NO authentication. Ensure network isolation\n` +
+        `[WARN] before exposing the address.\n` +
+        `${banner}\n`,
+    );
+  }
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? host}`);

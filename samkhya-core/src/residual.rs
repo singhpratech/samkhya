@@ -57,6 +57,41 @@
 
 use crate::Result;
 
+/// Emit a single `log::warn!` the first time a plaintext-HTTP URL
+/// pointing at a non-loopback host is configured for an HTTP corrector
+/// backend. See `documents/SECURITY-REVIEW-2026-05-17.md` (H2): such a
+/// URL means features and any embedded baseline estimate travel
+/// unencrypted on the wire. The warning is fire-and-forget — no behaviour
+/// change, so well-configured operators (the typical case, defaults are
+/// localhost) see nothing.
+#[cfg(any(feature = "tabpfn_http", feature = "llm_http"))]
+fn warn_if_remote_plaintext_http(url: &str, backend: &'static str) {
+    let lower = url.to_ascii_lowercase();
+    if !lower.starts_with("http://") {
+        return;
+    }
+    // Pull the host (between "http://" and the next "/" or ":" or end).
+    let rest = &url[7..]; // safe: starts_with confirmed above
+    let host_end = rest
+        .find(|c: char| c == '/' || c == ':' || c == '?')
+        .unwrap_or(rest.len());
+    let host = &rest[..host_end];
+    let is_loopback = matches!(host, "127.0.0.1" | "::1" | "localhost")
+        || host.starts_with("[::1]")
+        || host.starts_with("127.");
+    if is_loopback {
+        return;
+    }
+    if std::env::var("SAMKHYA_ALLOW_REMOTE_HTTP").as_deref() == Ok("1") {
+        return;
+    }
+    log::warn!(
+        "samkhya {backend} corrector configured with plaintext HTTP to non-loopback host {host}; \
+         features and baseline_estimate will travel unencrypted. Use https:// or set \
+         SAMKHYA_ALLOW_REMOTE_HTTP=1 to silence this warning."
+    );
+}
+
 /// Feature vector handed to the corrector at estimate time.
 ///
 /// Intentionally minimal at v0.0.1: row count + distinct count + null
@@ -663,17 +698,18 @@ pub mod tabpfn {
     impl TabPfnHttpCorrector {
         /// Build a corrector from explicit options.
         pub fn new(options: TabPfnHttpOptions) -> Self {
+            super::warn_if_remote_plaintext_http(&options.base_url, "tabpfn_http");
             Self { options }
         }
 
         /// Convenience constructor: default options with the supplied URL.
         pub fn with_url(base_url: impl Into<String>) -> Self {
-            Self {
-                options: TabPfnHttpOptions {
-                    base_url: base_url.into(),
-                    ..TabPfnHttpOptions::default()
-                },
-            }
+            let opts = TabPfnHttpOptions {
+                base_url: base_url.into(),
+                ..TabPfnHttpOptions::default()
+            };
+            super::warn_if_remote_plaintext_http(&opts.base_url, "tabpfn_http");
+            Self { options: opts }
         }
 
         /// Configured options (for diagnostics / logging).
@@ -897,6 +933,7 @@ pub mod llm {
             if options.timeout_ms > MAX_TIMEOUT_MS {
                 options.timeout_ms = MAX_TIMEOUT_MS;
             }
+            super::warn_if_remote_plaintext_http(&options.base_url, "llm_http");
             Self { options }
         }
 

@@ -40,7 +40,12 @@
 # samkhya-gpudb/scripts/run-llm-bench-ts.sh, default port 8767). Same
 # wire contract; pick whichever runtime fits the host.
 
+# SECURITY-REVIEW-2026-05-17.md (M3): `pipefail` so a curl failure in
+# the health-poll loop (curl piped into grep) does not silently appear
+# to succeed via grep exit 0. `errexit` would be too aggressive for the
+# trap-cleanup pattern below, so we leave it off intentionally.
 set -u
+set -o pipefail
 
 # Resolve repo root from this script's location so the script is safe
 # to invoke from any cwd.
