@@ -1,8 +1,12 @@
 # Contributing to samkhya
 
-Thanks for your interest in samkhya. The project is pre-alpha and the
-public surface is still in flux, so the most useful contributions right
-now are:
+Thanks for your interest in samkhya. The project is **v1.0+ stable**.
+The public Rust API, on-disk formats (Puffin sidecar layout, sketch
+payload codecs, SQLite feedback-store schema), and CLI flags are
+covered by semver — see [`docs/SEMVER.md`](./docs/SEMVER.md) for the
+governance rules and [`CHANGELOG.md`](./CHANGELOG.md) for the
+authoritative release log. Useful contributions land in any of the
+following buckets:
 
 - Bug reports against `samkhya-core` sketches (HLL, Bloom) and the
   `ColumnStats` shape.
@@ -188,10 +192,9 @@ maintainer is a single author and reviews land in batches.
 ## Architecture
 
 For a high-level tour of the workspace and the design decisions that
-shaped it, see `samkhya.md` §3. A dedicated `ARCHITECTURE.md` will land
-once the major subsystems (Puffin I/O, feedback recorder, LpBound
-envelope) have first implementations — when it exists, it will be
-linked here.
+shaped it, see [`ARCHITECTURE.md`](./ARCHITECTURE.md). The major
+subsystems (Puffin I/O, feedback recorder, LpBound envelope) are all
+implemented and documented there.
 
 The short version:
 

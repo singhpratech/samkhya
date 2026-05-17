@@ -1,178 +1,126 @@
 # samkhya-duckdb-ext
 
-Server-side **DuckDB extension** for samkhya — a loadable
-`.duckdb_extension` that exposes samkhya's portable sketches as DuckDB
-SQL functions and feeds a `_samkhya_stats` metadata table back into
-the planner during cardinality estimation.
+**v1.0 cxx FFI scaffold** linking samkhya's portable cardinality
+primitives into DuckDB. The Rust <-> C++ bridge is complete and
+linkable today; the DuckDB optimizer hook that consumes the bridge
+ships in **v1.1**, pending [DuckDB Issue #11638][issue-11638]
+("OptimizerExtension API for cardinality overrides").
 
-## Status: scaffolding (v0.7.0 roadmap)
+[issue-11638]: https://github.com/duckdb/duckdb/issues/11638
 
-This crate is the v0.7.0 deliverable from `ROADMAP.md` §5. It ships:
+## What v1.0 ships
 
-- a working Rust ↔ C++ `cxx` bridge surface,
-- a C++ stub with the DuckDB extension entrypoint declared,
-- the build plumbing wired up behind an opt-in Cargo feature,
-- documented hand-off points for the remaining DuckDB API calls.
+A `staticlib + rlib` Rust crate that, when linked from a C++ build,
+exposes the following symbols under the `samkhya::` C++ namespace:
 
-Full DuckDB function registration plus the optimizer-extension hook is
-a multi-week C++ effort tracked separately. The next round should not
-need to redesign the integration surface — only fill in the DuckDB API
-calls inside `src/extension.cpp`.
+| Symbol | Purpose |
+|---|---|
+| `samkhya::hll_new(p)` | Construct an `HllHandle` at precision `p` (4..=18; fallback p=12). |
+| `samkhya::hll_add(h, bytes)` | Insert one byte-string item into the sketch. |
+| `samkhya::hll_estimate(h)` | Return the current cardinality estimate as `double`. |
+| `samkhya::puffin_inspect(path)` | Read a Puffin sidecar and return its blob metadata. |
+| `samkhya::samkhya_register(db)` | v1.1 entrypoint, declared today, no-op body. |
 
-## Two DuckDB crates — which is which
+The FFI surface is declared exactly once, in `src/lib.rs`, inside a
+`#[cxx::bridge(namespace = "samkhya")]` module. The cxx-build crate
+generates the matching C++ header at build time; `src/wrapper.cc`
+includes it and re-exposes the symbols through `src/wrapper.h`.
 
-This crate is **not** the same as `samkhya-duckdb`. They sit on
-opposite sides of the DuckDB process boundary:
+## What v1.1 will add
 
-| Crate | Role | C++ toolchain required |
-|---|---|---|
-| `samkhya-duckdb` | Rust *client* that opens a DuckDB connection and reads rows. Builds sketches outside the engine. | Only with the `bundled` feature. |
-| `samkhya-duckdb-ext` *(this crate)* | `.duckdb_extension` that DuckDB *loads* at runtime. Runs *inside* the engine. | Yes — for the `extension` feature. |
+The actual DuckDB integration:
 
-The client crate is the "workaround tier" from v0.4.0; this crate is
-the graduation path.
+1. **Optimizer extension.** A subclass of `duckdb::OptimizerExtension`
+   that walks `LogicalGet` nodes, matches `(schema, table, column)`
+   tuples against a `_samkhya_stats` metadata table, and overrides
+   the planner's cardinality estimate when a match is found.
+2. **`_samkhya_stats` table.** Catalog-registered metadata table with
+   `(schema, table, column, distinct_count, sketch_blob)` columns.
+3. **`register_puffin(table, path)` SQL function.** Reads a Puffin
+   sidecar via the bridge's `puffin_inspect`, hydrates the sketches,
+   and inserts rows into `_samkhya_stats`.
 
-## Default build (no C++ toolchain needed)
+All of v1.1 lives inside the body of `samkhya::samkhya_register` and
+the new `duckdb::OptimizerExtension` subclass — the cxx bridge itself
+does not need to change.
+
+The blocker is upstream: DuckDB's `OptimizerExtension` does not yet
+expose a stable hook for cardinality overrides. Issue #11638 tracks
+that work; once it lands we'll pin to the resulting DuckDB tag and
+fill in the body of `samkhya_register`.
+
+## Today's call shape (from C++)
+
+```cpp
+#include "samkhya-duckdb-ext/src/lib.rs.h"
+
+// Build an HLL sketch over an in-memory column.
+auto h = samkhya::hll_new(12);
+samkhya::hll_add(*h, rust::Slice<const uint8_t>{ptr, len});
+double ndv = samkhya::hll_estimate(*h);
+
+// Inspect a Puffin sidecar.
+auto blobs = samkhya::puffin_inspect(rust::Str{"events.puffin"});
+for (const auto& b : blobs) {
+    // b.kind, b.offset, b.length
+}
+```
+
+## Building
+
+### Default (requires a C++17 toolchain)
 
 ```bash
 cargo check -p samkhya-duckdb-ext
-cargo build  -p samkhya-duckdb-ext
+cargo build -p samkhya-duckdb-ext --release
 ```
 
-These commands work on a minimal image with **no DuckDB headers and no
-C++ compiler**. With the default feature set the crate compiles to an
-empty cdylib so the workspace stays buildable on small CI runners.
+The default build invokes `cxx_build`, generates the bridge header,
+and compiles `src/wrapper.cc` with `-std=c++17`. It needs a C++17
+compiler (clang++ >= 7 or g++ >= 7) on PATH. It does **not** need any
+DuckDB headers — those only become relevant in v1.1 when
+`samkhya_register` gains a body.
 
-## Building the actual extension
+### Minimal CI (`no_cxx` feature)
 
-The `extension` Cargo feature enables the cxx bridge and compiles
-`src/extension.cpp`.
-
-### Prerequisites
-
-1. **C++17 toolchain** — recent clang or gcc.
-2. **DuckDB extension headers** — the simplest way to obtain them is
-   to clone DuckDB's official extension template:
-
-   ```bash
-   git clone https://github.com/duckdb/extension-template ~/duckdb-ext-tpl
-   cd ~/duckdb-ext-tpl
-   git checkout v1.2.x   # pin per ROADMAP §5 risk note
-   make pull                                # fetches duckdb/ submodule
-   ```
-
-   This leaves the DuckDB headers at
-   `~/duckdb-ext-tpl/duckdb/src/include`.
-
-3. **`DUCKDB_INCLUDE_DIR` env var** pointing at those headers:
-
-   ```bash
-   export DUCKDB_INCLUDE_DIR=~/duckdb-ext-tpl/duckdb/src/include
-   ```
-
-### Build
+For sandboxed CI runners that lack a C++ toolchain entirely:
 
 ```bash
-cargo build -p samkhya-duckdb-ext --release --features extension
+cargo check -p samkhya-duckdb-ext --features no_cxx
 ```
 
-The resulting cdylib lands at:
+With `--features no_cxx` the `build.rs` is a no-op, the cxx bridge
+module is excluded from compilation, and the crate's Rust API stays
+fully exercised by the unit tests. The C++ surface is unreachable in
+that configuration — the trade-off is intentional and documented in
+`Cargo.toml`.
 
-```
-target/release/libsamkhya_duckdb_ext.so       # Linux
-target/release/libsamkhya_duckdb_ext.dylib    # macOS
-target/release/samkhya_duckdb_ext.dll         # Windows
-```
+## Output
 
-If this build fails with `fatal error: 'duckdb.hpp' file not found`,
-the DuckDB headers are missing or `DUCKDB_INCLUDE_DIR` is unset. That
-is the expected failure mode for environments that haven't set up the
-extension template — the default `cargo check` path stays green.
-
-### Install
-
-Copy the cdylib into DuckDB's per-user extension directory, renaming
-the suffix to `.duckdb_extension`:
-
-```bash
-DUCKDB_VER=1.2.0        # match the DuckDB version you built against
-ARCH=$(uname -m)        # e.g. x86_64 / arm64
-PLATFORM=linux_amd64    # or osx_arm64 etc. — see DuckDB docs
-
-DEST=~/.duckdb/extensions/v${DUCKDB_VER}/${PLATFORM}
-mkdir -p "$DEST"
-cp target/release/libsamkhya_duckdb_ext.so \
-   "$DEST/samkhya_duckdb_ext.duckdb_extension"
+```text
+target/release/libsamkhya_duckdb_ext.a   # staticlib for the DuckDB C++ build
+target/release/libsamkhya_duckdb_ext.rlib # rlib for sibling Rust crates
 ```
 
-Unsigned extensions require DuckDB to run with
-`allow_unsigned_extensions=true`:
+The staticlib is what `samkhya-duckdb-ext`'s v1.1 wiring will link
+into the DuckDB extension binary. The rlib lets sibling crates
+(notably `samkhya-bench`'s planned `--engine duckdb` runner) call the
+Rust API directly without going through C++.
 
-```bash
-duckdb -unsigned
-```
+## Two DuckDB crates — which is which
 
-or, inside a session:
+This crate is **not** the same as `samkhya-duckdb`:
 
-```sql
-SET allow_unsigned_extensions = true;
-```
+| Crate | Role |
+|---|---|
+| `samkhya-duckdb` | Rust *client* that opens a DuckDB connection from outside the engine. |
+| `samkhya-duckdb-ext` *(this crate)* | FFI shipped *into* DuckDB. v1.0: bridge only; v1.1: optimizer hook. |
 
-### Load
-
-```sql
-LOAD 'samkhya_duckdb_ext';
-```
-
-### Use
-
-Once the C++ side is filled in (see "Outstanding work" below), the
-SQL surface will look like:
-
-```sql
--- Build a portable HLL sketch over a column.
-SELECT hll_sketch_estimate(hll_sketch_build(user_id)) AS approx_users
-FROM events;
-
--- Register a Puffin sidecar so the planner sees samkhya stats.
-CALL register_puffin('events', '/data/events.parquet.puffin');
-```
-
-The bridged Rust API that backs those SQL functions is declared in
-`src/lib.rs` inside the `#[cxx::bridge]` block; the cdylib's
-entrypoint is `samkhya_duckdb_ext_init` in `src/extension.cpp`.
-
-## Outstanding work (next round)
-
-The remaining tasks are *DuckDB-side*, not Rust-side:
-
-1. **Scalar / aggregate function registration.** Replace the
-   `TODO(v0.7.0-followup)` placeholders in `extension.cpp` with real
-   `ScalarFunction` / `AggregateFunction` constructors and call
-   `ExtensionUtil::RegisterFunction`. The aggregate state is the
-   `rust::Box<samkhya::HllSketch>` produced by `hll_new`; thread it
-   through DuckDB's state-init / update / combine / finalize callbacks.
-2. **`_samkhya_stats` table.** Create the metadata table on extension
-   init via DuckDB's catalog API, with columns
-   `(schema, table, column, distinct_count, sketch_blob)`.
-3. **`register_puffin` SQL function.** Reads a Puffin sidecar (use
-   the `samkhya-core::puffin` reader from the Rust side via a new
-   bridge function), inserts rows into `_samkhya_stats`, and bumps a
-   "stats version" counter the planner sees.
-4. **`OptimizerExtension`.** Subclass `duckdb::OptimizerExtension` and
-   register it in `samkhya_duckdb_ext_init`. On invocation, walk the
-   `LogicalOperator` tree, match `LogicalGet` nodes against
-   `_samkhya_stats`, and inject `distinct_count` overrides.
-5. **CI matrix job.** Add a CI configuration that performs the
-   `extension`-feature build with the DuckDB headers cached, per the
-   `ROADMAP.md` §5 risk note. Expect a >30 min cold run; cache the
-   DuckDB source checkout aggressively.
-
-Once those land, the bench harness's `--engine duckdb` path
-(`bench run --suite job-slow --engine duckdb`) will exercise the
-extension end-to-end against the same Puffin sidecars DataFusion
-already consumes — the portability moat the project is built around.
+`samkhya-duckdb` is the workaround tier from earlier releases;
+`samkhya-duckdb-ext` is the graduation path. Once v1.1 lands, the
+bench harness will exercise both paths against the same Puffin
+sidecars DataFusion already consumes.
 
 ## License
 
-Apache-2.0. See `LICENSE-APACHE` at the repository root.
+Apache-2.0. Sole author: Prateek Singh.

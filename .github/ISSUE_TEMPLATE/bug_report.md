@@ -37,6 +37,8 @@ shows the problem.
 
 <!--
 Stack traces, sketch payloads, query plans, or anything else that helps
-narrow it down. For security-sensitive bugs, please email the
-maintainer privately instead of filing here — see CONTRIBUTING.md.
+narrow it down. For security-sensitive bugs, use **GitHub Security
+Advisories** (GHSA) on the repository — do not email the maintainer
+and do not file public issues for security reports. See SECURITY.md
+for the GHSA-only intake policy.
 -->

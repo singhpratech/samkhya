@@ -1,99 +1,105 @@
 # samkhya-iceberg
 
-Bridge between Apache Iceberg table snapshots and samkhya's Puffin
-sidecars.
+[![crates.io](https://img.shields.io/crates/v/samkhya-iceberg.svg)](https://crates.io/crates/samkhya-iceberg)
+[![docs.rs](https://docs.rs/samkhya-iceberg/badge.svg)](https://docs.rs/samkhya-iceberg)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/singhpratech/samkhya/blob/main/LICENSE)
 
-## Integration model
+Bridge between Apache Iceberg snapshots and samkhya's Puffin sidecars. Walks
+an Iceberg snapshot's `statistics-files` entries, resolves the Puffin paths,
+and surfaces samkhya `KIND`-tagged blobs as engine-neutral `ColumnStats`.
 
-Iceberg has had a Puffin sidecar concept since the v2 spec: every
-snapshot's manifest carries a `statistics` entry that lists Puffin
-files written alongside the table. samkhya already knows how to
-write Puffin files
-([`samkhya_core::puffin`](../samkhya-core/src/puffin.rs)) and how to
-bundle the deserialized sketches into
-[`ColumnStats`](../samkhya-core/src/stats.rs); what it has been
-missing is the *snapshot-aware* link that says: "for this current
-table snapshot, here are the sidecar paths samkhya should look at".
+Part of the [samkhya](https://github.com/singhpratech/samkhya) project —
+portable, feedback-driven cardinality correction for embedded analytical
+engines.
 
-This crate is that link.
+## How it fits the Iceberg model
 
-Concretely, it provides:
+Iceberg already has a Puffin sidecar concept: every snapshot's manifest
+carries `statistics` and `partition-statistics` entries that list Puffin
+files written alongside the table. Each Puffin file holds typed blobs
+identified by a `KIND` tag. Iceberg's own blob kinds
+(`apache-datasketches-theta-v1`, `deletion-vector-v1`, …) live in the same
+physical file as samkhya's blob kinds (`samkhya.hll-v1`, `samkhya.bloom-v1`,
+`samkhya.cms-v1`, `samkhya.equi-depth-v1`, `samkhya.correlated-2d-v1`).
+Per the Puffin v1 spec, readers ignore kinds they do not understand — so an
+Iceberg-native reader transparently coexists with samkhya-produced sidecars.
 
-- **`SnapshotPuffinPaths`** — an always-on contract type (no cargo
-  features required) listing the Puffin sidecar paths discovered
-  from a snapshot manifest. Downstream code can depend on this type
-  without pulling the heavy `iceberg` crate.
-- **`Schema`** — a lightweight `(field_id, name)` view used by the
-  always-on `column_stats_from_paths` projection.
-- **`snapshot::discover_puffin_sidecars`** (feature `iceberg`) —
-  reads the current snapshot's `StatisticsFile` entries from a live
+samkhya already knows how to write Puffin files and how to bundle the
+deserialized sketches into `ColumnStats`. This crate supplies the missing
+*snapshot-aware* link: "for this current table snapshot, here are the
+sidecar paths samkhya should look at."
+
+## What this crate provides
+
+- **`SnapshotPuffinPaths`** (always available, no cargo features required) —
+  a list of Puffin sidecar paths discovered from a snapshot manifest, plus
+  the resolved snapshot id. Constructible from any source via
+  `SnapshotPuffinPaths::from_strings`, so a test harness or a Puffin-only
+  pipeline that does not own an Iceberg table can still use the loader.
+- **`Schema` / `SchemaField`** — a lightweight `(field_id, name)` projection
+  of the Iceberg schema; the minimum needed to map Puffin blob metadata back
+  onto `ColumnStats`.
+- **`column_stats_from_paths`** — the loader that combines a
+  `SnapshotPuffinPaths` set with `samkhya_core::puffin::PuffinReader` to
+  produce a `HashMap<field_id, ColumnStats>`.
+- **`snapshot::discover_puffin_sidecars`** (feature `iceberg`) — reads the
+  current snapshot's `StatisticsFile` entries from a live
   `iceberg::table::Table` and returns a `SnapshotPuffinPaths`.
-- **`snapshot::load_column_stats`** (feature `iceberg`) — composes
-  `discover_puffin_sidecars` with `samkhya_core::puffin::PuffinReader`
-  to deserialize samkhya sketches and project them into a
-  `HashMap<usize, ColumnStats>` keyed by Iceberg field id.
+- **`snapshot::load_column_stats`** (feature `iceberg`) — the async
+  end-to-end walker: discover sidecars, decode samkhya blobs, return
+  `ColumnStats` keyed by Iceberg field id.
 
-## How to enable
+## Quick start
 
-The `iceberg` crate is large (it transitively pulls `opendal`,
-`arrow`, `parquet`, `tokio`, etc.). To keep default builds slim,
-the live Iceberg walker is hidden behind a non-default cargo
-feature:
+```rust
+use samkhya_iceberg::{SnapshotPuffinPaths, Schema, SchemaField, column_stats_from_paths};
 
-```toml
-[dependencies]
-samkhya-iceberg = { version = "0.0.1", features = ["iceberg"] }
+let paths = SnapshotPuffinPaths::from_strings(
+    Some(42),
+    ["orders.puffin", "lineitem.puffin"],
+);
+
+let schema = Schema::from_fields(vec![
+    SchemaField { field_id: 1, name: "order_id".into() },
+    SchemaField { field_id: 2, name: "customer_id".into() },
+]);
+
+let stats = column_stats_from_paths(&paths, &schema)?;
+for (field_id, col_stats) in &stats {
+    println!("field {field_id}: distinct ~= {:?}", col_stats.distinct_count);
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Without the feature, you can still construct `SnapshotPuffinPaths`
-by hand (from any source — a test harness, a Puffin-only ELT
-pipeline that does not own an Iceberg table) and feed it to
-`column_stats_from_paths`. This makes the crate cheap to depend
-on as a *contract*: a downstream consumer can write code against
-`SnapshotPuffinPaths` without committing to compiling the iceberg
-dependency tree.
+## Feature flags
 
-## Puffin-side compatibility
+- `iceberg` (off by default) — pulls in the apache `iceberg` crate (0.9.x)
+  plus `tokio`, and enables the async snapshot walker in the `snapshot`
+  module. Off by default because the iceberg dependency tree is large
+  (opendal, parquet, arrow, …). Downstream crates that only need
+  `SnapshotPuffinPaths` as a contract type can depend on `samkhya-iceberg`
+  without paying for that tree.
 
-samkhya's Puffin blob kinds (`samkhya.hll-v1`, `samkhya.bloom-v1`,
-`samkhya.cms-v1`, `samkhya.equi-depth-v1`,
-`samkhya.correlated-2d-v1`) live alongside Iceberg's own blob
-kinds (`apache-datasketches-theta-v1`, `deletion-vector-v1`, etc.)
-in the same physical sidecar file. The Puffin v1 spec is explicit
-about this: readers MUST ignore blob kinds they do not understand.
+## Compatibility
 
-This means:
+Tested against `iceberg = "0.9.1"`. Builds cleanly on Rust 1.94 (the iceberg
+crate's declared minimum is 1.92). Earlier design notes referenced 0.4; the
+snapshot / statistics-file shape is substantively the same across the two,
+but module paths moved — this crate insulates callers from that drift. If
+upstream shifts again, only the body of `snapshot::discover_puffin_sidecars`
+changes; the public `SnapshotPuffinPaths` contract is independent of the
+iceberg crate.
 
-- An Iceberg-native reader that knows nothing about samkhya will
-  still read its own `apache-datasketches-theta-v1` blobs out of
-  a samkhya-produced sidecar.
-- samkhya-iceberg's loader skips any blob kind it does not
-  recognize, so it co-exists cleanly with sidecars written by
-  Iceberg's own statistics-file writers (Trino, Spark, etc.).
+## Integration
 
-The two ecosystems share the file format and ignore each other's
-blob kinds — that is the portability moat.
-
-## Iceberg version
-
-This crate is currently built and tested against `iceberg = 0.9.1`
-(latest at the time of writing). The original design note referenced
-`0.4`; the snapshot / statistics-file shape is substantively the
-same across the two, but module paths have moved. If the iceberg
-crate's "current snapshot's stats files" accessor shifts again,
-only the body of `snapshot::discover_puffin_sidecars` needs to
-change — the public `SnapshotPuffinPaths` contract is independent
-of the iceberg crate.
-
-## Status
-
-Working scaffold. The path-walking and Puffin-projection logic are
-both implemented and exercised by `tests/smoke.rs`. A full
-end-to-end test against a real in-memory `iceberg::table::Table`
-fixture is gated behind `#[ignore]` until iceberg-rust ships a
-stable `TableBuilder::build_for_test`-style helper for attaching
-`StatisticsFile` entries to a snapshot.
+A nightly ELT job writes a Puffin sidecar containing samkhya HLL / Bloom /
+histogram blobs and appends a `statistics-files` entry to the new Iceberg
+snapshot. At query time, any engine adapter (`samkhya-datafusion`,
+`samkhya-duckdb`) uses `samkhya-iceberg` to walk the current snapshot, locate
+sidecars, and load `ColumnStats` — without coupling the engine itself to the
+iceberg crate. The two ecosystems share the file format and ignore each
+other's blob kinds; that is the portability moat.
 
 ## License
 
-Apache-2.0, inherited from the workspace.
+Apache-2.0. Sole author: Prateek Singh.

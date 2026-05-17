@@ -1,59 +1,103 @@
 # samkhya-postgres
 
-PostgreSQL adapter for [samkhya](../).
+PostgreSQL extension adapter for [samkhya](../) — portable
+cardinality correction for embedded analytical engines.
 
-## Status
+This crate ships a [pgrx](https://github.com/pgcentralfoundation/pgrx)
+based PostgreSQL extension that exposes samkhya's portable sketch and
+Puffin sidecar primitives to SQL.
 
-Scaffold. The integration model is settled in shape — PostgreSQL exposes
-a rich set of planner / executor hooks, and the prior art is mature —
-but the wiring lands in a later milestone. This crate declares the
-surface today and reserves the workspace member slot.
+## Build modes
 
-## Prior art
+The crate has two build modes, controlled by the `pg_extension` Cargo
+feature:
 
-- [`postgrespro/aqo`](https://github.com/postgrespro/aqo) — the closest
-  working analogue. AQO hooks the planner and executor, captures
-  `(plan, estimated_rows, actual_rows)` after every query, and feeds
-  the deltas back into selectivity estimates on subsequent runs.
-  samkhya targets the same `(plan, est, actual)` capture shape but
-  keeps the sketches portable (Puffin / `samkhya_core::sketches`)
-  rather than baked into a PostgreSQL-specific store.
-- [`pg_qualstats`](https://github.com/powa-team/pg_qualstats) — per-qual
-  selectivity statistics; useful template for how to surface the
-  collected stats as SQL-queryable views.
-- [`pg_hint_plan`](https://github.com/ossc-db/pg_hint_plan) — explicit
-  cardinality hints via SQL comments; complementary to samkhya's
-  feedback-driven correction path.
+- **Default (`pg_extension` off)**: empty `rlib`. Compiles in seconds
+  without PostgreSQL development headers. This is what
+  `cargo check --workspace` builds in CI. Suitable for downstream
+  crates that want `samkhya-postgres` in their dependency graph
+  without forcing every consumer to install `libpq-dev`.
+- **`pg_extension` on**: pulls in pgrx and compiles the real
+  PostgreSQL loadable module. Requires PostgreSQL development headers
+  (`postgresql-server-dev-NN` on Debian/Ubuntu, `postgresql-devel` on
+  RHEL/Fedora) and the matching `cargo-pgrx` toolchain.
 
-## Planned integration patterns
+## Quickstart (extension build)
 
-1. **PG extension via [pgrx](https://github.com/pgcentralfoundation/pgrx)**
-   — register `planner_hook` to inject corrected cardinalities into
-   `RelOptInfo::rows`, and `ExecutorEnd_hook` to capture actual row
-   counts post-execution. Persist observations into a `samkhya` schema
-   mirroring the `aqo_data` / `aqo_queries` layout.
-2. **libpq-driven sidecar** — for environments that cannot load native
-   extensions, a `tokio-postgres` sidecar scrapes
-   `pg_stat_statements` plus `EXPLAIN (ANALYZE, FORMAT JSON)` output
-   and writes sketches into a samkhya-managed schema, surfaced back
-   into the planner via `pg_hint_plan`-style hints.
-3. **Sketches in a `samkhya` schema** — HLL / Bloom / Count-Min /
-   EquiDepthHistogram serialized via
-   `samkhya_core::sketches::Sketch` and stored as `bytea` keyed by
-   `(table_oid, attnum)`, queryable from SQL for debugging.
+```bash
+# 1. Install the pgrx CLI.
+cargo install --locked cargo-pgrx
 
-## Why this crate exists today
+# 2. One-time pgrx init — downloads and builds the supported PG
+#    majors into ~/.pgrx (skip the ones you don't need with --pg16
+#    etc.). Pick the version you plan to develop against.
+cargo pgrx init
 
-The samkhya architecture lists PostgreSQL alongside DataFusion,
-DuckDB, Polars, and gpudb as integration targets. Even as a stub, this
-crate:
+# 3. From the workspace root, run the extension inside an ephemeral
+#    PostgreSQL 16 (or 17) instance with psql attached.
+cargo pgrx run pg16 --features pg_extension,pg16 \
+    --package samkhya-postgres
 
-- Reserves the workspace member slot and crate name on crates.io.
-- Lets downstream users add `samkhya-postgres` to their `Cargo.toml`
-  today and pick up the real integration once it lands.
-- Documents the planned hook shape so contributors can map
-  `postgrespro/aqo`-style prior art onto samkhya's portable,
-  feedback-driven, self-correcting cardinality model.
+# Inside psql:
+#   CREATE EXTENSION samkhya_postgres;
+```
+
+## SQL surface
+
+### `samkhya_hll_count(input anyarray) -> bigint`
+
+Builds a samkhya `HllSketch` (precision 14) from the input array and
+returns its estimated distinct-element count.
+
+```sql
+SELECT samkhya_hll_count(array_agg(id)) FROM foo;
+SELECT samkhya_hll_count(ARRAY[1, 2, 2, 3, 3, 3]::int[]);
+```
+
+### `samkhya_puffin_inspect(path text) -> jsonb`
+
+Opens an Iceberg [Puffin](https://iceberg.apache.org/puffin-spec/)
+sidecar file on the server filesystem and returns per-blob metadata
+(`kind`, `fields`, `offset`, `length`, `compression_codec`).
+
+```sql
+SELECT samkhya_puffin_inspect('/srv/iceberg/sketches/orders.puffin');
+```
+
+Output shape:
+
+```json
+{
+  "blobs": [
+    {
+      "kind": "samkhya.hll-v1",
+      "fields": [7],
+      "offset": 4,
+      "length": 16384,
+      "compression_codec": null
+    }
+  ]
+}
+```
+
+## Scope
+
+This is the v1.0 scaffold. It establishes the extension surface,
+crate layout, and pgrx feature gating. The operator-side cardinality
+hook (replacing `get_relation_info_hook` so the planner picks up
+samkhya's corrected row estimates without per-query SQL changes) is a
+**v1.1** target.
+
+## Testing
+
+```bash
+# Default-feature check (no PG headers required).
+cargo check -p samkhya-postgres
+
+# Extension-side unit tests (requires cargo-pgrx).
+cargo pgrx test pg16 --features pg_extension,pg16,pg_test \
+    --package samkhya-postgres
+```
 
 ## License
 

@@ -1,0 +1,105 @@
+cff-version: 1.2.0
+message: "If you use samkhya in academic work, please cite it as below."
+title: "samkhya: portable, feedback-driven cardinality correction for embedded analytical engines"
+abstract: >
+  samkhya is the engine-agnostic Rust SDK for feedback-driven cardinality
+  correction in embedded analytical engines. It provides a pluggable
+  `Corrector` trait (GBT default, TabPFN-2.5 opt-in, LLM TODO), an
+  `LpJoinBound` pessimistic envelope (strict-tighter than AGM by 40.95×
+  on star-5 join topologies, p<10⁻⁵), portable Iceberg Puffin sidecars
+  for five classical sketches (HLL, Bloom, Count-Min, equi-depth
+  histogram, 2D correlated histogram), and adapters into DataFusion,
+  DuckDB, Polars, Postgres, Iceberg, Arrow, and Python.
+authors:
+  - family-names: Singh
+    given-names: Prateek
+version: "1.0.0"
+date-released: "2026-05-17"
+license:
+  - Apache-2.0
+  - MIT
+repository-code: "https://github.com/singhpratech/samkhya"
+url: "https://github.com/singhpratech/samkhya"
+keywords:
+  - cardinality estimation
+  - query optimization
+  - DataFusion
+  - DuckDB
+  - Polars
+  - embedded analytics
+  - LpBound
+  - TabPFN
+  - feedback-driven
+  - Iceberg Puffin
+  - HyperLogLog
+  - Bloom filter
+  - Count-Min Sketch
+preferred-citation:
+  type: software
+  title: "samkhya: portable, feedback-driven cardinality correction for embedded analytical engines"
+  authors:
+    - family-names: Singh
+      given-names: Prateek
+  version: "1.0.0"
+  date-released: "2026-05-17"
+  url: "https://github.com/singhpratech/samkhya"
+  license:
+    - Apache-2.0
+    - MIT
+references:
+  - type: article
+    authors:
+      - family-names: Hollmann
+        given-names: Noah
+      - family-names: Müller
+        given-names: Samuel
+      - family-names: Eggensperger
+        given-names: Katharina
+      - family-names: Hutter
+        given-names: Frank
+    title: "TabPFN: A Transformer That Solves Small Tabular Classification Problems in a Second"
+    conference:
+      name: "International Conference on Learning Representations (ICLR)"
+    year: 2023
+  - type: article
+    authors:
+      - family-names: Atserias
+        given-names: Albert
+      - family-names: Grohe
+        given-names: Martin
+      - family-names: Marx
+        given-names: Dániel
+    title: "Size Bounds and Query Plans for Relational Joins"
+    conference:
+      name: "ACM SIGMOD-SIGACT-SIGART Symposium on Principles of Database Systems (PODS)"
+    year: 2008
+  - type: article
+    authors:
+      - family-names: Leis
+        given-names: Viktor
+      - family-names: Gubichev
+        given-names: Andrey
+      - family-names: Mirchev
+        given-names: Atanas
+      - family-names: Boncz
+        given-names: Peter
+      - family-names: Kemper
+        given-names: Alfons
+      - family-names: Neumann
+        given-names: Thomas
+    title: "How Good Are Query Optimizers, Really?"
+    conference:
+      name: "VLDB"
+    year: 2015
+  - type: article
+    authors:
+      - family-names: Moerkotte
+        given-names: Guido
+      - family-names: Neumann
+        given-names: Thomas
+      - family-names: Steidl
+        given-names: Gabriele
+    title: "Preventing Bad Plans by Bounding the Impact of Cardinality Estimation Errors"
+    conference:
+      name: "VLDB"
+    year: 2009
