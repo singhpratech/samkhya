@@ -243,9 +243,27 @@ impl TableProvider for SamkhyaTableProvider {
         // (they all describe the same relation, so any populated value is
         // a corrected estimate of |R|). If no override carries a row
         // count, keep the inner provider's value.
+        //
+        // WAVE5-RC2: plan-memory-monotonic guard. Never publish a row
+        // count smaller than the inner provider's native estimate. The
+        // hash-join build-side sizing in DataFusion 46 picks the smaller
+        // side as the build side; if samkhya under-estimates and the
+        // actual data is much larger, the build hash table grows past
+        // its sized allocation and the planner walks into an OOM. Capping
+        // the published row count at `max(samkhya, native)` preserves
+        // samkhya's win when it has a larger / more accurate NDV-derived
+        // row count, while never pushing the planner toward a smaller
+        // build side than it would have chosen with no samkhya input.
+        // Symmetric guard on `SamkhyaStatsExec::statistics()` enforces
+        // the same invariant at the physical layer.
         let override_row_count = self.overrides.values().filter_map(|s| s.row_count).max();
         if let Some(rc) = override_row_count {
-            base.num_rows = Precision::Inexact(rc as usize);
+            let rc_usize = rc as usize;
+            let monotone_rc = match base.num_rows {
+                Precision::Exact(n) | Precision::Inexact(n) => rc_usize.max(n),
+                Precision::Absent => rc_usize,
+            };
+            base.num_rows = Precision::Inexact(monotone_rc);
             // Total byte size: if the inner provider reported it, relax to
             // inexact since the row count has shifted; otherwise leave
             // absent.
@@ -271,16 +289,44 @@ impl TableProvider for SamkhyaTableProvider {
 /// Merge a samkhya-translated `ColumnStatistics` over a base one.
 ///
 /// Fields where the override is `Precision::Absent` fall through to the
-/// base. Fields where the override carries an `Inexact` value win. This
-/// mirrors how the optimizer treats partial stats: any signal is better
-/// than no signal, but never overwrite a known value with unknown.
+/// base. Fields where the override carries an `Inexact` value win for
+/// null_count / max_value / min_value / sum_value. **`distinct_count`
+/// applies the WAVE5-RC2 plan-memory-monotonic guard** — the published
+/// value is `max(samkhya_ndv, native_ndv)`. NDV drives hash-join
+/// build-side sizing; never publishing a smaller distinct count than
+/// DataFusion's native estimate prevents the corrected arm from
+/// pushing the planner toward a smaller build hash table than it would
+/// have chosen with no samkhya input.
 fn merge_column_stats(base: ColumnStatistics, ovr: ColumnStatistics) -> ColumnStatistics {
     ColumnStatistics {
         null_count: pick(base.null_count, ovr.null_count),
         max_value: pick(base.max_value, ovr.max_value),
         min_value: pick(base.min_value, ovr.min_value),
         sum_value: pick(base.sum_value, ovr.sum_value),
-        distinct_count: pick(base.distinct_count, ovr.distinct_count),
+        distinct_count: pick_max_usize(base.distinct_count, ovr.distinct_count),
+    }
+}
+
+/// Plan-memory-monotonic merge for `Precision<usize>` cardinality
+/// fields. Returns `Precision::Inexact(max(base, ovr))` when both
+/// carry a value, the present one when only one does, and
+/// `Precision::Absent` when neither does. Used for `distinct_count`
+/// merges so samkhya never publishes an NDV smaller than the inner
+/// provider would have on its own.
+fn pick_max_usize(base: Precision<usize>, ovr: Precision<usize>) -> Precision<usize> {
+    let base_val = match base {
+        Precision::Exact(n) | Precision::Inexact(n) => Some(n),
+        Precision::Absent => None,
+    };
+    let ovr_val = match ovr {
+        Precision::Exact(n) | Precision::Inexact(n) => Some(n),
+        Precision::Absent => None,
+    };
+    match (base_val, ovr_val) {
+        (Some(b), Some(o)) => Precision::Inexact(b.max(o)),
+        (Some(b), None) => Precision::Inexact(b),
+        (None, Some(o)) => Precision::Inexact(o),
+        (None, None) => Precision::Absent,
     }
 }
 
@@ -368,5 +414,102 @@ mod tests {
         // No panic, statistics still produced.
         let stats = wrapped.statistics().expect("statistics present");
         assert_eq!(stats.column_statistics.len(), 2);
+    }
+
+    /// WAVE5-RC2: when the inner provider's native row count exceeds the
+    /// samkhya override, the published value is the inner provider's
+    /// estimate, not the (smaller) samkhya value. Prevents the planner
+    /// from picking a smaller hash-join build side than baseline would.
+    ///
+    /// Uses a minimal mock provider that returns a known
+    /// `Precision::Inexact(5)` for num_rows, since `MemTable`'s default
+    /// stats path leaves num_rows as `Precision::Absent` (which would
+    /// trip the fallback branch, not the monotone-cap branch).
+    #[test]
+    fn statistics_row_count_caps_at_max_of_samkhya_and_native() {
+        use async_trait::async_trait;
+        use datafusion::catalog::Session;
+        use datafusion::common::Result as DfResult;
+        use datafusion::datasource::{TableProvider, TableType};
+        use datafusion::logical_expr::Expr;
+        use datafusion::physical_plan::ExecutionPlan;
+
+        #[derive(Debug)]
+        struct MockProvider {
+            schema: SchemaRef,
+            native_rows: usize,
+        }
+
+        #[async_trait]
+        impl TableProvider for MockProvider {
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn schema(&self) -> SchemaRef {
+                Arc::clone(&self.schema)
+            }
+            fn table_type(&self) -> TableType {
+                TableType::Base
+            }
+            async fn scan(
+                &self,
+                _state: &dyn Session,
+                _projection: Option<&Vec<usize>>,
+                _filters: &[Expr],
+                _limit: Option<usize>,
+            ) -> DfResult<Arc<dyn ExecutionPlan>> {
+                unreachable!("scan not exercised by this test")
+            }
+            fn statistics(&self) -> Option<Statistics> {
+                let mut s = Statistics::new_unknown(self.schema.as_ref());
+                s.num_rows = Precision::Inexact(self.native_rows);
+                Some(s)
+            }
+        }
+
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        let inner: Arc<dyn TableProvider> = Arc::new(MockProvider {
+            schema: Arc::clone(&schema),
+            native_rows: 5,
+        });
+        let wrapped = SamkhyaTableProvider::new(inner)
+            .with_column_stats(0, ColumnStats::new().with_row_count(3));
+        let stats = wrapped.statistics().expect("statistics present");
+        assert_eq!(
+            stats.num_rows,
+            Precision::Inexact(5),
+            "monotone cap must publish max(samkhya=3, native=5)=5, not the smaller samkhya estimate"
+        );
+    }
+
+    /// WAVE5-RC2: symmetric column-level guard. When samkhya's NDV
+    /// override is smaller than the inner provider's native NDV, publish
+    /// the native (larger) value to keep hash-join build sides on the
+    /// safe side.
+    #[test]
+    fn statistics_distinct_count_caps_at_max_of_samkhya_and_native() {
+        // Hand-construct a base ColumnStatistics with a known native
+        // distinct_count and feed it through merge_column_stats with a
+        // smaller samkhya override. Expected: max() wins.
+        let base = ColumnStatistics {
+            null_count: Precision::Absent,
+            max_value: Precision::Absent,
+            min_value: Precision::Absent,
+            sum_value: Precision::Absent,
+            distinct_count: Precision::Inexact(1000),
+        };
+        let ovr = ColumnStatistics {
+            null_count: Precision::Absent,
+            max_value: Precision::Absent,
+            min_value: Precision::Absent,
+            sum_value: Precision::Absent,
+            distinct_count: Precision::Inexact(50),
+        };
+        let merged = merge_column_stats(base, ovr);
+        assert_eq!(
+            merged.distinct_count,
+            Precision::Inexact(1000),
+            "merge must publish max(samkhya, native) distinct_count"
+        );
     }
 }

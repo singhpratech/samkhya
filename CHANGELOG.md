@@ -6,12 +6,53 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — v1.0.0-rc.2 iteration
 
-Post-rc.1 stabilization. Tracking items: file 18 cold-cache corrector
-arm (corrector-path memory leak under n=30, see project corrector-
-memory-leak memory entry), TS-port 30-trial campaign, per-join-node
-q-error walking (WAVE4-C Blocker 3), L4/L5 deployment beyond A3, pyo3
-0.23+ migration, pgrx 0.13+ migration, DuckDB runtime LOAD when
-upstream Issue #11638 closes.
+Post-rc.1 stabilization. The rc.2 work re-diagnosed the
+"corrector-path memory leak" framing that bounded WAVE5-J/WAVE5-M as
+**two independent bugs**, neither of which is a memory leak:
+
+### Fixed
+
+- **`samkhya-bench` n-trial runner never invoked the runtime
+  corrector** (WAVE5-RC2 prong 1). `runner::run_async` reached
+  `execute_query` unconditionally — even when `--baseline=false` was
+  passed. The `samkhya-corrected` label was cosmetic; the runtime
+  `Corrector::correct()` trait was never called from the n-trial CLI
+  path. Fixed by adding `Runner::with_corrector(Arc<dyn Corrector>)`
+  + a `--corrector none|identity` CLI flag + an
+  `execute_query_dispatch` helper that routes to
+  `execute_query_with_corrector` when a corrector is configured.
+  Smoke-tested against the synthetic suite: `--corrector identity`
+  produces byte-identical estimates to `--baseline` (the identity
+  corrector passes the raw estimate through), confirming the
+  dispatch is honest. The next rc.2 commit will add
+  `--corrector gbt|additive-gbt` with training from a `--feedback`
+  store at CLI-startup time.
+
+- **`SamkhyaStatsExec` could push DataFusion into a smaller
+  hash-join build side than baseline** (WAVE5-RC2 prong 2). The
+  symptom was the corrected arm OOM-killing at q5c when the baseline
+  arm completed all 113 JOB-Slow queries. The mechanism: when
+  samkhya's HLL-derived NDV under-estimated the actual cardinality
+  vs DataFusion's native heuristic, the planner picked a smaller
+  build hash table and the underlying data overflowed it. Fixed by
+  capping the published row count and column-level distinct count at
+  `max(samkhya, native)` in `SamkhyaTableProvider::statistics()` and
+  the new `pick_max_usize` merge helper. The cap means samkhya's
+  published estimate is now monotonic in the
+  plan-memory-safe direction relative to the baseline plan
+  DataFusion would have chosen on its own. Unit-tested with a mock
+  `TableProvider` that returns a known native row count.
+
+### Open / deferred
+
+Tracked for rc.3 / v1.1 (not blockers for rc.2):
+- **TS-port 30-trial campaign** — TypeScript transport shipped with
+  smoke tests only; not yet 30-trial campaign-measured.
+- **Per-join-node q-error walking** (WAVE4-C Blocker 3).
+- **L4/L5 deployment beyond A3.**
+- **pyo3 ≥ 0.23 migration** (pinned at 0.22).
+- **pgrx ≥ 0.13 migration** (pinned at 0.12 + double-gated).
+- **DuckDB runtime `LOAD`** — blocked on upstream Issue #11638.
 
 ## [1.0.0-rc.1] — 2026-05-17
 

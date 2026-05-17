@@ -36,7 +36,7 @@ use crate::synthetic;
 use crate::tpch;
 
 /// Configuration for a single benchmark run.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Runner {
     suite: Suite,
     baseline: bool,
@@ -67,6 +67,16 @@ pub struct Runner {
     /// (backward-compatible warm-cache behaviour). Citation: Leis et al.
     /// VLDB 2015 §3 — cold-cache amplification.
     cold_cache: bool,
+    /// WAVE5-RC2 prong 1: optional runtime residual corrector applied
+    /// per query inside the trial loop. When `Some(c)` and
+    /// `baseline=false`, every query's raw optimizer estimate is fed
+    /// into `c.correct(...)`; the corrected value becomes the
+    /// `QueryOutcome::estimated_rows` reported in the JSON.
+    /// When `None` (default), behavior is unchanged — the trial loop
+    /// records the raw DataFusion estimate. The planner-level stat
+    /// injection through `SamkhyaTableProvider` remains controlled by
+    /// the existing `baseline` flag and is independent of this field.
+    corrector: Option<std::sync::Arc<dyn samkhya_core::residual::Corrector>>,
 }
 
 /// One join-node q-error sample (Moerkotte VLDB 2009 §3).
@@ -176,7 +186,22 @@ impl Runner {
             trials: 1,
             query_timeout_s: None,
             cold_cache: false,
+            corrector: None,
         }
+    }
+
+    /// WAVE5-RC2 prong 1: attach a runtime residual corrector to the
+    /// trial loop. When set and `baseline=false`, every query's raw
+    /// optimizer estimate is passed through `c.correct(...)` and the
+    /// corrected value is reported in [`QueryOutcome::estimated_rows`].
+    /// Setting a corrector in baseline mode is a no-op (baseline runs
+    /// the native DataFusion plan with no samkhya state injection).
+    pub fn with_corrector(
+        mut self,
+        c: std::sync::Arc<dyn samkhya_core::residual::Corrector>,
+    ) -> Self {
+        self.corrector = Some(c);
+        self
     }
 
     /// Persist observations to a SQLite store at the given path.
@@ -364,10 +389,29 @@ impl Runner {
                     }
                     continue;
                 }
+                // WAVE5-RC2 prong 1: dispatch through `execute_query_dispatch`
+                // so a configured runtime corrector is actually applied. In
+                // baseline mode (or with no corrector), this is identical to
+                // the prior `execute_query(&ctx, q)` call. In corrected mode
+                // with a corrector present, the raw DataFusion estimate is
+                // fed through `corrector.correct(...)` and the corrected value
+                // becomes `outcome.estimated_rows` in the QueryOutcome (and
+                // hence in the JSON `estimated` column).
+                let active_corrector: Option<&dyn samkhya_core::residual::Corrector> =
+                    if self.baseline {
+                        None
+                    } else {
+                        self.corrector.as_deref()
+                    };
                 let exec_result = match self.query_timeout_s {
                     Some(s) => {
                         let dur = std::time::Duration::from_secs(s);
-                        match tokio::time::timeout(dur, execute_query(&ctx, q)).await {
+                        match tokio::time::timeout(
+                            dur,
+                            execute_query_dispatch(&ctx, q, active_corrector),
+                        )
+                        .await
+                        {
                             Ok(inner) => inner,
                             Err(_) => {
                                 // WAVE-5J: TIMEOUT is recorded, not dropped
@@ -393,7 +437,7 @@ impl Runner {
                             }
                         }
                     }
-                    None => execute_query(&ctx, q).await,
+                    None => execute_query_dispatch(&ctx, q, active_corrector).await,
                 };
                 match exec_result {
                     Ok(mut outcome) => {
@@ -856,6 +900,41 @@ async fn execute_query(ctx: &SessionContext, q: &Query) -> Result<QueryOutcome> 
         trial_id: 1,
         status: "ok",
     })
+}
+
+/// WAVE5-RC2 prong 1 dispatch helper. Routes to either the corrected
+/// or baseline execution path based on whether a `Corrector` is
+/// supplied. When `corrector` is `None`, behaviour is byte-identical
+/// to [`execute_query`]. When `Some(_)`, the corrected estimate
+/// (clamped by the corrector's ceiling) becomes
+/// `QueryOutcome::estimated_rows` and the q-error in the outcome is
+/// the *corrected* q-error — so downstream JSON consumers compare on
+/// the corrected number without changes.
+///
+/// `per_join_q_errors` are populated from the raw plan walk in both
+/// arms (the corrector affects the *final* estimate, not the
+/// optimizer's intermediate join cardinalities).
+async fn execute_query_dispatch(
+    ctx: &SessionContext,
+    q: &Query,
+    corrector: Option<&dyn Corrector>,
+) -> Result<QueryOutcome> {
+    match corrector {
+        None => execute_query(ctx, q).await,
+        Some(c) => {
+            let corrected = execute_query_with_corrector(ctx, q, c).await?;
+            Ok(QueryOutcome {
+                name: corrected.name,
+                estimated_rows: corrected.corrected_estimate,
+                actual_rows: corrected.actual_rows,
+                q_error: corrected.q_error_corrected,
+                latency_ms: corrected.latency_ms,
+                per_join_q_errors: corrected.per_join_q_errors,
+                trial_id: 1, // overwritten by the trial loop
+                status: "ok",
+            })
+        }
+    }
 }
 
 /// Variant of [`execute_query`] that feeds the raw optimizer estimate

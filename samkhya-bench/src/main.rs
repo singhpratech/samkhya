@@ -95,6 +95,15 @@ enum Command {
         /// et al. VLDB 2015 §3.
         #[arg(long, default_value_t = false)]
         cold_cache: bool,
+
+        /// WAVE5-RC2 prong 1: select a runtime residual corrector for
+        /// the trial loop. `none` (default) preserves the prior n-trial
+        /// behaviour where only planner-level stat injection runs.
+        /// `identity` wires the trivial pass-through corrector — useful
+        /// for proving the dispatch path without training data. Ignored
+        /// in `--baseline` mode (baseline never invokes a corrector).
+        #[arg(long, value_enum, default_value_t = CorrectorArg::None)]
+        corrector: CorrectorArg,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -198,6 +207,18 @@ enum SuiteArg {
     Synthetic,
 }
 
+/// WAVE5-RC2 prong 1: corrector selection for the trial loop.
+/// `None` preserves prior n-trial behaviour (planner-level stat
+/// injection only). `Identity` is the pass-through corrector — proves
+/// the dispatch path works without any training data. Future variants
+/// (`Gbt`, `AdditiveGbt`) will train from a `--feedback` store at
+/// CLI-startup time; deferred to a follow-up rc.2 commit.
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum CorrectorArg {
+    None,
+    Identity,
+}
+
 /// WAVE-5F: CLI-facing IMDb source format. Maps 1:1 to
 /// [`samkhya_bench::puffin_io::ImdbFormat`].
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -243,6 +264,7 @@ fn main() -> Result<()> {
             trials,
             query_timeout_s,
             cold_cache,
+            corrector,
         } => {
             let mut runner = Runner::new(suite.into(), baseline);
             if let Some(path) = feedback {
@@ -264,6 +286,15 @@ fn main() -> Result<()> {
             runner = runner.with_trials(trials);
             runner = runner.with_query_timeout_s(query_timeout_s);
             runner = runner.with_cold_cache(cold_cache);
+            // WAVE5-RC2 prong 1: attach corrector if requested.
+            match corrector {
+                CorrectorArg::None => {}
+                CorrectorArg::Identity => {
+                    let c: std::sync::Arc<dyn samkhya_core::residual::Corrector> =
+                        std::sync::Arc::new(samkhya_core::residual::IdentityCorrector);
+                    runner = runner.with_corrector(c);
+                }
+            }
             runner.run()
         }
         Command::Compare { suite, puffin_dir } => {
