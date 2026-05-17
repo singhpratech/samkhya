@@ -11,6 +11,10 @@ __pycache__/
 .venv/
 .venv-acceptance/
 *.egg-info/
+**/node_modules/
+**/fuzz/target/
+**/fuzz/corpus/
+**/fuzz/artifacts/
 
 # Strategic / internal / pre-approval — NEVER commit without explicit approval
 documents/

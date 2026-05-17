@@ -5234,7 +5234,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-arrow"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "arrow 54.3.1",
  "samkhya-core",
@@ -5242,22 +5242,25 @@ dependencies = [
 
 [[package]]
 name = "samkhya-bench"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "clap",
  "datafusion",
  "gbdt",
+ "libc",
  "rand 0.8.6",
  "samkhya-core",
  "samkhya-datafusion",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
+ "ureq",
 ]
 
 [[package]]
 name = "samkhya-cli"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "clap",
  "csv",
@@ -5268,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-core"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "bincode",
  "byteorder",
@@ -5289,7 +5292,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-datafusion"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "async-trait",
  "datafusion",
@@ -5299,7 +5302,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-duckdb"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "duckdb",
  "samkhya-core",
@@ -5307,7 +5310,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-duckdb-ext"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -5316,14 +5319,14 @@ dependencies = [
 
 [[package]]
 name = "samkhya-gpudb"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "samkhya-core",
 ]
 
 [[package]]
 name = "samkhya-iceberg"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "iceberg",
  "samkhya-core",
@@ -5334,11 +5337,15 @@ dependencies = [
 
 [[package]]
 name = "samkhya-it"
-version = "1.0.0"
+version = "1.0.0-rc.1"
+dependencies = [
+ "samkhya-core",
+ "tokio",
+]
 
 [[package]]
 name = "samkhya-polars"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "polars",
  "samkhya-core",
@@ -5346,7 +5353,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-postgres"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "pgrx",
  "samkhya-core",
@@ -5354,7 +5361,7 @@ dependencies = [
 
 [[package]]
 name = "samkhya-py"
-version = "1.0.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "bincode",
  "pyo3",

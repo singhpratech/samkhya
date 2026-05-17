@@ -17,9 +17,9 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.0-rc.1"
 edition = "2024"
-license = "Apache-2.0"
+license = "Apache-2.0 OR MIT"
 authors = ["Prateek Singh"]
 repository = "https://github.com/singhpratech/samkhya"
 homepage = "https://github.com/singhpratech/samkhya"
@@ -30,7 +30,7 @@ keywords = ["database", "cardinality", "query-optimizer", "datafusion", "duckdb"
 categories = ["database"]
 
 [workspace.dependencies]
-samkhya-core = { path = "samkhya-core", version = "1.0.0" }
+samkhya-core = { path = "samkhya-core", version = "1.0.0-rc.1" }
 # Foundational
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

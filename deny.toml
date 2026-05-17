@@ -74,6 +74,23 @@ ignore = [
     # for the v1.1 evaluation; for v1.0 the existing bincode wire
     # format is the published artifact stability guarantee.
     "RUSTSEC-2025-0141",
+
+    # RUSTSEC-2025-0003 — fast-float 0.2.0 segfault on empty input.
+    # The fast_float::common::AsciiStr::first method dereferences
+    # without a bounds check; an empty input string can trigger
+    # invalid memory access. Pulled in transitively by polars-arrow
+    # 0.44.2 (which feeds polars 0.44 → samkhya-polars). samkhya
+    # itself never feeds untrusted float-string buffers through
+    # polars — the samkhya-polars adapter only reads typed Series
+    # (Float32/Float64) that have already been parsed by Polars
+    # internals from disk-backed Parquet/Arrow records, not raw
+    # ASCII text. The vulnerable code path (CSV/JSON float parsing
+    # on empty fields) is not exercised by any samkhya code path.
+    # No safe upgrade is available; the documented fix is a fork
+    # (fast-float2) that polars 0.45+ migrates to. Retires when
+    # samkhya-polars bumps to polars >= 0.45 (already on the v1.1
+    # roadmap alongside the broader polars/datafusion sync).
+    "RUSTSEC-2025-0003",
 ]
 
 # ---------------------------------------------------------------------------
@@ -98,6 +115,23 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "CC0-1.0",
+    # CDLA-Permissive-2.0 — Community Data License Agreement, permissive
+    # variant. OSI-recognised permissive license used by the rustls
+    # webpki-roots crate (both 0.26.x and 1.0.x lines) for the Mozilla
+    # root certificate bundle. It is a derivative-friendly license
+    # equivalent in practice to MIT/Apache-2.0 for distribution. Added
+    # here rather than as a per-crate exception because the entire
+    # rustls TLS path depends on it; a per-crate exception would also
+    # need to be duplicated whenever rustls bumps the webpki-roots
+    # patch version. See https://cdla.dev/permissive-2-0/ for the text.
+    "CDLA-Permissive-2.0",
+    # BSL-1.0 — Boost Software License 1.0, permissive, OSI-approved.
+    # Used by xxhash-rust 0.8.x (pulled transitively by polars-core
+    # 0.44 for the rolling-hash builder). BSL-1.0 is functionally
+    # equivalent to MIT/Apache for redistribution and is on the SPDX
+    # standard license list. Retires when polars migrates xxhash-rust
+    # off BSL or when xxhash-rust changes license (neither imminent).
+    "BSL-1.0",
 ]
 # Exceptions are *narrowed* allowlists for specific crates that ship under
 # a license we otherwise consider case-by-case. Empty today; add entries
@@ -121,18 +155,27 @@ exceptions = []
 #     justified individually rather than ignored wholesale through a
 #     sub-tree.
 #
-# As of v0.9.0 the known-transitive duplicate set is:
-#   * hashbrown 0.12 / 0.14 / 0.15 / 0.17 — pulled by indexmap, datafusion,
-#     std internal, and the modern direct users respectively.
-#   * bitflags 1.3 — legacy clap-2 / rusqlite path; bitflags 2 is the modern
-#     direct user.
-#   * syn 1.0 — legacy proc-macro deps still rooted in serde_derive_internals
-#     / older derive macros; syn 2 is the modern direct user.
-#   * thiserror 1.0 — datafusion / pyo3 still on v1; we use v1 directly
-#     until those ecosystems migrate.
-#   * windows-sys 0.52 / 0.60 — only matters when CI runs on Windows
-#     (currently disabled); kept here so a future Windows job doesn't
-#     immediately trip the duplicate rule.
+# As of v1.0-rc.1 the workspace integrates four large transitive ecosystems
+# that pin different versions of the arrow / parquet / hashbrown stack:
+#
+#   * DataFusion 46.0.1 → arrow / arrow-* / parquet 54.x, hashbrown 0.15.x
+#   * Iceberg 0.9.1     → arrow / arrow-* / parquet 57.x, hashbrown 0.16.x,
+#                         flatbuffers 25.x, brotli 8.x, thiserror 2.x,
+#                         apache-avro 0.21 (bon / darling 0.23 macro stack)
+#   * DuckDB 1.10501.0  → arrow / arrow-* 58.x (no parquet — DuckDB has its
+#                         own C++ Parquet reader), hashbrown 0.17.x,
+#                         hashlink 0.10, foldhash 0.2 (via cxx),
+#                         half 2.7, reqwest/hyper-rustls/webpki-roots 1.x
+#   * pgrx 0.12.9       → legacy pinned ecosystem (semver 0.11, rustc_version
+#                         0.3, petgraph 0.6, fixedbitset 0.4, half 1.8.x via
+#                         serde_cbor, supports-color 2.x via owo-colors)
+#
+# Each of these is upstream-unavoidable in v1.0 because samkhya intentionally
+# integrates with all four engines for the empirical campaign. Consolidation
+# happens when each upstream syncs to the same arrow line (tracked in
+# https://github.com/apache/arrow-rs/issues — the community is converging on
+# arrow 58 for the 2026 cycle); the skip entries below retire one by one as
+# that happens.
 # ---------------------------------------------------------------------------
 [bans]
 multiple-versions = "deny"
@@ -149,29 +192,181 @@ deny = []
 # explaining *why* the duplicate exists; if upstream consolidates, remove
 # the skip in the same PR.
 skip = [
-    # hashbrown — pulled by indexmap 1.x (older deps), DataFusion 46,
-    # std-internal, and the modern direct user. As of the 2026-05-16
-    # cleanup the 0.12 arm has dropped out of the graph (upstream
-    # consolidation); 0.14 and 0.15 remain. Re-add an entry only when
-    # a new arm reappears.
+    # --- arrow / parquet ecosystem triplet ---
+    # arrow + every arrow-* helper crate co-version with arrow. DataFusion
+    # 46 pins 54.x, Iceberg 0.9 pins 57.x, DuckDB 1.x pins 58.x. We list
+    # the older two versions as skips so the v54 / v57 graphs (kept by
+    # the upstream engines) do not trip the deny. Retire each entry when
+    # the corresponding engine bumps to share arrow 58 with DuckDB; the
+    # arrow-rs project's 2026 roadmap targets a unified line. Note that
+    # arrow-row and arrow-ipc only have two versions because Iceberg does
+    # not pull arrow-row, and DuckDB does not pull arrow-ipc directly.
+    { name = "arrow", version = "54.3.1" },
+    { name = "arrow", version = "58.3.0" },
+    { name = "arrow-arith", version = "54.3.1" },
+    { name = "arrow-arith", version = "57.3.1" },
+    { name = "arrow-arith", version = "58.3.0" },
+    { name = "arrow-array", version = "54.3.1" },
+    { name = "arrow-array", version = "57.3.1" },
+    { name = "arrow-array", version = "58.3.0" },
+    { name = "arrow-buffer", version = "54.3.1" },
+    { name = "arrow-buffer", version = "57.3.1" },
+    { name = "arrow-buffer", version = "58.3.0" },
+    { name = "arrow-cast", version = "54.3.1" },
+    { name = "arrow-cast", version = "57.3.1" },
+    { name = "arrow-cast", version = "58.3.0" },
+    { name = "arrow-data", version = "54.3.1" },
+    { name = "arrow-data", version = "57.3.1" },
+    { name = "arrow-data", version = "58.3.0" },
+    { name = "arrow-ipc", version = "54.3.1" },
+    { name = "arrow-ipc", version = "57.3.1" },
+    { name = "arrow-ord", version = "54.3.1" },
+    { name = "arrow-ord", version = "57.3.1" },
+    { name = "arrow-ord", version = "58.3.0" },
+    { name = "arrow-row", version = "54.3.1" },
+    { name = "arrow-row", version = "58.3.0" },
+    { name = "arrow-schema", version = "54.3.1" },
+    { name = "arrow-schema", version = "57.3.1" },
+    { name = "arrow-schema", version = "58.3.0" },
+    { name = "arrow-select", version = "54.3.1" },
+    { name = "arrow-select", version = "57.3.1" },
+    { name = "arrow-select", version = "58.3.0" },
+    { name = "arrow-string", version = "54.3.1" },
+    { name = "arrow-string", version = "57.3.1" },
+    { name = "arrow-string", version = "58.3.0" },
+    # parquet — DataFusion 46 pins 54, Iceberg 0.9 pins 57; DuckDB does
+    # not pull parquet-rs (uses its own C++ reader). Retires when one of
+    # the two Rust engines bumps to share a parquet line.
+    { name = "parquet", version = "54.3.1" },
+    { name = "parquet", version = "57.3.1" },
+
+    # --- arrow-ecosystem co-version churn ---
+    # brotli + brotli-decompressor — parquet 54 pins brotli 7, parquet 57
+    # pins brotli 8. Both lines are pulled solely for parquet's COMPRESSION
+    # codec discovery; samkhya code never invokes brotli directly. Retires
+    # when parquet 54/57 converge (tracked alongside the arrow consolidation).
+    { name = "brotli", version = "7.0.0" },
+    { name = "brotli-decompressor", version = "4.0.3" },
+    # flatbuffers — arrow-ipc 54 pins 24.x, arrow-ipc 57 pins 25.x. Retires
+    # with arrow consolidation.
+    { name = "flatbuffers", version = "24.12.23" },
+    # lz4_flex — arrow-ipc 54 / parquet 54 pin 0.11.x; parquet 57 pins 0.12.x.
+    # Compression codec only; not on any samkhya hot path. Retires with the
+    # parquet bumps above.
+    { name = "lz4_flex", version = "0.11.6" },
+    # half — arrow-array 54 pins half 2.7 (modern); pgrx 0.12 pulls half
+    # 1.8.x transitively through serde_cbor (the legacy "f16" feature path).
+    # Retires when pgrx >= 0.13 lands and drops serde_cbor.
+    { name = "half", version = "1.8.3" },
+
+    # --- hashbrown / hashlink — three engines, three pins ---
+    # DataFusion 46 → hashbrown 0.15; Iceberg 0.9 → hashbrown 0.16;
+    # DuckDB 1.x → hashbrown 0.17. All three are transitive only; no
+    # samkhya code constructs a hashbrown map directly. Each retires
+    # when its parent engine bumps. The 0.14 entry remains because
+    # indexmap 1.x (clap-2 / rusqlite ffi path) still pins it.
     { name = "hashbrown", version = "0.14" },
     { name = "hashbrown", version = "0.15" },
+    { name = "hashbrown", version = "0.16" },
+    # hashlink — rusqlite 0.31 pins 0.9.x; duckdb 1.x pins 0.10.x. Both
+    # are scoped LRU caches for their respective DB clients. Retires with
+    # rusqlite >= 0.32.
+    { name = "hashlink", version = "0.9.1" },
+
+    # --- foldhash / ordered-float — small leaf duplicates ---
+    # foldhash 0.1 is pulled by hashbrown 0.15 (DataFusion path);
+    # foldhash 0.2 is pulled by cxx 1.0 (samkhya-duckdb-ext via cxx-build).
+    # Both are transitive; samkhya never hashes through foldhash directly.
+    # Retires when cxx 1.1+ rebases to foldhash 0.1 or hashbrown bumps to
+    # foldhash 0.2.
+    { name = "foldhash", version = "0.1.5" },
+    # ordered-float 2.x via thrift 0.17 (parquet 54 path); 4.x via iceberg
+    # 0.9. Transitive only; samkhya uses its own NaN-handling for histograms.
+    # Retires with the parquet / iceberg consolidation.
+    { name = "ordered-float", version = "2.10.1" },
+
+    # --- bitflags / syn / thiserror legacy lines ---
     # bitflags — legacy 1.3 still rooted in clap-2 / rusqlite ffi; we use
     # the modern 2.x line directly.
     { name = "bitflags", version = "1.3" },
-    # syn — legacy 1.0 has dropped out of the graph as of the
-    # 2026-05-16 cleanup; only syn 2.x remains. Re-add a skip if a
-    # future dep reintroduces the 1.0 arm.
-    # thiserror — historically duplicated; current graph has only
-    # the 1.x line. Skip retained because reintroduction of a 2.x
-    # arm (when DataFusion / pyo3 migrate) would re-trip the rule;
-    # cargo-deny warns on unused skips and we accept that warning.
+    # syn — 1.0 is pulled solely by multiversion-macros 0.7 (polars-arrow
+    # SIMD dispatch). All other samkhya proc-macro deps are on syn 2.x.
+    # Retires when polars >= 0.45 drops multiversion or when multiversion
+    # 0.8 migrates to syn 2.
+    { name = "syn", version = "1.0" },
+    # thiserror — DataFusion 46 / Polars 0.44 / pyo3 0.22 still pin 1.x;
+    # Iceberg 0.9 (via apache-avro 0.21) pulls 2.x. We use thiserror 1.x
+    # directly in samkhya-core for wire compatibility. Retires when both
+    # DataFusion and pyo3 migrate to 2.x (tracked in v1.1).
     { name = "thiserror", version = "1.0" },
-    # windows-sys — Windows-only target dupes (0.52 / 0.60). The CI matrix
-    # currently runs Linux + macOS; these skips keep the rule from tripping
-    # if a Windows job is added back.
+    # thiserror-impl mirrors thiserror — same retire condition.
+    { name = "thiserror-impl", version = "1.0" },
+
+    # --- pgrx legacy ecosystem (samkhya-postgres only) ---
+    # pgrx 0.12.9 pins a pre-2024 toolchain: semver 0.11, rustc_version 0.3,
+    # petgraph 0.6, fixedbitset 0.4, supports-color 2.x via owo-colors,
+    # unicode-width 0.1.x via annotate-snippets 0.9 (bindgen 0.70), and
+    # darling 0.20 via derive_builder 0.20. The entire stack is gated
+    # behind the `pg_extension` feature (samkhya_pgrx_enabled rustc cfg),
+    # so consumers who don't opt in do not pull any of these. Retires
+    # when pgrx >= 0.13 lands and samkhya-postgres bumps to match (the
+    # [[feedback-pgrx-feature-isolation]] memory documents the WAVE5-A plan).
+    { name = "semver", version = "0.11" },
+    { name = "rustc_version", version = "0.3" },
+    { name = "petgraph", version = "0.6" },
+    { name = "fixedbitset", version = "0.4" },
+    { name = "supports-color", version = "2.1.0" },
+    { name = "unicode-width", version = "0.1" },
+    { name = "darling", version = "0.20" },
+    { name = "darling_core", version = "0.20" },
+    { name = "darling_macro", version = "0.20" },
+
+    # --- iceberg + apache-avro proc-macro stack ---
+    # darling 0.23 via bon-macros 3.x (apache-avro 0.21 builder layer);
+    # strum_macros 0.27 via apache-avro 0.21. Both retire with iceberg
+    # 0.10+ which is targeting a leaner builder stack.
+    { name = "strum_macros", version = "0.27" },
+
+    # --- duckdb / cxx layer ---
+    # codespan-reporting / unicode-width 0.2.x are build-deps of cxx 1.0
+    # for diagnostic rendering during the C++ bridge codegen. Retires with
+    # cxx >= 1.1 (which switches to annotate-snippets 0.11).
+    { name = "unicode-width", version = "0.2" },
+    # supports-color 3.x — pulled by pgrx-pg-config 0.12 via owo-colors
+    # 4.3 on the build-deps path (alongside the 2.1 version above; owo-colors
+    # has both as alt feature lines). Retires with pgrx >= 0.13.
+    { name = "supports-color", version = "3.0.2" },
+
+    # --- rand / rand_core legacy ---
+    # rand 0.8 — DataFusion / Polars / pyo3 still on rand 0.8 (the
+    # rand_chacha 0.3 line). rand 0.9 is pulled by apache-avro 0.21
+    # (iceberg path). samkhya-core uses rand 0.8 directly for the
+    # deterministic Bloom seeds. Retires when DataFusion >= 47 migrates
+    # to rand 0.9.
+    { name = "rand", version = "0.8" },
+    # rand_core 0.6 mirrors rand 0.8; rand_core 0.9 mirrors rand 0.9.
+    # Same retire condition as rand.
+    { name = "rand_core", version = "0.6" },
+    # rand_chacha 0.3 mirrors rand 0.8; rand_chacha 0.9 mirrors rand 0.9.
+    { name = "rand_chacha", version = "0.3" },
+
+    # --- webpki-roots — two TLS lines (rustls 0.21 + rustls 0.23) ---
+    # webpki-roots 0.26.x — ureq 2.12 path (samkhya-core http fetch).
+    # webpki-roots 1.0.7 — reqwest 0.12 / hyper-rustls 0.27 path, build
+    # dep of libduckdb-sys (samkhya-duckdb only). Both ship the same
+    # Mozilla CA bundle, just packaged for the rustls major-version split.
+    # Retires when ureq 3.x lands (uses rustls 0.23 like reqwest, then
+    # both consolidate on webpki-roots 1.0).
+    { name = "webpki-roots", version = "0.26" },
+
+    # --- windows-sys (Windows CI not currently enabled) ---
+    # windows-sys 0.52 / 0.60 — only matters when CI runs on Windows
+    # (currently disabled); kept here so a future Windows job doesn't
+    # immediately trip the duplicate rule.
     { name = "windows-sys", version = "0.52" },
     { name = "windows-sys", version = "0.60" },
+
+    # --- generic transitive churn (low-risk leaves) ---
     # cpufeatures — both 0.2 paths exist via different SIMD detection
     # crates (rand_chacha-old + the modern direct user). Transitive
     # only; no samkhya code calls cpufeatures directly.
