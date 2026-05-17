@@ -4,11 +4,35 @@ All notable changes to **samkhya** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v1.0.0-rc.2 iteration
+## [Unreleased]
 
-Post-rc.1 stabilization. The rc.2 work re-diagnosed the
-"corrector-path memory leak" framing that bounded WAVE5-J/WAVE5-M as
-**two independent bugs**, neither of which is a memory leak:
+Tracking work after v1.0.0. Empty at release time; populated as v1.1
+items land.
+
+## [1.0.0] — 2026-05-17
+
+**First stable release.** Promoted from rc.2 after the deep security
+review, the corrector-OOM re-diagnosis, and the license consolidation
+to Apache-2.0 only all landed and verified clean. The empirical
+campaign attached to this release is the WAVE-4 / WAVE-5 work
+documented in `REPRODUCIBILITY.md` and the `bench-results/` series;
+headline measurements:
+
+- **LpJoinBound vs AGM 40.95× on star-5 p=1**, BCa 95% CI [30.93,
+  47.45], Wilcoxon W=0, p=1.73×10⁻⁶, n=30 (file 07).
+- **JOB-Slow head-to-head 1.038× geomean**, BCa 95% CI [1.026, 1.056],
+  Wilcoxon p=3.00×10⁻⁶, BH-FDR 24/55, 17 wins / 38 ties / 0 losses —
+  pre-registered ≥1.35× hypothesis **falsified** (honest report, not
+  silenced; see file 18 WAVE4-F).
+- **TabPFN-2.5 P95 31.15 ms** at B=8 L=128 on RTX 4090 Laptop, BCa
+  95% CI [29.39, 35.32] — H1-A PASS (file 14, WAVE5-L2).
+- 51 binaries / 325+ tests passing / 0 failed across the workspace
+  (default + all-features), 17 property-tests, ~31 M cargo-fuzz execs
+  / 0 crashes.
+
+The substance of v1.0.0 = the consolidated content of v1.0.0-rc.0
+through v1.0.0-rc.2 (see those sections below). The release-notes
+view of what changed since rc.1:
 
 ### Fixed
 

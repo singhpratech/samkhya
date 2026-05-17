@@ -14,7 +14,7 @@ publish = false
 
 [dependencies]
 samkhya-core = { workspace = true, features = ["gbt", "additive_gbt"] }
-samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.0.0-rc.2" }
+samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.0.0" }
 clap.workspace = true
 tokio.workspace = true
 datafusion = "46"
