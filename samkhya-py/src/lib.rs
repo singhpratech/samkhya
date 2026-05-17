@@ -14,6 +14,7 @@
 // Both go away once we move to pyo3 >= 0.23 in samkhya-py v1.1.
 #![allow(clippy::useless_conversion)]
 #![allow(unexpected_cfgs)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;

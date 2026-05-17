@@ -31,6 +31,10 @@
 //! cargo run --release -p samkhya-core --example memory_profile
 //! ```
 
+use std::env;
+use std::fs::File;
+use std::io::Write;
+
 use samkhya_core::sketches::{
     BloomFilter, CorrelatedHistogram2D, CountMinSketch, EquiDepthHistogram, HllSketch,
 };
@@ -194,6 +198,9 @@ fn bootstrap_mean_ci(samples: &[f64], iters: usize, seed: u64) -> (f64, f64, f64
 }
 
 fn main() {
+    let raw_path = env::var("SAMKHYA_RAW_OUT").ok();
+    let mut raw_cells: Vec<String> = Vec::new();
+
     println!(
         "fixture,scale,rows,bytes_per_row,raw_bytes,hll_total,bloom_total,equidepth_total,\
          cms_total,corr2d_total,samkhya_total_mean,samkhya_total_lo,samkhya_total_hi,pct_of_raw"
@@ -282,6 +289,28 @@ fn main() {
                 hi,
                 pct
             );
+
+            if raw_path.is_some() {
+                let totals_vec = totals
+                    .iter()
+                    .map(|v| format!("{v:.1}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                raw_cells.push(format!(
+                    "{{\"fixture\":\"{}\",\"scale\":{},\"rows\":{},\"replicates\":{},\"samkhya_total_bytes\":[{totals_vec}]}}",
+                    fx.name, sf, rows, REPLICATES
+                ));
+            }
         }
+    }
+
+    if let Some(path) = raw_path {
+        let body = format!(
+            "{{\"benchmark\":\"memory_profile\",\"seed_scheme\":\"0xA5A5_5A5A_DEAD_BEEF + replicate\",\"cells\":[{}]}}",
+            raw_cells.join(",")
+        );
+        let mut f = File::create(&path).expect("create raw output file");
+        f.write_all(body.as_bytes()).expect("write raw output");
+        eprintln!("# raw per-trial vectors written to {path}");
     }
 }

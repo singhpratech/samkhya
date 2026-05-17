@@ -12,3 +12,14 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+# WAVE5-H pipeline closure: minimal burst harness for file 17
+# (17_failure_modes.md). Exercises the sketch + corrector hot path under a
+# fixed query-per-second load and emits P50/P95/P99 latency vectors.
+[[bin]]
+name = "burst_harness"
+path = "src/bin/burst_harness.rs"
+
+[dependencies]
+samkhya-core.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

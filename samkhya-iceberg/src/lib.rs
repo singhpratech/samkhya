@@ -27,7 +27,7 @@
 //!   [`column_stats_from_paths`] placeholder. Downstream consumers
 //!   can take a dependency on this crate as a *contract type*
 //!   without ever pulling the heavy `iceberg` dependency tree.
-//! - The optional [`snapshot`] module — gated behind the `iceberg`
+//! - The optional `snapshot` module — gated behind the `iceberg`
 //!   feature — contains the actual snapshot-walking logic that
 //!   resolves [`SnapshotPuffinPaths`] from an open
 //!   `iceberg::table::Table` and the loader that combines that
@@ -45,6 +45,7 @@
 //! [`SnapshotPuffinPaths`] manually from any source (a test harness,
 //! a Puffin-only pipeline that does not own an Iceberg table) and
 //! hand it to [`column_stats_from_paths`].
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -53,9 +54,9 @@ use samkhya_core::stats::ColumnStats;
 
 /// List of Puffin sidecar paths attached to a single Iceberg snapshot.
 ///
-/// Returned by the snapshot walker in [`crate::snapshot`] and also
-/// constructible by hand for tests and Puffin-only callers that do
-/// not own an Iceberg table.
+/// Returned by the snapshot walker in `crate::snapshot` (available with
+/// the `iceberg` cargo feature) and also constructible by hand for tests
+/// and Puffin-only callers that do not own an Iceberg table.
 ///
 /// Always available — does *not* require the `iceberg` cargo feature.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -148,9 +149,10 @@ impl Schema {
 
 /// Placeholder that returns an empty `ColumnStats` map for every
 /// schema column. Once the snapshot-walking loader in
-/// [`crate::snapshot`] lands, this function will defer to it; for
-/// now it satisfies the contract type so downstream code can call
-/// it from the no-feature build without conditionally compiling.
+/// `crate::snapshot` (the `iceberg`-feature-gated module) lands, this
+/// function will defer to it; for now it satisfies the contract type
+/// so downstream code can call it from the no-feature build without
+/// conditionally compiling.
 ///
 /// The key is the Iceberg field id (matches `BlobMetadata::fields`
 /// in samkhya Puffin blobs); the value is the assembled
@@ -160,7 +162,7 @@ pub fn column_stats_from_paths(
     schema: &Schema,
 ) -> HashMap<usize, ColumnStats> {
     // The real walker lives behind the `iceberg` feature in
-    // [`crate::snapshot::load_column_stats`]. Outside that feature
+    // `crate::snapshot::load_column_stats`. Outside that feature
     // we still hand back a well-typed (empty) map so callers can
     // unconditionally depend on this function.
     schema

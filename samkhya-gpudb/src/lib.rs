@@ -35,6 +35,7 @@
 //! The trait is implementable on plain CPU (see [`CpuFallbackCorrector`])
 //! so downstream code can depend on `samkhya-gpudb` and exercise the
 //! interface today without any GPU dependency.
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use samkhya_core::Result;
 use samkhya_core::residual::CorrectionFeatures;

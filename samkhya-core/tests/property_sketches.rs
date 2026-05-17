@@ -274,10 +274,12 @@ proptest! {
     #![proptest_config(cases())]
 
     // Full-domain range covers the total input count exactly.
+    // `buckets >= 2` and `values.len() >= 2` enforce the Ioannidis-Poosala
+    // (SIGMOD 1996) / Jagadish (VLDB 1998) minimum-partition contract.
     #[test]
     fn histogram_full_range_equals_total(
-        values in pvec(-1e6f64..1e6f64, 1..256usize),
-        buckets in 1usize..=32usize,
+        values in pvec(-1e6f64..1e6f64, 2..256usize),
+        buckets in 2usize..=32usize,
     ) {
         let h = EquiDepthHistogram::from_values(&values, buckets).unwrap();
         let total = h.total();
@@ -292,11 +294,12 @@ proptest! {
     }
 
     // Round-trip is structural: serialized then deserialized buckets
-    // and counts are byte-identical.
+    // and counts are byte-identical. `buckets >= 2` and `values.len() >= 2`
+    // enforce the equi-depth minimum-partition contract.
     #[test]
     fn histogram_round_trip(
-        values in pvec(-1e3f64..1e3f64, 0..256usize),
-        buckets in 1usize..=16usize,
+        values in pvec(-1e3f64..1e3f64, 2..256usize),
+        buckets in 2usize..=16usize,
     ) {
         let h = EquiDepthHistogram::from_values(&values, buckets).unwrap();
         let bytes = h.to_bytes().unwrap();

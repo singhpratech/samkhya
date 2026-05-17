@@ -78,7 +78,7 @@ impl CorrelatedHistogram2D {
         })
     }
 
-    /// Source-compatible alias for [`try_new`]. Preserved so that
+    /// Source-compatible alias for [`Self::try_new`]. Preserved so that
     /// downstream call sites continue to compile unchanged.
     pub fn new(col_a_bins: usize, col_b_bins: usize) -> Result<Self> {
         Self::try_new(col_a_bins, col_b_bins)

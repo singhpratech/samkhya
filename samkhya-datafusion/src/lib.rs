@@ -86,6 +86,7 @@
 //! [`ExecutionPlan::statistics()`]: datafusion::physical_plan::ExecutionPlan::statistics
 //! [`ColumnStatistics`]: datafusion::common::ColumnStatistics
 //! [`Precision::Inexact`]: datafusion::common::stats::Precision::Inexact
+#![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod optimizer_rule;
 pub mod physical_plan;

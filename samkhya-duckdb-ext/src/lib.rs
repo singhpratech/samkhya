@@ -37,6 +37,7 @@
 //! gone.
 
 #![deny(rust_2018_idioms)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 // ---------------------------------------------------------------------
 // Rust-side wrappers around the samkhya-core primitives the bridge

@@ -4,6 +4,7 @@
 //! debug sidecars, inspect feedback stores, and build sketches from CSV
 //! inputs without writing Rust. See `samkhya --help` for the full
 //! subcommand tree.
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;

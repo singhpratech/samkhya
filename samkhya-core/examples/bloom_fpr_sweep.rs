@@ -13,6 +13,9 @@
 //! Uses splitmix64 for deterministic, seedable key generation — no `rand`
 //! dependency.
 
+use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::time::Instant;
 
 use samkhya_core::sketches::BloomFilter;
@@ -115,6 +118,9 @@ fn main() {
     let mut pass_count = 0usize;
     let mut total_cells = 0usize;
 
+    let raw_path = env::var("SAMKHYA_RAW_OUT").ok();
+    let mut raw_cells: Vec<String> = Vec::new();
+
     for &fp in &fp_targets {
         for &cap in &capacities {
             total_cells += 1;
@@ -167,7 +173,28 @@ fn main() {
                 query_mops,
                 if pass { "PASS" } else { "FAIL" }
             );
+
+            if raw_path.is_some() {
+                let emp_vec = empirical
+                    .iter()
+                    .map(|v| format!("{v:.10}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                raw_cells.push(format!(
+                    "{{\"fp_target\":{fp},\"capacity\":{cap},\"num_bits\":{num_bits},\"num_hashes\":{num_hashes},\"trials\":{n_trials},\"empirical_fpr\":[{emp_vec}]}}"
+                ));
+            }
         }
+    }
+
+    if let Some(path) = raw_path {
+        let body = format!(
+            "{{\"benchmark\":\"bloom_fpr_sweep\",\"n_queries_per_trial\":{n_queries},\"seed_scheme\":\"0xA5A5...^cap^fp^trial\",\"cells\":[{}]}}",
+            raw_cells.join(",")
+        );
+        let mut f = File::create(&path).expect("create raw output file");
+        f.write_all(body.as_bytes()).expect("write raw output");
+        eprintln!("# raw per-trial vectors written to {path}");
     }
 
     eprintln!(

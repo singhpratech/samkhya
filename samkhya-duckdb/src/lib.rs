@@ -24,6 +24,7 @@
 //! [`BloomFilter`]: samkhya_core::sketches::BloomFilter
 
 #![deny(rust_2018_idioms)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 #[cfg(feature = "bundled")]
 pub mod sketcher;

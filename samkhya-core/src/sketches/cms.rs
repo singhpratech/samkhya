@@ -73,7 +73,7 @@ impl CountMinSketch {
         })
     }
 
-    /// Source-compatible alias for [`try_new`]. Preserved so that
+    /// Source-compatible alias for [`Self::try_new`]. Preserved so that
     /// downstream call sites continue to compile unchanged.
     pub fn new(depth: u32, width: u32) -> Result<Self> {
         Self::try_new(depth, width)

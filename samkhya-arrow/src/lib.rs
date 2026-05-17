@@ -25,6 +25,7 @@
 //! consume (see `HllSketch::add`, `BloomFilter::insert`,
 //! `CountMinSketch::add`), so values added through this crate and values
 //! added directly via the core API hash to the same key.
+#![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod batch;
 pub mod ingest;

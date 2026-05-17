@@ -13,9 +13,14 @@
 //!
 //! Concrete backends (all behind feature flags):
 //!
-//! - `gbt` — gradient-boosted trees (the [`gbt`] submodule, gated on the `gbt` cargo feature)
-//! - `additive_gbt` — additive gradient-boosted trees ([`additive`], gated on `additive_gbt`)
-//! - `tabpfn` — foundation-model interface (see the [`tabpfn`] submodule)
+//! - `gbt` — gradient-boosted trees (the `gbt` submodule, gated on the `gbt` cargo feature)
+//! - `additive_gbt` — additive gradient-boosted trees (the `additive` submodule, gated on `additive_gbt`)
+//! - `tabpfn` — foundation-model interface (see the `tabpfn` submodule,
+//!   gated on the `tabpfn_http` cargo feature)
+//! - `llm` — LLM-pluggable corrector backend (see the `llm` submodule,
+//!   gated on the `llm_http` cargo feature). Same wire contract as
+//!   `tabpfn`; the server picks an Anthropic / OpenAI / local-Ollama /
+//!   dummy provider via the `SAMKHYA_LLM_BACKEND` env var.
 //!
 //! # Foundation-model interface (Layer 5)
 //!
@@ -31,7 +36,7 @@
 //! 1. **localhost HTTP** — a Python TabPFN inference server runs out of
 //!    band; samkhya POSTs the feature vector as JSON and reads back an
 //!    `{"estimate": <u64>}` response. Implemented today behind the
-//!    `tabpfn_http` cargo feature (see [`tabpfn::TabPfnHttpCorrector`]).
+//!    `tabpfn_http` cargo feature (see `tabpfn::TabPfnHttpCorrector`).
 //! 2. **subprocess** — samkhya spawns a Python child, frames JSON over
 //!    stdin/stdout, and keeps the process warm across estimates. Deferred:
 //!    the scaffolding is present (umbrella `tabpfn` feature), the
@@ -133,8 +138,8 @@ impl CorrectionFeatures {
     pub const FEATURE_LEN: usize = 7;
 }
 
-/// A pluggable corrector. Engines call [`correct`] on every estimate that
-/// passes through samkhya's optimizer hook.
+/// A pluggable corrector. Engines call [`Corrector::correct`] on every
+/// estimate that passes through samkhya's optimizer hook.
 ///
 /// Returning `Ok(None)` lets the engine fall back to the baseline estimate;
 /// returning `Ok(Some(_))` overrides it (subject to the LpBound envelope).
@@ -198,7 +203,7 @@ impl Corrector for IdentityCorrector {
 /// dependency. The integration shape is visible in every build.
 ///
 /// To wire in a real foundation-model backend, swap this for
-/// [`tabpfn::TabPfnHttpCorrector`] (gated on `tabpfn_http`) or a future
+/// `tabpfn::TabPfnHttpCorrector` (gated on `tabpfn_http`) or a future
 /// subprocess adapter. The trait contract is identical, so the swap is
 /// a one-line change at the call site.
 ///
@@ -743,6 +748,234 @@ pub mod tabpfn {
     }
 }
 
+#[cfg(feature = "llm_http")]
+pub mod llm {
+    //! LLM-pluggable corrector backend — HTTP transport.
+    //!
+    //! Posts a [`super::CorrectionFeatures`] vector as JSON to a
+    //! user-configured endpoint (e.g., a Python LLM inference server
+    //! listening on `http://localhost:8766/infer`) and parses an
+    //! `{"estimate": <u64>}` reply. The server-side LLM provider
+    //! (Anthropic, OpenAI, local Ollama, dummy) is selected by the
+    //! `SAMKHYA_LLM_BACKEND` env var on the server process — the wire
+    //! contract is identical regardless of which provider is configured.
+    //!
+    //! Transport: pure-Rust `ureq` (rustls-only, no OpenSSL). Compiled in
+    //! only when the `llm_http` cargo feature is enabled.
+    //!
+    //! # Naming
+    //!
+    //! This is *the LLM-pluggable corrector backend* — a transport-level
+    //! integration that lets a foundation language model serve as the
+    //! cardinality corrector behind the same `Corrector` trait as every
+    //! other backend in this module. It is **not** an "AI", "adaptive",
+    //! or "learned" feature; the samkhya envelope still dominates the
+    //! safety contract and the LLM is strictly an opt-in pluggable
+    //! backend. The default samkhya build does not pull this in.
+    //!
+    //! # Safety contract
+    //!
+    //! Any failure — DNS, connection refused, HTTP non-2xx, body parse
+    //! error, timeout — returns `Ok(None)`. The engine falls back to the
+    //! native estimate. We never propagate transport errors to the
+    //! optimizer hot path; a remote inference server going down must not
+    //! surface as a query failure. Mirrors the
+    //! [`super::tabpfn::TabPfnHttpCorrector`] contract exactly.
+    //!
+    //! # Wire format
+    //!
+    //! Request body (JSON):
+    //!
+    //! ```json
+    //! {
+    //!   "features": [<f64>, <f64>, ...],
+    //!   "baseline_estimate": <u64>
+    //! }
+    //! ```
+    //!
+    //! Response body (JSON):
+    //!
+    //! ```json
+    //! { "estimate": <u64> }
+    //! ```
+    //!
+    //! Any extra fields in the response are ignored, so server
+    //! implementations are free to add diagnostics (e.g., the LLM's raw
+    //! text reply, parse-status flags) without breaking the client.
+    //!
+    //! # Latency expectations
+    //!
+    //! LLM round-trips are 2–3 orders of magnitude slower than the TabPFN
+    //! tier (P95 in the 0.3–2 s range vs. ~30 ms for TabPFN). The default
+    //! per-request timeout is therefore 2 000 ms (vs. 50 ms for TabPFN),
+    //! with a 60 s hard cap available for cold-cache diagnostics. The
+    //! `llm_http` backend is intended for *offline / overnight*
+    //! re-validation and schema-introspection use cases, not the online
+    //! query hot path. See `bench-results/19_llm_corrector.md` §6 for
+    //! routing guidance.
+
+    use serde::{Deserialize, Serialize};
+    use std::time::Duration;
+
+    use super::{CorrectionFeatures, Corrector};
+    use crate::Result;
+    use crate::lpbound::saturating_clamp;
+
+    /// Default per-request timeout for the LLM HTTP backend (milliseconds).
+    /// LLMs are 2–3 orders of magnitude slower than TabPFN; the 2 s
+    /// default is the smallest budget that consistently covers warm-cache
+    /// Anthropic Claude / OpenAI GPT-4o-mini calls without spurious
+    /// timeouts in measurement.
+    pub const DEFAULT_TIMEOUT_MS: u64 = 2_000;
+
+    /// Hard per-request ceiling (milliseconds). Constructors that accept
+    /// a `timeout_ms` saturate to this value so a misconfigured caller
+    /// cannot pin the optimizer for longer than 60 s on a single call.
+    pub const MAX_TIMEOUT_MS: u64 = 60_000;
+
+    /// Default inference endpoint. Distinct from the TabPFN default port
+    /// (`8765`) so an operator can run both servers side-by-side without
+    /// collision.
+    pub const DEFAULT_URL: &str = "http://127.0.0.1:8766/infer";
+
+    /// Configuration for [`LlmHttpCorrector`].
+    #[derive(Debug, Clone)]
+    pub struct LlmHttpOptions {
+        /// Inference endpoint URL. The corrector POSTs here on every
+        /// `correct()` call. Example: `http://localhost:8766/infer`.
+        pub base_url: String,
+        /// Per-request timeout. Applies to connect, read, and write
+        /// phases. Capped at [`MAX_TIMEOUT_MS`] so a misconfigured caller
+        /// cannot stall the optimizer indefinitely.
+        pub timeout_ms: u64,
+        /// Inclusive upper bound applied to every corrected estimate via
+        /// [`saturating_clamp`]. The Layer 3 safety guarantee —
+        /// corrections can never exceed this regardless of what the
+        /// remote LLM returns. Use `u64::MAX` to disable.
+        pub ceiling: u64,
+    }
+
+    impl Default for LlmHttpOptions {
+        fn default() -> Self {
+            Self {
+                base_url: DEFAULT_URL.into(),
+                timeout_ms: DEFAULT_TIMEOUT_MS,
+                ceiling: u64::MAX,
+            }
+        }
+    }
+
+    /// JSON request body sent to the inference endpoint.
+    #[derive(Serialize)]
+    struct InferRequest<'a> {
+        features: &'a [f64],
+        baseline_estimate: u64,
+    }
+
+    /// JSON response body. Extra fields are ignored.
+    #[derive(Deserialize)]
+    struct InferResponse {
+        estimate: u64,
+    }
+
+    /// HTTP-backed LLM-pluggable corrector.
+    ///
+    /// Holds a tiny client config and a base URL. The `ureq` agent is
+    /// constructed per-call: the per-estimate cost is dominated by LLM
+    /// inference (hundreds of milliseconds), not agent allocation, and
+    /// per-call agents keep the struct cheaply `Send + Sync` without
+    /// interior mutability.
+    pub struct LlmHttpCorrector {
+        options: LlmHttpOptions,
+    }
+
+    impl LlmHttpCorrector {
+        /// Build a corrector from explicit options. The `timeout_ms`
+        /// value is saturated to [`MAX_TIMEOUT_MS`] so misconfigured
+        /// callers cannot stall the optimizer for longer than that.
+        pub fn new(mut options: LlmHttpOptions) -> Self {
+            if options.timeout_ms > MAX_TIMEOUT_MS {
+                options.timeout_ms = MAX_TIMEOUT_MS;
+            }
+            Self { options }
+        }
+
+        /// Convenience constructor: default options with the supplied
+        /// URL. Useful for ad-hoc bench / smoke clients.
+        pub fn with_url(base_url: impl Into<String>) -> Self {
+            Self::new(LlmHttpOptions {
+                base_url: base_url.into(),
+                ..LlmHttpOptions::default()
+            })
+        }
+
+        /// Configured options (for diagnostics / logging).
+        pub fn options(&self) -> &LlmHttpOptions {
+            &self.options
+        }
+
+        /// Attempt one inference call. Returns `None` on any failure
+        /// (network, parse, non-2xx). The `correct()` trait method wraps
+        /// this and applies the LpBound clamp.
+        fn try_infer(&self, features: &CorrectionFeatures) -> Option<u64> {
+            let feature_vec = features.to_vec();
+            let payload = InferRequest {
+                features: &feature_vec,
+                baseline_estimate: features.baseline_estimate,
+            };
+
+            let timeout = Duration::from_millis(self.options.timeout_ms);
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(timeout)
+                .timeout_read(timeout)
+                .timeout_write(timeout)
+                .build();
+
+            let response = match agent.post(&self.options.base_url).send_json(&payload) {
+                Ok(r) => r,
+                Err(err) => {
+                    log::debug!(
+                        "llm_http: request to {} failed: {}",
+                        self.options.base_url,
+                        err
+                    );
+                    return None;
+                }
+            };
+
+            match response.into_json::<InferResponse>() {
+                Ok(body) => Some(body.estimate),
+                Err(err) => {
+                    log::debug!(
+                        "llm_http: response from {} failed to parse: {}",
+                        self.options.base_url,
+                        err
+                    );
+                    None
+                }
+            }
+        }
+    }
+
+    impl Corrector for LlmHttpCorrector {
+        fn correct(&self, features: &CorrectionFeatures) -> Result<Option<u64>> {
+            // Safety contract: every failure returns Ok(None), not Err.
+            // Mirrors `TabPfnHttpCorrector::correct`. On the optimizer's
+            // hot path a remote LLM going down (rate limit, network
+            // partition, mis-config) must never surface as a query
+            // failure.
+            let Some(raw) = self.try_infer(features) else {
+                return Ok(None);
+            };
+            Ok(Some(saturating_clamp(raw as f64, self.options.ceiling)))
+        }
+
+        fn name(&self) -> &'static str {
+            "llm-http"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1065,5 +1298,159 @@ mod tabpfn_http_tests {
         assert!(opts.base_url.starts_with("http://"));
         assert!(opts.timeout_ms > 0);
         assert_eq!(opts.ceiling, u64::MAX);
+    }
+}
+
+#[cfg(all(test, feature = "llm_http"))]
+mod llm_http_tests {
+    use super::llm::{
+        DEFAULT_TIMEOUT_MS, DEFAULT_URL, LlmHttpCorrector, LlmHttpOptions, MAX_TIMEOUT_MS,
+    };
+    use super::{CorrectionFeatures, Corrector};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
+
+    /// Tiny hand-rolled mock HTTP server, one-shot per accept. We avoid
+    /// pulling `mockito` (not currently a dep) and keep the test binary
+    /// lean. The server reads the full request, then writes a fixed
+    /// response. The handler closure decides what to send so the same
+    /// scaffolding serves both success and parse-error cases.
+    fn spawn_mock(
+        responder: impl Fn(usize) -> Vec<u8> + Send + Sync + 'static,
+        max_requests: usize,
+    ) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}/infer");
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_thread = Arc::clone(&counter);
+        let responder = Arc::new(Mutex::new(responder));
+        thread::spawn(move || {
+            listener
+                .set_nonblocking(false)
+                .expect("blocking mode for mock");
+            for stream in listener.incoming().take(max_requests) {
+                let Ok(mut stream) = stream else { continue };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+                // Drain HTTP request: read headers + body. We pull a
+                // bounded chunk; the bench client sends tiny payloads
+                // (sub-200 bytes) so this is sufficient for the tests
+                // and avoids the parsing complexity of a full HTTP
+                // server.
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let idx = counter_thread.fetch_add(1, Ordering::SeqCst);
+                let body = responder.lock().unwrap()(idx);
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(header.as_bytes());
+                let _ = stream.write_all(&body);
+                let _ = stream.flush();
+            }
+        });
+        (url, counter)
+    }
+
+    /// Pointing at port 1 on the loopback interface is the canonical
+    /// "guaranteed-to-refuse-connection" target on Linux/macOS. The
+    /// safety contract says: any transport failure must surface as
+    /// `Ok(None)`, never `Err`, never a panic.
+    #[test]
+    fn http_failure_returns_none_not_error() {
+        let corrector = LlmHttpCorrector::new(LlmHttpOptions {
+            base_url: "http://127.0.0.1:1/infer".into(),
+            timeout_ms: 50,
+            ceiling: u64::MAX,
+        });
+        let features = CorrectionFeatures {
+            baseline_estimate: 1234,
+            ..Default::default()
+        };
+        let result = corrector.correct(&features);
+        assert!(
+            result.is_ok(),
+            "llm-http transport failure must not propagate as Err; got {result:?}"
+        );
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "llm-http transport failure must yield Ok(None) so the engine falls back cleanly"
+        );
+        assert_eq!(corrector.name(), "llm-http");
+    }
+
+    #[test]
+    fn malformed_url_returns_none() {
+        let corrector = LlmHttpCorrector::with_url("not a url at all");
+        let features = CorrectionFeatures::default();
+        let result = corrector.correct(&features).expect("never Err");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn options_default_is_localhost_on_llm_port() {
+        let opts = LlmHttpOptions::default();
+        assert_eq!(opts.base_url, DEFAULT_URL);
+        assert!(opts.base_url.contains(":8766"));
+        assert_eq!(opts.timeout_ms, DEFAULT_TIMEOUT_MS);
+        assert_eq!(opts.ceiling, u64::MAX);
+    }
+
+    #[test]
+    fn timeout_is_saturated_to_max() {
+        let corrector = LlmHttpCorrector::new(LlmHttpOptions {
+            base_url: "http://127.0.0.1:1/infer".into(),
+            timeout_ms: MAX_TIMEOUT_MS * 10,
+            ceiling: u64::MAX,
+        });
+        assert_eq!(corrector.options().timeout_ms, MAX_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn mock_success_returns_clamped_estimate() {
+        let (url, counter) = spawn_mock(|_| br#"{"estimate": 4242}"#.to_vec(), 2);
+        let corrector = LlmHttpCorrector::new(LlmHttpOptions {
+            base_url: url,
+            timeout_ms: 2_000,
+            ceiling: 1_000_000,
+        });
+        let features = CorrectionFeatures {
+            baseline_estimate: 1_000,
+            ..Default::default()
+        };
+        let result = corrector.correct(&features).expect("ok");
+        assert_eq!(result, Some(4242));
+        assert!(counter.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn mock_clamps_to_ceiling() {
+        let (url, _counter) = spawn_mock(|_| br#"{"estimate": 99999999}"#.to_vec(), 2);
+        let corrector = LlmHttpCorrector::new(LlmHttpOptions {
+            base_url: url,
+            timeout_ms: 2_000,
+            ceiling: 500,
+        });
+        let result = corrector
+            .correct(&CorrectionFeatures::default())
+            .expect("ok");
+        assert_eq!(result, Some(500));
+    }
+
+    #[test]
+    fn mock_parse_error_returns_none() {
+        let (url, _counter) = spawn_mock(|_| b"not json at all".to_vec(), 2);
+        let corrector = LlmHttpCorrector::with_url(url);
+        let result = corrector
+            .correct(&CorrectionFeatures::default())
+            .expect("ok");
+        assert_eq!(result, None);
     }
 }

@@ -9,12 +9,20 @@
 //! Emits a CSV-like block on stdout that the parent bench-results doc
 //! ingests verbatim. No external deps beyond samkhya-core itself + std.
 
+use std::cell::RefCell;
+use std::env;
+use std::fs::File;
 use std::hint::black_box;
+use std::io::Write;
 use std::time::Instant;
 
 #[cfg(feature = "lp_solver")]
 use samkhya_core::lpbound::LpJoinBound;
 use samkhya_core::lpbound::{AgmBound, ChainBound, ProductBound, UpperBound};
+
+thread_local! {
+    static RAW_COLLECTOR: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
 
 // Small deterministic PRNG (xorshift64*) — keeps the harness dep-free and
 // makes the topology samples reproducible across reruns.
@@ -202,6 +210,25 @@ fn run_cell(name: &str, sizes: &[usize], topologies: &[Topology], reps_per_cell:
                 samples_warm.push(warm);
                 samples_cold.push(cold);
             }
+            // Snapshot raw vectors BEFORE sorting (for stable per-trial export).
+            RAW_COLLECTOR.with(|c| {
+                let warm_str = samples_warm
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let cold_str = samples_cold
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                c.borrow_mut().push(format!(
+                    "{{\"bound\":\"{name}\",\"topology\":\"{}\",\"join_size\":{n},\"trials\":{},\"inner_loop\":{inner},\"warm_ns\":[{warm_str}],\"cold_ns\":[{cold_str}]}}",
+                    topo_name(t),
+                    samples_warm.len(),
+                ));
+            });
+
             samples_warm.sort_unstable();
             samples_cold.sort_unstable();
             let p50 = percentile(&samples_warm, 0.50);
@@ -298,4 +325,12 @@ fn main() {
     }
     #[cfg(not(feature = "lp_solver"))]
     println!("# LpJoin skipped: rebuild with --features lp_solver");
+
+    if let Ok(path) = env::var("SAMKHYA_RAW_OUT") {
+        let raw = RAW_COLLECTOR.with(|c| c.borrow().join(","));
+        let body = format!("{{\"benchmark\":\"lpbound_latency\",\"cells\":[{}]}}", raw);
+        let mut f = File::create(&path).expect("create raw output file");
+        f.write_all(body.as_bytes()).expect("write raw output");
+        eprintln!("# raw per-trial vectors written to {path}");
+    }
 }

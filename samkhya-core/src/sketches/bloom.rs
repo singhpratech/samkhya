@@ -42,7 +42,8 @@ const MAX_NUM_BITS: u64 = 1u64 << 33;
 impl BloomFilter {
     /// Fallible constructor. Validates `capacity > 0` and
     /// `fp_rate ∈ (0, 1)` BEFORE computing the bit-array size, then
-    /// also refuses sizings that exceed [`MAX_NUM_BITS`] (a guard
+    /// also refuses sizings that exceed an internal `MAX_NUM_BITS` cap
+    /// (2^33 bits = 1 GiB; a guard
     /// against pathological `fp_rate` values that would otherwise drive
     /// the allocator into a multi-EiB request and SIGABRT the process).
     ///

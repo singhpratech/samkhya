@@ -8,7 +8,7 @@
 //!
 //! # Preferred bound
 //!
-//! When the `lp_solver` Cargo feature is enabled, [`LpJoinBound`] (a real
+//! When the `lp_solver` Cargo feature is enabled, `LpJoinBound` (a real
 //! fractional-edge-cover LP solved with `good_lp`'s pure-Rust `microlp`
 //! backend) is the preferred ceiling. It is provably tighter than the
 //! coarse [`ProductBound`] / [`AgmBound`] / [`ChainBound`] approximations
@@ -23,8 +23,8 @@
 //! ceiling, for unit tests, and as the safety floor when the LP solver
 //! fails (numerical edge cases, malformed join graphs). They are
 //! scaffolding for the full LpBound, not a replacement: prefer
-//! [`LpJoinBound`] in any release build that can afford the `good_lp`
-//! dependency.
+//! `LpJoinBound` (under the `lp_solver` feature) in any release build that
+//! can afford the `good_lp` dependency.
 //!
 //! # Empirical bound ordering
 //!
@@ -162,8 +162,8 @@ impl UpperBound for ChainBound {
 /// Returns `min(product, |R_min| * |R_max|)` when at least one equality
 /// predicate exists, otherwise falls back to [`ProductBound`]. This is a
 /// placeholder approximation; the true AGM / LpBound bound requires
-/// fractional edge cover / LP relaxation — see [`LpJoinBound`] for the
-/// principled construction.
+/// fractional edge cover / LP relaxation — see `LpJoinBound` (under the
+/// `lp_solver` feature) for the principled construction.
 ///
 /// # Examples
 ///

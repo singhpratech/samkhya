@@ -59,6 +59,14 @@ tabpfn_http = ["dep:ureq"]
 # under this umbrella so downstream users can request "TabPFN, however
 # it's deployed" without picking a transport.
 tabpfn = ["tabpfn_http"]
+# LLM-pluggable corrector backend over localhost HTTP (see
+# src/residual.rs::llm). Same wire contract as `tabpfn_http`; the server
+# side picks an LLM provider (Anthropic / OpenAI / local Ollama / dummy)
+# from an env var and returns the same `{"estimate": <u64>}` JSON. Pulls
+# in `ureq` for the transport (shared with `tabpfn_http`; the dep is
+# additive). Off by default — the LLM backend is strictly opt-in and is
+# *not* the recommended production corrector (GBT v3 remains default).
+llm_http = ["dep:ureq"]
 
 [dev-dependencies]
 proptest = "1.5"

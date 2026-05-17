@@ -6,9 +6,57 @@
 //!   PostgreSQL development headers; suitable for `cargo check
 //!   --workspace` in CI environments that do not have `libpq-dev` /
 //!   `postgresql-server-dev-*` installed.
-//! - **`pg_extension`** feature: pulls in [pgrx] and exposes the
-//!   functions defined below as a loadable PostgreSQL extension.
-//!   Build with `cargo pgrx` — see this crate's README.
+//! - **`pg_extension`** feature **plus** `samkhya_pgrx_enabled` rustc
+//!   cfg flag: pulls in [pgrx] and exposes the functions defined
+//!   below as a loadable PostgreSQL extension targeting **PostgreSQL
+//!   17** (the only major supported in v1.0). Build with `cargo pgrx`
+//!   — see this crate's README. The recommended invocation is:
+//!
+//!   ```bash
+//!   RUSTFLAGS="--cfg=samkhya_pgrx_enabled" \
+//!     cargo pgrx run pg17 --features pg_extension --package samkhya-postgres
+//!   ```
+//!
+//! # v1.0 double-gating + single-version pin (pg17)
+//!
+//! pgrx 0.12.9's `pgrx-pg-sys` build script panics at bindgen-time
+//! when more than one `pg$VERSION` feature is simultaneously active:
+//!
+//! ```text
+//! Error: Multiple `pg$VERSION` features found.
+//! `--no-default-features` may be required.
+//! Found: pg13, pg14, pg15, pg16, pg17
+//! ```
+//!
+//! Cargo's `--all-features` (used by `cargo check --workspace
+//! --all-features` and similar workspace-wide gates) activates every
+//! feature in a crate's `[features]` table simultaneously. With the
+//! canonical pgrx feature-flag pattern (pg13..pg17 as parallel
+//! features that each forward `pgrx/pgNN`), workspace gates therefore
+//! cannot pass — pgrx-pg-sys's build script panics before any
+//! manifest-level `compile_error!` we add ever fires.
+//!
+//! For v1.0 the design is:
+//!
+//! 1. **Single-version pin (pg17)**. The `pg_extension` Cargo feature
+//!    forwards `pgrx/pg17`. No pg13..pg16 features are declared.
+//! 2. **Target-cfg dep isolation**. The pgrx dependency lives under
+//!    `[target.'cfg(samkhya_pgrx_enabled)'.dependencies]` in
+//!    `Cargo.toml`. Under `cargo check --workspace --all-features`
+//!    (where `samkhya_pgrx_enabled` is unset), pgrx is excluded from
+//!    the dep graph and `pg_extension` is a harmless no-op. Under
+//!    `RUSTFLAGS="--cfg=samkhya_pgrx_enabled" cargo pgrx run pg17
+//!    --features pg_extension`, pgrx enters the dep graph and the
+//!    extension module below compiles.
+//!
+//! v1.1 will restore pg13..pg16 when one of:
+//!
+//! - pgrx 0.13+ removes the feature-multiplexing constraint, or
+//! - the pgrx-using code is moved to a non-workspace sub-crate that
+//!   does not participate in `--workspace --all-features` gates.
+//!
+//! See `feedback-pgrx-feature-isolation` memory for the full
+//! design-decision record and retire conditions.
 //!
 //! # Provided SQL functions (when built as an extension)
 //!
@@ -34,13 +82,22 @@
 //!
 //! [pgrx]: https://github.com/pgcentralfoundation/pgrx
 
-#![cfg_attr(not(feature = "pg_extension"), deny(rust_2018_idioms))]
+#![cfg_attr(
+    not(all(feature = "pg_extension", samkhya_pgrx_enabled)),
+    deny(rust_2018_idioms)
+)]
 
 // ---------------------------------------------------------------------
 // Non-extension build: empty rlib.
+//
+// The stub compiles whenever the `pg_extension` feature is OFF, OR
+// when the `samkhya_pgrx_enabled` cfg flag is unset. The latter
+// catches `cargo check --workspace --all-features` (which enables
+// `pg_extension` but does not set the cfg flag), keeping the
+// workspace-wide gate green on hosts without PG dev headers.
 // ---------------------------------------------------------------------
 
-#[cfg(not(feature = "pg_extension"))]
+#[cfg(not(all(feature = "pg_extension", samkhya_pgrx_enabled)))]
 mod stub {
     //! Stub surface that compiles without pgrx.
     //!
@@ -66,14 +123,21 @@ mod stub {
     }
 }
 
-#[cfg(not(feature = "pg_extension"))]
+#[cfg(not(all(feature = "pg_extension", samkhya_pgrx_enabled)))]
 pub use stub::version;
 
 // ---------------------------------------------------------------------
 // pgrx-backed extension build.
+//
+// Activated only when BOTH:
+//   - the `pg_extension` Cargo feature is enabled, AND
+//   - the `samkhya_pgrx_enabled` rustc cfg flag is set
+//     (typically via `RUSTFLAGS="--cfg=samkhya_pgrx_enabled"`).
+// The double-gate ensures workspace-wide `--all-features` builds do
+// not pull pgrx into the dep graph on hosts without PG dev headers.
 // ---------------------------------------------------------------------
 
-#[cfg(feature = "pg_extension")]
+#[cfg(all(feature = "pg_extension", samkhya_pgrx_enabled))]
 mod extension {
     use pgrx::prelude::*;
     use pgrx::{AnyElement, Array, JsonB};

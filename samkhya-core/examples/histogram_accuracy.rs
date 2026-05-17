@@ -16,6 +16,10 @@
 //! Output is stdout-only; the markdown in bench-results/ summarises a
 //! reference run on the v0.4.0 release hardware.
 
+use std::env;
+use std::fs::File;
+use std::io::Write;
+
 use samkhya_core::sketches::{CorrelatedHistogram2D, EquiDepthHistogram};
 
 // ---------------------------------------------------------------------------
@@ -187,6 +191,7 @@ struct CellSummary {
     max: f64,
     p95_ci_lo: f64,
     p95_ci_hi: f64,
+    p95_per_trial: Vec<f64>,
 }
 
 fn run_equidepth_cell(
@@ -234,6 +239,7 @@ fn run_equidepth_cell(
         max: *all_errs.last().unwrap_or(&0.0),
         p95_ci_lo: lo,
         p95_ci_hi: hi,
+        p95_per_trial,
     }
 }
 
@@ -262,6 +268,7 @@ struct TwoDSummary {
     p95_ci_lo: f64,
     p95_ci_hi: f64,
     indep_p95: f64,
+    p95_per_trial: Vec<f64>,
 }
 
 fn run_correlated_cell(
@@ -341,6 +348,7 @@ fn run_correlated_cell(
         p95_ci_lo: lo,
         p95_ci_hi: hi,
         indep_p95: percentile(&indep_errs, 0.95),
+        p95_per_trial,
     }
 }
 
@@ -361,6 +369,10 @@ fn main() {
     let ns = [10_000usize, 100_000, 1_000_000];
     let buckets_set = [32usize, 64, 128, 256];
 
+    let raw_path = env::var("SAMKHYA_RAW_OUT").ok();
+    let mut raw_1d: Vec<String> = Vec::new();
+    let mut raw_2d: Vec<String> = Vec::new();
+
     println!("# EquiDepthHistogram 1D");
     println!("dist,n,buckets,p50,p95,p99,max,p95_ci_lo,p95_ci_hi");
     for &dist in &dists {
@@ -379,6 +391,18 @@ fn main() {
                     s.p95_ci_lo,
                     s.p95_ci_hi,
                 );
+                if raw_path.is_some() {
+                    let p95_vec = s
+                        .p95_per_trial
+                        .iter()
+                        .map(|v| format!("{v:.10}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    raw_1d.push(format!(
+                        "{{\"dist\":\"{}\",\"n\":{n},\"buckets\":{b},\"trials\":{trials},\"queries_per_trial\":{queries},\"p95_per_trial\":[{p95_vec}]}}",
+                        dist.name()
+                    ));
+                }
             }
         }
     }
@@ -397,7 +421,29 @@ fn main() {
                     "{:.2},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
                     rho, n, b, s.p50, s.p95, s.p99, s.max, s.p95_ci_lo, s.p95_ci_hi, s.indep_p95,
                 );
+                if raw_path.is_some() {
+                    let p95_vec = s
+                        .p95_per_trial
+                        .iter()
+                        .map(|v| format!("{v:.10}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    raw_2d.push(format!(
+                        "{{\"rho\":{rho},\"n\":{n},\"bins\":{b},\"trials\":{trials},\"queries_per_trial\":{queries},\"p95_per_trial\":[{p95_vec}]}}"
+                    ));
+                }
             }
         }
+    }
+
+    if let Some(path) = raw_path {
+        let body = format!(
+            "{{\"benchmark\":\"histogram_accuracy\",\"seed_scheme\":\"f(dist,n,buckets,trial) splitmix64\",\"equidepth_1d\":[{}],\"correlated_2d\":[{}]}}",
+            raw_1d.join(","),
+            raw_2d.join(",")
+        );
+        let mut f = File::create(&path).expect("create raw output file");
+        f.write_all(body.as_bytes()).expect("write raw output");
+        eprintln!("# raw per-trial vectors written to {path}");
     }
 }

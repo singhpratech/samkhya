@@ -65,8 +65,8 @@ impl HllSketch {
         })
     }
 
-    /// Source-compatible alias for [`try_new`]. New code should call
-    /// [`try_new`] directly; this entry point is preserved so that
+    /// Source-compatible alias for [`Self::try_new`]. New code should call
+    /// [`Self::try_new`] directly; this entry point is preserved so that
     /// downstream crates (samkhya-cli, samkhya-py) keep compiling.
     pub fn new(precision: u8) -> Result<Self> {
         Self::try_new(precision)

@@ -1,18 +1,51 @@
 # samkhya-postgres — PostgreSQL extension adapter for samkhya.
 #
-# Design choice: pgrx is opt-in behind the `pg_extension` feature flag.
+# Design choice (v1.0): pgrx is opt-in behind both
+#   (1) the `pg_extension` Cargo feature, AND
+#   (2) the `samkhya_pgrx_enabled` rustc cfg flag (typically set via
+#       `RUSTFLAGS="--cfg=samkhya_pgrx_enabled"` or `.cargo/config.toml`).
+# The Postgres major version is **pinned to pg17** in v1.0.
 #
-# Why: pgrx generates Postgres-extension glue that requires PostgreSQL
-# development headers (`postgresql-server-dev-*`) to be present on the
-# build host. Most CI runners and downstream users of `samkhya-postgres`
-# (as a workspace member or transitive dep) do not have those headers
-# installed, and forcing them on by default would break `cargo check
-# --workspace` everywhere.
+# # Why double-gating (feature + cfg)?
 #
-# With `pg_extension` disabled (the default), this crate is an empty
-# `rlib` — no native deps, no link-time requirements, compiles in
-# seconds. Extension builders enable the feature explicitly and run
-# `cargo pgrx` to produce a real `.so`.
+# pgrx 0.12.9's `pgrx-pg-sys` build script:
+#   - panics at bindgen-time when more than one `pg$VERSION` feature
+#     is simultaneously active, and
+#   - requires PostgreSQL development headers
+#     (`postgresql-server-dev-*`) plus a `~/.pgrx/config.toml`
+#     populated by `cargo pgrx init`.
+#
+# Cargo's `--all-features` (used by workspace-wide gates like
+# `cargo check --workspace --all-features`) activates every feature
+# declared in `[features]`. If `pg_extension` lived in `[features]`
+# alone and pulled pgrx in via a normal `[dependencies]` entry, those
+# gates would always trigger the pgrx-pg-sys build script and panic
+# on hosts without PG dev headers (i.e., every CI runner and most
+# downstream consumers).
+#
+# By moving the pgrx dependency to
+# `[target.'cfg(samkhya_pgrx_enabled)'.dependencies]`, pgrx is
+# excluded from the dep graph unless the `samkhya_pgrx_enabled` cfg
+# is explicitly set by the operator at build time. The `pg_extension`
+# Cargo feature remains as the visible knob in `[features]`, but
+# under `--all-features` it is a no-op: the `dep:pgrx` reference is
+# silently dropped because the target predicate evaluates to false.
+#
+# # Why pin to pg17?
+#
+# pgrx 0.12.9 multiplexes pg13..pg17 as parallel features that each
+# forward `pgrx/pgNN` to `pgrx-pg-sys`. Even with `compile_error!`
+# guarding our manifest, pgrx-pg-sys's build script panics before our
+# guard ever fires under `--all-features` (build-script execution
+# precedes proc-macro/source compilation). A single-version pin
+# sidesteps the multiplexing entirely. v1.1 will restore pg13..pg16
+# when either:
+#   - pgrx 0.13+ removes the feature-multiplexing constraint, or
+#   - the pgrx-using code is moved to a non-workspace sub-crate that
+#     does not participate in `--workspace --all-features` gates.
+#
+# See `feedback-pgrx-feature-isolation` memory for the full
+# design-decision record and retire conditions.
 [package]
 name = "samkhya-postgres"
 version.workspace = true
@@ -30,27 +63,39 @@ categories = ["database"]
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[lints.rust]
+# Declare the kill-switch cfg flag so rustc's `unexpected_cfgs`
+# (implied by `-D warnings`) does not flag uses of
+# `#[cfg(samkhya_pgrx_enabled)]` in src/lib.rs.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(samkhya_pgrx_enabled)'] }
+
 [features]
 default = []
-# Pull in pgrx and compile the Postgres-side extension entry points.
-# Requires PostgreSQL development headers on the build host. See README.
-pg_extension = ["dep:pgrx"]
-# Per-Postgres-major-version selection passthrough to pgrx. These mirror
-# the standard pgrx feature naming convention so `cargo pgrx run pgNN`
-# picks the right backend version.
-# H09 fix: each pgNN must imply pg_extension, otherwise selecting the
-# Postgres-major version alone activates the optional pgrx dep without
-# the gate that hides pgrx code behind `cfg(feature = "pg_extension")`,
-# which then fails `cargo check` on hosts without PG dev headers.
-pg13 = ["pg_extension", "pgrx/pg13"]
-pg14 = ["pg_extension", "pgrx/pg14"]
-pg15 = ["pg_extension", "pgrx/pg15"]
-pg16 = ["pg_extension", "pgrx/pg16"]
-pg17 = ["pg_extension", "pgrx/pg17"]
+# Advertises the pgrx extension capability. To actually build the
+# extension, the operator must ALSO set
+# `RUSTFLAGS="--cfg=samkhya_pgrx_enabled"` (or equivalent in
+# `.cargo/config.toml`). Without that cfg flag this feature is a
+# no-op: the pgrx dependency is excluded from the dep graph by the
+# target-cfg predicate, and the extension module in src/lib.rs is
+# gated on `cfg(samkhya_pgrx_enabled)` so its `use pgrx::...` lines
+# never compile.
+#
+# The double-gating is intentional: it lets workspace gates like
+# `cargo check --workspace --all-features` enable this feature
+# harmlessly while preventing pgrx-pg-sys's bindgen panic on hosts
+# without PG dev headers.
+pg_extension = ["dep:pgrx", "pgrx/pg17"]
+# pgrx test harness flag — separate from `pg_extension` because
+# `cargo pgrx test` toggles it independently.
 pg_test = []
 
 [dependencies]
 samkhya-core.workspace = true
+
+# pgrx lives under a target-cfg predicate so it is only resolved when
+# the operator explicitly enables `samkhya_pgrx_enabled`. See the
+# top-of-file comment for the rationale.
+[target.'cfg(samkhya_pgrx_enabled)'.dependencies]
 pgrx = { version = "0.12", optional = true }
 
 [package.metadata.docs.rs]

@@ -23,6 +23,21 @@ use crate::{Error, Result};
 /// the same number of rows. Range estimates interpolate linearly inside the
 /// partial-overlap buckets at each endpoint.
 ///
+/// # Minimum-size invariant
+///
+/// A meaningful equi-depth histogram requires `buckets >= 2`. A single
+/// bucket degenerates to a count-only estimator: it carries no
+/// range-discrimination information beyond the global `total`, so any
+/// range query over a 1-bucket histogram either returns 0 or the full
+/// count without interpolating. We therefore reject `buckets < 2` at
+/// every constructor and in [`Sketch::from_bytes`] validation. This is
+/// the standard equi-depth partition contract laid out by Ioannidis &
+/// Poosala (SIGMOD 1996, "Balancing Histogram Optimality and Practicality
+/// for Query Result Size Estimation") and reaffirmed by Jagadish et al.
+/// (VLDB 1998, "Optimal Histograms with Quality Guarantees"), both of
+/// which define the bucket set as a non-trivial partition (B >= 2) of
+/// the value-frequency matrix.
+///
 /// # Examples
 ///
 /// ```
@@ -45,17 +60,25 @@ pub struct EquiDepthHistogram {
     total: u64,
 }
 
+/// Minimum number of buckets required for a meaningful equi-depth
+/// histogram. See the type-level doc comment for the
+/// Ioannidis-Poosala / Jagadish justification.
+const MIN_BUCKETS: usize = 2;
+
 impl EquiDepthHistogram {
     /// Fallible parameter-only constructor: produce an empty
     /// histogram shell with `buckets` zero-count bins and degenerate
-    /// `[0, 0]` boundaries. Validates `buckets > 0` before allocating.
-    /// Useful when the caller wants a typed receptacle to merge into
-    /// rather than building from a value population.
+    /// `[0, 0, ..., 0]` boundaries. Validates `buckets >= 2` before
+    /// allocating (see the type-level doc comment for the equi-depth
+    /// minimum-partition contract). Useful when the caller wants a typed
+    /// receptacle to merge into rather than building from a value
+    /// population.
     pub fn try_new(buckets: usize) -> Result<Self> {
-        if buckets == 0 {
-            return Err(Error::InvalidSketch(
-                "EquiDepthHistogram buckets must be > 0".into(),
-            ));
+        if buckets < MIN_BUCKETS {
+            return Err(Error::InvalidSketch(format!(
+                "EquiDepthHistogram requires buckets >= {MIN_BUCKETS} \
+                 (Ioannidis-Poosala 1996, Jagadish 1998); got {buckets}"
+            )));
         }
         // boundaries.len() == buckets + 1, all zero; counts all zero.
         Ok(Self {
@@ -68,6 +91,11 @@ impl EquiDepthHistogram {
     /// Build a histogram from a slice of sorted (or unsorted; we sort it
     /// here) `f64` values, partitioned into `buckets` equi-depth bins.
     ///
+    /// Returns [`Error::InvalidSketch`] if `buckets < 2` or
+    /// `values.len() < 2`: neither produces a meaningful equi-depth
+    /// partition (see the type-level doc comment for the
+    /// Ioannidis-Poosala / Jagadish minimum-partition contract).
+    ///
     /// # Examples
     ///
     /// ```
@@ -76,22 +104,24 @@ impl EquiDepthHistogram {
     /// let h = EquiDepthHistogram::from_values(&[1.0, 2.0, 3.0, 4.0], 2).unwrap();
     /// assert_eq!(h.total(), 4);
     /// assert_eq!(h.buckets(), 2);
-    /// // Empty population is handled without erroring.
-    /// let empty = EquiDepthHistogram::from_values(&[], 5).unwrap();
-    /// assert_eq!(empty.total(), 0);
+    /// // Empty / singleton populations cannot be partitioned into >= 2
+    /// // equi-depth bins and are rejected.
+    /// assert!(EquiDepthHistogram::from_values(&[], 5).is_err());
+    /// assert!(EquiDepthHistogram::from_values(&[1.0], 5).is_err());
     /// ```
     pub fn from_values(values: &[f64], buckets: usize) -> Result<Self> {
-        if buckets == 0 {
-            return Err(Error::InvalidSketch(
-                "EquiDepthHistogram buckets must be > 0".into(),
-            ));
+        if buckets < MIN_BUCKETS {
+            return Err(Error::InvalidSketch(format!(
+                "EquiDepthHistogram requires buckets >= {MIN_BUCKETS} \
+                 (Ioannidis-Poosala 1996, Jagadish 1998); got {buckets}"
+            )));
         }
-        if values.is_empty() {
-            return Ok(Self {
-                boundaries: vec![0.0, 0.0],
-                counts: vec![0],
-                total: 0,
-            });
+        if values.len() < MIN_BUCKETS {
+            return Err(Error::InvalidSketch(format!(
+                "EquiDepthHistogram requires values.len() >= {MIN_BUCKETS} \
+                 to populate a non-trivial equi-depth partition; got {}",
+                values.len()
+            )));
         }
         let mut sorted: Vec<f64> = values.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -179,16 +209,23 @@ impl EquiDepthHistogram {
     }
 
     /// Validate the structural invariants of a deserialised payload:
-    /// at least one bucket (so boundaries.len() >= 2), boundaries.len()
-    /// matches counts.len() + 1, no NaN bin edges, and the boundaries
-    /// vector is non-decreasing. Used by [`Sketch::from_bytes`] to
-    /// reject adversarial byte streams that bincode-decode but violate
-    /// the type contract.
+    /// at least [`MIN_BUCKETS`] buckets (so boundaries.len() >= 3),
+    /// boundaries.len() matches counts.len() + 1, no NaN bin edges,
+    /// the boundaries vector is non-decreasing, and total == sum(counts).
+    /// Used by [`Sketch::from_bytes`] to reject adversarial byte streams
+    /// that bincode-decode but violate the type contract.
+    ///
+    /// The minimum-bucket gate enforces the Ioannidis-Poosala (SIGMOD
+    /// 1996) / Jagadish (VLDB 1998) equi-depth contract: a 1-bucket
+    /// "histogram" is just a count and cannot answer non-trivial range
+    /// queries, so we reject it at the deserialisation boundary.
     fn validate(&self) -> Result<()> {
-        if self.counts.is_empty() {
-            return Err(Error::InvalidSketch(
-                "EquiDepthHistogram must have ≥ 1 bucket".into(),
-            ));
+        if self.counts.len() < MIN_BUCKETS {
+            return Err(Error::InvalidSketch(format!(
+                "EquiDepthHistogram requires >= {MIN_BUCKETS} buckets \
+                 (Ioannidis-Poosala 1996, Jagadish 1998); got {}",
+                self.counts.len()
+            )));
         }
         if self.boundaries.len() != self.counts.len() + 1 {
             return Err(Error::InvalidSketch(format!(
@@ -272,10 +309,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_population_handled() {
-        let h = EquiDepthHistogram::from_values(&[], 5).unwrap();
-        assert_eq!(h.total(), 0);
-        assert_eq!(h.estimate_range(0.0, 100.0), 0);
+    fn empty_population_rejected() {
+        // After the equi-depth minimum-partition tightening
+        // (Ioannidis-Poosala 1996, Jagadish 1998), empty and singleton
+        // populations no longer build a degenerate histogram — they
+        // return `Err(InvalidSketch)`.
+        assert!(EquiDepthHistogram::from_values(&[], 5).is_err());
+        assert!(EquiDepthHistogram::from_values(&[42.0], 5).is_err());
     }
 
     #[test]
@@ -296,8 +336,21 @@ mod tests {
     }
 
     #[test]
+    fn one_bucket_rejected_by_from_values() {
+        // 1-bucket "histogram" is just a count; the equi-depth contract
+        // (Ioannidis-Poosala 1996, Jagadish 1998) requires >= 2 buckets.
+        let values = vec![1.0, 2.0, 3.0, 4.0];
+        assert!(EquiDepthHistogram::from_values(&values, 1).is_err());
+    }
+
+    #[test]
     fn try_new_rejects_zero_buckets() {
         assert!(EquiDepthHistogram::try_new(0).is_err());
+    }
+
+    #[test]
+    fn try_new_rejects_one_bucket() {
+        assert!(EquiDepthHistogram::try_new(1).is_err());
     }
 
     #[test]
@@ -305,6 +358,28 @@ mod tests {
         let h = EquiDepthHistogram::try_new(8).unwrap();
         assert_eq!(h.buckets(), 8);
         assert_eq!(h.total(), 0);
+    }
+
+    #[test]
+    fn from_bytes_rejects_one_bucket_payload() {
+        // Even a structurally consistent 1-bucket payload must be
+        // rejected: boundaries=[0.0, 1.0], counts=[5], total=5.
+        #[derive(serde::Serialize)]
+        struct Wire {
+            boundaries: Vec<f64>,
+            counts: Vec<u64>,
+            total: u64,
+        }
+        let bad = Wire {
+            boundaries: vec![0.0, 1.0],
+            counts: vec![5],
+            total: 5,
+        };
+        let bytes = bincode::serialize(&bad).unwrap();
+        assert!(
+            EquiDepthHistogram::from_bytes(&bytes).is_err(),
+            "single-bucket payload accepted by from_bytes"
+        );
     }
 
     #[test]

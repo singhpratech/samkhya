@@ -172,10 +172,12 @@ proptest! {
 
 proptest! {
     /// EquiDepthHistogram with a whole-range query returns exactly the input count.
+    /// `buckets >= 2` and `values.len() >= 2` enforce the equi-depth
+    /// minimum-partition contract (Ioannidis-Poosala 1996, Jagadish 1998).
     #[test]
     fn histogram_full_range_returns_total(
-        values in pvec(-1e6f64..1e6f64, 1..=500usize),
-        buckets in 1usize..=32,
+        values in pvec(-1e6f64..1e6f64, 2..=500usize),
+        buckets in 2usize..=32,
     ) {
         let h = EquiDepthHistogram::from_values(&values, buckets).unwrap();
         prop_assert_eq!(h.total(), values.len() as u64);
@@ -185,10 +187,11 @@ proptest! {
     }
 
     /// Range estimate is monotone in range width: widening the range never
-    /// decreases the estimate.
+    /// decreases the estimate. `values.len() >= 2` enforces the
+    /// equi-depth minimum-partition contract (8 buckets, fixed).
     #[test]
     fn histogram_range_monotone(
-        values in pvec(-1e3f64..1e3f64, 1..=200usize),
+        values in pvec(-1e3f64..1e3f64, 2..=200usize),
         center in -500.0f64..500.0,
         half_width in 0.0f64..500.0,
     ) {
@@ -200,10 +203,12 @@ proptest! {
     }
 
     /// Round-trip preserves boundaries, counts, and total.
+    /// `buckets >= 2` and `values.len() >= 2` enforce the equi-depth
+    /// minimum-partition contract (Ioannidis-Poosala 1996, Jagadish 1998).
     #[test]
     fn histogram_round_trip(
-        values in pvec(-1e3f64..1e3f64, 1..=200usize),
-        buckets in 1usize..=16,
+        values in pvec(-1e3f64..1e3f64, 2..=200usize),
+        buckets in 2usize..=16,
     ) {
         let h = EquiDepthHistogram::from_values(&values, buckets).unwrap();
         let bytes = h.to_bytes().unwrap();

@@ -225,7 +225,7 @@ impl<W: Write + Seek> PuffinWriter<W> {
 
     /// Append a blob with payload compressed under `codec`.
     ///
-    /// `CompressionCodec::None` is equivalent to [`add_blob`].
+    /// `CompressionCodec::None` is equivalent to [`Self::add_blob`].
     /// `CompressionCodec::Zstd` requires the `zstd` feature; otherwise this
     /// returns an [`Error::InvalidPuffin`] explaining the missing feature.
     pub fn add_blob_compressed(&mut self, blob: Blob<'_>, codec: CompressionCodec) -> Result<()> {

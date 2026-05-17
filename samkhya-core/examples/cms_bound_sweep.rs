@@ -23,6 +23,9 @@
 //! splitmix64 PRNG and Zipfian inverse-CDF sampler so the benchmark stays
 //! reproducible across toolchains.
 
+use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::time::Instant;
 
 use samkhya_core::sketches::CountMinSketch;
@@ -191,6 +194,9 @@ fn main() {
          delta_x_1.2, status, wall_s"
     );
 
+    let raw_path = env::var("SAMKHYA_RAW_OUT").ok();
+    let mut raw_cells: Vec<String> = Vec::new();
+
     for &(eps, del) in cells {
         let (depth, width) = size_cms(eps, del);
         let mem = 4u64 * depth as u64 * width as u64;
@@ -228,6 +234,37 @@ fn main() {
                  {frac_mean:.6} [{frac_lo:.6},{frac_hi:.6}], \
                  {bound:.6}, {status}, {wall:.2}s"
             );
+
+            if raw_path.is_some() {
+                let max_vec = maxes
+                    .iter()
+                    .map(|v| format!("{v:.6}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let p95_vec = p95s
+                    .iter()
+                    .map(|v| format!("{v:.6}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let frac_vec = fracs
+                    .iter()
+                    .map(|v| format!("{v:.10}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                raw_cells.push(format!(
+                    "{{\"epsilon\":{eps},\"delta\":{del},\"n\":{n},\"depth\":{depth},\"width\":{width},\"trials\":{trials},\"max_over\":[{max_vec}],\"p95_over\":[{p95_vec}],\"frac_exceeding\":[{frac_vec}]}}"
+                ));
+            }
         }
+    }
+
+    if let Some(path) = raw_path {
+        let body = format!(
+            "{{\"benchmark\":\"cms_bound_sweep\",\"vocab\":{vocab},\"zipf_s\":{zipf_s},\"seed_scheme\":\"0xC3155EED ^ eps^del ^ n*c1 ^ t*c2\",\"cells\":[{}]}}",
+            raw_cells.join(",")
+        );
+        let mut f = File::create(&path).expect("create raw output file");
+        f.write_all(body.as_bytes()).expect("write raw output");
+        eprintln!("# raw per-trial vectors written to {path}");
     }
 }

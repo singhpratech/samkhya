@@ -20,6 +20,9 @@
 //! (`bench-results/07_lpbound_tightness.md`) interprets the numbers.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::env;
+use std::fs::File;
+use std::io::Write;
 
 use samkhya_core::lpbound::{AgmBound, ChainBound, ProductBound, UpperBound};
 
@@ -268,6 +271,8 @@ struct Stats {
     sum_ratio_chain: f64,
     sum_ratio_agm: f64,
     sum_ratio_lp: f64,
+    ratios_product: Vec<f64>,
+    ratios_chain: Vec<f64>,
     ratios_lp: Vec<f64>,
     ratios_agm: Vec<f64>,
     ordering_ok: u64, // ProductBound >= ChainBound >= AgmBound >= LpJoinBound
@@ -303,6 +308,9 @@ fn main() {
     let mut global_ordering_ok = 0u64;
     let mut global_total = 0u64;
     let mut star5_lp_improvement_skew: Vec<f64> = Vec::new();
+
+    let raw_path = env::var("SAMKHYA_RAW_OUT").ok();
+    let mut raw_cells: Vec<String> = Vec::new();
 
     for &topo in &topologies {
         for &n in &sizes {
@@ -350,6 +358,8 @@ fn main() {
                     stats.sum_ratio_chain += r_chain;
                     stats.sum_ratio_agm += r_agm;
                     stats.sum_ratio_lp += r_lp;
+                    stats.ratios_product.push(r_prod);
+                    stats.ratios_chain.push(r_chain);
                     stats.ratios_lp.push(r_lp);
                     stats.ratios_agm.push(r_agm);
 
@@ -417,6 +427,24 @@ fn main() {
                     opct = 100.0 * stats.ordering_ok as f64 / stats.samples as f64,
                     lpct = 100.0 * stats.lp_le_agm as f64 / stats.samples as f64,
                 );
+
+                if raw_path.is_some() {
+                    let fmt = |xs: &[f64]| {
+                        xs.iter()
+                            .map(|v| format!("{v:.6}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    };
+                    raw_cells.push(format!(
+                        "{{\"topology\":\"{topo}\",\"size\":{n},\"p\":\"{}\",\"trials\":{},\"ratios_product\":[{}],\"ratios_chain\":[{}],\"ratios_agm\":[{}],\"ratios_lp\":[{}]}}",
+                        p.label(),
+                        stats.samples,
+                        fmt(&stats.ratios_product),
+                        fmt(&stats.ratios_chain),
+                        fmt(&stats.ratios_agm),
+                        fmt(&stats.ratios_lp),
+                    ));
+                }
             }
         }
     }
@@ -434,6 +462,17 @@ fn main() {
     println!("  \"hypothesis_star5_skew_median_lp_vs_agm\": {median_star5_skew:.3},");
     println!("  \"feature_lp_solver\": {}", cfg!(feature = "lp_solver"));
     println!("}}");
+
+    if let Some(path) = raw_path {
+        let body = format!(
+            "{{\"benchmark\":\"lpbound_tightness\",\"trials_per_cell\":{trials_per_cell},\"feature_lp_solver\":{},\"cells\":[{}]}}",
+            cfg!(feature = "lp_solver"),
+            raw_cells.join(",")
+        );
+        let mut f = File::create(&path).expect("create raw output file");
+        f.write_all(body.as_bytes()).expect("write raw output");
+        eprintln!("# raw per-trial vectors written to {path}");
+    }
 
     // Suppress unused-import warning when lp_solver is off.
     let _ = BTreeMap::<(), ()>::new();
