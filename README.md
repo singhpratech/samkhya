@@ -201,9 +201,10 @@ including data-flow diagrams and the `samkhya-core` module map.
 
 Public, tracked files only:
 
-- **[Publication on The AI Vibe](https://theaivibe.org/publications/samkhya-portable-feedback-driven-cardinality-correction-embedded-analytics)**
-  — long-form v1.0 launch article: motivation, architecture, the
-  honest 1.038× falsification, what samkhya is actually for.
+- **[v1.0 launch article — first published on The AI Vibe](https://theaivibe.org/publications/samkhya-portable-feedback-driven-cardinality-correction-embedded-analytics)**
+  — long-form launch piece: motivation, architecture, the honest
+  1.038× falsification, what samkhya is actually for. The canonical
+  narrative companion to the v1.0.0 release.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — five-layer design, crate layout, data
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
