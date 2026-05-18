@@ -40,4 +40,27 @@ PROOF.md
 */ACCEPTANCE_REPORT.md
 METHODOLOGY.md
 EMPIRICAL_PLAN.md
-bench-results/
+# bench-results: gitignore the directory by default (internal iteration notes,
+# wave plans, gate decisions, methodology drafts), but selectively un-ignore
+# the public empirical receipts that the README / REPRODUCIBILITY / CHANGELOG
+# / paper cite as "Receipt" for measured headlines. The numbered campaigns
+# 00–19 + their _raw.{json,csv} are the ACM AE Available artifacts; the
+# aggregate docs (BENCHMARKS, METHODOLOGY, EVIDENCE) and binary acceptance
+# B07–B09 + B13 are the public-friendly factual receipts.
+bench-results/*
+!bench-results/[0-9][0-9]_*.md
+!bench-results/[0-9][0-9]_*.json
+!bench-results/[0-9][0-9]_*.csv
+!bench-results/BENCHMARKS.md
+!bench-results/METHODOLOGY.md
+!bench-results/EVIDENCE.md
+!bench-results/B07_supply_chain.md
+!bench-results/B08_fuzz_inventory.md
+!bench-results/B09_property_100k.md
+!bench-results/B13_criterion.md
+# bench-results/scripts/ holds the reproducer scripts referenced in REPRODUCIBILITY.md
+!bench-results/scripts/
+!bench-results/scripts/**
+# Re-ignore python bytecode under scripts/ (root __pycache__/ rule is overridden by the !** negation above)
+bench-results/scripts/__pycache__/
+bench-results/scripts/**/*.pyc

@@ -1,0 +1,26 @@
+{
+  "schema": "samkhya.bench.tabpfn_cold_start.v1",
+  "n_trials": 3,
+  "device": "cuda",
+  "trials": [
+    {
+      "trial": 1,
+      "ready_s": 3.028959107999981,
+      "first_request_ms": 49.408859,
+      "total_cold_path_s": 3.0784770039999785
+    },
+    {
+      "trial": 2,
+      "ready_s": 3.0102533280005446,
+      "first_request_ms": 39.85655,
+      "total_cold_path_s": 3.0501511610000307
+    },
+    {
+      "trial": 3,
+      "ready_s": 3.5110825729998396,
+      "first_request_ms": 46.058984,
+      "total_cold_path_s": 3.5572284160007257
+    }
+  ],
+  "note": "Cold path = process spawn \u2192 checkpoint load \u2192 CUDA init \u2192 fit(support) \u2192 first /health \u2192 first /infer."
+}

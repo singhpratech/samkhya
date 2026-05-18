@@ -1,0 +1,266 @@
+{
+  "schema": "bench-results/02_gpu_hash_throughput.v1",
+  "results": [
+    {
+      "backend": "gpu_torch",
+      "n": 1000000,
+      "threads": null,
+      "replicates": 30,
+      "mean_s": 7.456639993203377e-05,
+      "p50_s": 7.210700005089166e-05,
+      "p95_s": 9.475199976805015e-05,
+      "p99_s": 9.60099996518693e-05,
+      "throughput_gkeys_s_mean": 13.594792489474985,
+      "throughput_gkeys_s_ci95": [
+        13.073397266568115,
+        14.108673916468385
+      ],
+      "h2d_s_mean": 0.0009512534001260064,
+      "d2h_s_mean": 0.0016755087999626994,
+      "detail": {
+        "device_name": "NVIDIA GeForce RTX 4090 Laptop GPU",
+        "compute_capability": "sm_89",
+        "total_memory_gb": 15.57,
+        "torch_version": "2.6.0+cu124"
+      },
+      "_tag": "gpu"
+    },
+    {
+      "backend": "gpu_torch",
+      "n": 10000000,
+      "threads": null,
+      "replicates": 30,
+      "mean_s": 0.0012484222667202025,
+      "p50_s": 0.0010466150001775532,
+      "p95_s": 0.0019158560003234015,
+      "p99_s": 0.001931961000082083,
+      "throughput_gkeys_s_mean": 8.52068976271945,
+      "throughput_gkeys_s_ci95": [
+        7.841845040845254,
+        9.104224538901184
+      ],
+      "h2d_s_mean": 0.008755924599972787,
+      "d2h_s_mean": 0.025375021600029867,
+      "detail": {
+        "device_name": "NVIDIA GeForce RTX 4090 Laptop GPU",
+        "compute_capability": "sm_89",
+        "total_memory_gb": 15.57,
+        "torch_version": "2.6.0+cu124"
+      },
+      "_tag": "gpu"
+    },
+    {
+      "backend": "gpu_torch",
+      "n": 100000000,
+      "threads": null,
+      "replicates": 30,
+      "mean_s": 0.010747989899982713,
+      "p50_s": 0.010725305000050867,
+      "p95_s": 0.010778924999613082,
+      "p99_s": 0.011309275000257912,
+      "throughput_gkeys_s_mean": 9.3049397214856,
+      "throughput_gkeys_s_ci95": [
+        9.268260770323035,
+        9.325937582846935
+      ],
+      "h2d_s_mean": 0.08268512600006943,
+      "d2h_s_mean": 0.24613287020019925,
+      "detail": {
+        "device_name": "NVIDIA GeForce RTX 4090 Laptop GPU",
+        "compute_capability": "sm_89",
+        "total_memory_gb": 15.57,
+        "torch_version": "2.6.0+cu124"
+      },
+      "_tag": "gpu"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 1000000,
+      "threads": 1,
+      "replicates": 30,
+      "mean_s": 0.0012519078333146658,
+      "p50_s": 0.0011180389997207385,
+      "p95_s": 0.002223804000095697,
+      "p99_s": 0.002878676999898744,
+      "throughput_gkeys_s_mean": 0.8449190865506316,
+      "throughput_gkeys_s_ci95": [
+        0.7853372139715945,
+        0.89832525576051
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu1"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 10000000,
+      "threads": 1,
+      "replicates": 30,
+      "mean_s": 0.038041506766679355,
+      "p50_s": 0.03767392700001437,
+      "p95_s": 0.04483289000017976,
+      "p99_s": 0.04552462399988144,
+      "throughput_gkeys_s_mean": 0.2635819021999891,
+      "throughput_gkeys_s_ci95": [
+        0.25884442899625143,
+        0.267746056013559
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu1"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 100000000,
+      "threads": 1,
+      "replicates": 30,
+      "mean_s": 0.37886274243334506,
+      "p50_s": 0.37695188199995755,
+      "p95_s": 0.40485741400016195,
+      "p99_s": 0.41032171599999856,
+      "throughput_gkeys_s_mean": 0.26421501209935994,
+      "throughput_gkeys_s_ci95": [
+        0.261018404923113,
+        0.2673504049172369
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu1"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 1000000,
+      "threads": 8,
+      "replicates": 30,
+      "mean_s": 0.0015353517000221474,
+      "p50_s": 0.001405042999977013,
+      "p95_s": 0.0023149900002863433,
+      "p99_s": 0.0032322000001840934,
+      "throughput_gkeys_s_mean": 0.6785520042284147,
+      "throughput_gkeys_s_ci95": [
+        0.6376297677692605,
+        0.7150230532966959
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu8"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 10000000,
+      "threads": 8,
+      "replicates": 30,
+      "mean_s": 0.03838253466660717,
+      "p50_s": 0.03701823899973533,
+      "p95_s": 0.049651374999939435,
+      "p99_s": 0.049692894000145316,
+      "throughput_gkeys_s_mean": 0.2627405639837493,
+      "throughput_gkeys_s_ci95": [
+        0.25444175788388773,
+        0.2700867057508925
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu8"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 100000000,
+      "threads": 8,
+      "replicates": 30,
+      "mean_s": 0.3766655835332737,
+      "p50_s": 0.3746115799999643,
+      "p95_s": 0.3957487869997749,
+      "p99_s": 0.4011613210000178,
+      "throughput_gkeys_s_mean": 0.26583382957861235,
+      "throughput_gkeys_s_ci95": [
+        0.2626448142032503,
+        0.2693213085725968
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu8"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 1000000,
+      "threads": 20,
+      "replicates": 30,
+      "mean_s": 0.0013111172333841144,
+      "p50_s": 0.001199506999910227,
+      "p95_s": 0.0024861219999365858,
+      "p99_s": 0.0031248139998751867,
+      "throughput_gkeys_s_mean": 0.8038064415454234,
+      "throughput_gkeys_s_ci95": [
+        0.7518634511206513,
+        0.8478729582402624
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu20"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 10000000,
+      "threads": 20,
+      "replicates": 30,
+      "mean_s": 0.037572625599947666,
+      "p50_s": 0.03721105800013902,
+      "p95_s": 0.038982430000032764,
+      "p99_s": 0.04674348499975167,
+      "throughput_gkeys_s_mean": 0.2667672579896902,
+      "throughput_gkeys_s_ci95": [
+        0.26224867010053127,
+        0.2704627049351257
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu20"
+    },
+    {
+      "backend": "cpu_numpy",
+      "n": 100000000,
+      "threads": 20,
+      "replicates": 30,
+      "mean_s": 0.5403415200999916,
+      "p50_s": 0.46804963999966276,
+      "p95_s": 0.8763386360001277,
+      "p99_s": 0.9516922949997024,
+      "throughput_gkeys_s_mean": 0.19658414915600408,
+      "throughput_gkeys_s_ci95": [
+        0.18136153815025102,
+        0.2112216997225252
+      ],
+      "h2d_s_mean": null,
+      "d2h_s_mean": null,
+      "detail": {
+        "numpy_version": "2.4.5"
+      },
+      "_tag": "cpu20"
+    }
+  ]
+}

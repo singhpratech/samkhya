@@ -1,0 +1,52 @@
+{
+  "schema": "samkhya.bench.tabpfn_accuracy.v1",
+  "device": "cuda",
+  "workload": {
+    "kind": "synthetic_correlated_multi_modal",
+    "n_train": 800,
+    "n_test": 200,
+    "seed": 42,
+    "feature_len": 7,
+    "note": "Synthetic stand-in for JOB-light hard correlated subset; shape per TabPFN-2.5 paper \u00a75. JOB-light extract is a v1.1 item."
+  },
+  "gbt": {
+    "library": "scikit-learn GradientBoostingRegressor",
+    "n_estimators": 200,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "fit_ms": 294.708447,
+    "median_q_error": 1.7748341070918126
+  },
+  "tabpfn": {
+    "library": "tabpfn 2.0.9 TabPFNRegressor",
+    "device": "cuda",
+    "fit_mode": "fit_with_cache",
+    "n_estimators": 1,
+    "fit_ms": 9058.160987,
+    "median_q_error": 1.6357645439187707
+  },
+  "baseline_no_corrector": {
+    "median_q_error": 6.672893647553632
+  },
+  "h1b": {
+    "metric": "median q-error reduction over GBT",
+    "point_estimate": 0.07835637292373025,
+    "bca_ci_95": [
+      0.022101824685987842,
+      0.14619662504965783
+    ],
+    "n_resamples": 10000,
+    "seed": 42,
+    "method": "BCa bootstrap (Efron-Tibshirani 1993 ch. 14)",
+    "threshold_pre_registered": 0.15,
+    "pass": false,
+    "ci_crosses_threshold": false
+  },
+  "wilcoxon_paired": {
+    "statistic_W": 6436.0,
+    "n_nonzero_pairs": 200,
+    "z_norm_approx": -4.409695041010233,
+    "p_two_sided": 1.0351628987770312e-05,
+    "note": "Normal-approximation Wilcoxon signed-rank (Wilcoxon 1945; Sheskin 2003). n>=20 \u2192 normal regime valid."
+  }
+}

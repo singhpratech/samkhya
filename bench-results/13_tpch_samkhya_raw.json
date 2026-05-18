@@ -1,0 +1,3482 @@
+{
+  "suite": "tpc-h",
+  "mode": "samkhya",
+  "n_queries": 110,
+  "outcomes": [
+    {
+      "name": "Q1",
+      "estimated_rows": 1200243,
+      "actual_rows": 4,
+      "q_error": 300060.75,
+      "latency_ms": 126.83344299999999,
+      "per_join_q_errors": [],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q2",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 35.257622000000005,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 460,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 32000,
+          "actual_rows": 642,
+          "q_error": 49.84423676012461
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 160000,
+          "actual_rows": 158960,
+          "q_error": 1.0065425264217414
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 7,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q3",
+      "estimated_rows": 10,
+      "actual_rows": 10,
+      "q_error": 1.0,
+      "latency_ms": 49.531448999999995,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 30519,
+          "q_error": 1.965988400668436
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 147126,
+          "q_error": 2.4521
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q4",
+      "estimated_rows": 300000,
+      "actual_rows": 5,
+      "q_error": 60000.0,
+      "latency_ms": 36.858867,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 52523,
+          "q_error": 5.711783409173124
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q5",
+      "estimated_rows": 24004800,
+      "actual_rows": 5,
+      "q_error": 4800960.0,
+      "latency_ms": 80.200011,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 24004800,
+          "actual_rows": 7243,
+          "q_error": 3314.2068203782965
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300060,
+          "actual_rows": 910519,
+          "q_error": 3.0344564420449243
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 227597,
+          "q_error": 1.3181193073722413
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q6",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 19.174608,
+      "per_join_q_errors": [],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q7",
+      "estimated_rows": 48009,
+      "actual_rows": 4,
+      "q_error": 12002.25,
+      "latency_ms": 110.025332,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 48009,
+          "actual_rows": 5924,
+          "q_error": 8.104152599594869
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 240048,
+          "actual_rows": 145703,
+          "q_error": 1.6475158370109058
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q8",
+      "estimated_rows": 60000,
+      "actual_rows": 2,
+      "q_error": 30000.0,
+      "latency_ms": 88.370758,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 2603,
+          "q_error": 23.05032654629274
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q9",
+      "estimated_rows": 1500000,
+      "actual_rows": 175,
+      "q_error": 8571.42857142857,
+      "latency_ms": 139.611433,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 4800972,
+          "actual_rows": 319404,
+          "q_error": 15.031032798587368
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q10",
+      "estimated_rows": 20,
+      "actual_rows": 20,
+      "q_error": 1.0,
+      "latency_ms": 70.583071,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 57069,
+          "q_error": 5.2567944067707515
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q11",
+      "estimated_rows": 0,
+      "actual_rows": 1048,
+      "q_error": null,
+      "latency_ms": 26.423540999999997,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1048,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q12",
+      "estimated_rows": 1200243,
+      "actual_rows": 2,
+      "q_error": 600121.5,
+      "latency_ms": 48.160045,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 30988,
+          "q_error": 38.73250935846134
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q13",
+      "estimated_rows": 300000,
+      "actual_rows": 42,
+      "q_error": 7142.857142857143,
+      "latency_ms": 38.215242,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 1533923,
+          "q_error": 5.113076666666666
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q14",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 28.669186,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 75983,
+          "q_error": 15.796204414145269
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q15",
+      "estimated_rows": 0,
+      "actual_rows": 1,
+      "q_error": null,
+      "latency_ms": 47.669644,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": null,
+          "actual_rows": 10000,
+          "q_error": null
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q16",
+      "estimated_rows": 160000,
+      "actual_rows": 18314,
+      "q_error": 8.736485748607622,
+      "latency_ms": 25.127221000000002,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 160000,
+          "actual_rows": 118274,
+          "q_error": 1.3527909768841841
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 118324,
+          "q_error": 1.352219329975322
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q17",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 130.108831,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 587,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1200243,
+          "actual_rows": 6088,
+          "q_error": 197.14898160315374
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q18",
+      "estimated_rows": 100,
+      "actual_rows": 57,
+      "q_error": 1.7543859649122808,
+      "latency_ms": 141.385164,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500303,
+          "actual_rows": 399,
+          "q_error": 3760.157894736842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500303,
+          "actual_rows": 6001215,
+          "q_error": 4.000001999596082
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1500000,
+          "actual_rows": 1500000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q19",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 46.614551999999996,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 240048,
+          "actual_rows": 121,
+          "q_error": 1983.8677685950413
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q20",
+      "estimated_rows": 2000,
+      "actual_rows": 186,
+      "q_error": 10.75268817204301,
+      "latency_ms": 48.451076,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 2000,
+          "actual_rows": 186,
+          "q_error": 10.75268817204301
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 2000,
+          "actual_rows": 412,
+          "q_error": 4.854368932038835
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": null,
+          "actual_rows": 5833,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 800000,
+          "actual_rows": 8508,
+          "q_error": 94.02914903620122
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q21",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 127.151878,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 4141,
+          "q_error": 14.489253803429124
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 73089,
+          "q_error": 1.21815
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 60000,
+          "actual_rows": 75871,
+          "q_error": 1.2645166666666667
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 1828911,
+          "q_error": 6.09637
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 3793296,
+          "q_error": 3.1604400108977933
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q22",
+      "estimated_rows": 0,
+      "actual_rows": 7,
+      "q_error": null,
+      "latency_ms": 18.597122000000002,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 6384,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 30000,
+          "actual_rows": 14086,
+          "q_error": 2.1297742439301435
+        }
+      ],
+      "trial_id": 1,
+      "status": "ok"
+    },
+    {
+      "name": "Q1",
+      "estimated_rows": 1200243,
+      "actual_rows": 4,
+      "q_error": 300060.75,
+      "latency_ms": 107.00182099999999,
+      "per_join_q_errors": [],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q2",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 47.286565,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 460,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 32000,
+          "actual_rows": 642,
+          "q_error": 49.84423676012461
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 160000,
+          "actual_rows": 158960,
+          "q_error": 1.0065425264217414
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 7,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q3",
+      "estimated_rows": 10,
+      "actual_rows": 10,
+      "q_error": 1.0,
+      "latency_ms": 50.893894,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 30519,
+          "q_error": 1.965988400668436
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 147126,
+          "q_error": 2.4521
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q4",
+      "estimated_rows": 300000,
+      "actual_rows": 5,
+      "q_error": 60000.0,
+      "latency_ms": 35.052587,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 52523,
+          "q_error": 5.711783409173124
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q5",
+      "estimated_rows": 24004800,
+      "actual_rows": 5,
+      "q_error": 4800960.0,
+      "latency_ms": 76.790537,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 24004800,
+          "actual_rows": 7243,
+          "q_error": 3314.2068203782965
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300060,
+          "actual_rows": 910519,
+          "q_error": 3.0344564420449243
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 227597,
+          "q_error": 1.3181193073722413
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q6",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 21.089115,
+      "per_join_q_errors": [],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q7",
+      "estimated_rows": 48009,
+      "actual_rows": 4,
+      "q_error": 12002.25,
+      "latency_ms": 117.741967,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 48009,
+          "actual_rows": 5924,
+          "q_error": 8.104152599594869
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 240048,
+          "actual_rows": 145703,
+          "q_error": 1.6475158370109058
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q8",
+      "estimated_rows": 60000,
+      "actual_rows": 2,
+      "q_error": 30000.0,
+      "latency_ms": 81.839258,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 2603,
+          "q_error": 23.05032654629274
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q9",
+      "estimated_rows": 1500000,
+      "actual_rows": 175,
+      "q_error": 8571.42857142857,
+      "latency_ms": 125.26707400000001,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 4800972,
+          "actual_rows": 319404,
+          "q_error": 15.031032798587368
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q10",
+      "estimated_rows": 20,
+      "actual_rows": 20,
+      "q_error": 1.0,
+      "latency_ms": 62.237673,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 57069,
+          "q_error": 5.2567944067707515
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q11",
+      "estimated_rows": 0,
+      "actual_rows": 1048,
+      "q_error": null,
+      "latency_ms": 24.371879999999997,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1048,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q12",
+      "estimated_rows": 1200243,
+      "actual_rows": 2,
+      "q_error": 600121.5,
+      "latency_ms": 36.801161,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 30988,
+          "q_error": 38.73250935846134
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q13",
+      "estimated_rows": 300000,
+      "actual_rows": 42,
+      "q_error": 7142.857142857143,
+      "latency_ms": 38.63391,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 1533923,
+          "q_error": 5.113076666666666
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q14",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 31.251745999999997,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 75983,
+          "q_error": 15.796204414145269
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q15",
+      "estimated_rows": 0,
+      "actual_rows": 1,
+      "q_error": null,
+      "latency_ms": 47.849830000000004,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": null,
+          "actual_rows": 10000,
+          "q_error": null
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q16",
+      "estimated_rows": 160000,
+      "actual_rows": 18314,
+      "q_error": 8.736485748607622,
+      "latency_ms": 20.170343,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 160000,
+          "actual_rows": 118274,
+          "q_error": 1.3527909768841841
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 118324,
+          "q_error": 1.352219329975322
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q17",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 130.192988,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 587,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1200243,
+          "actual_rows": 6088,
+          "q_error": 197.14898160315374
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q18",
+      "estimated_rows": 100,
+      "actual_rows": 57,
+      "q_error": 1.7543859649122808,
+      "latency_ms": 163.445693,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500303,
+          "actual_rows": 399,
+          "q_error": 3760.157894736842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500303,
+          "actual_rows": 6001215,
+          "q_error": 4.000001999596082
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1500000,
+          "actual_rows": 1500000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q19",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 48.22159,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 240048,
+          "actual_rows": 121,
+          "q_error": 1983.8677685950413
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q20",
+      "estimated_rows": 2000,
+      "actual_rows": 186,
+      "q_error": 10.75268817204301,
+      "latency_ms": 51.462559,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 2000,
+          "actual_rows": 186,
+          "q_error": 10.75268817204301
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 2000,
+          "actual_rows": 412,
+          "q_error": 4.854368932038835
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": null,
+          "actual_rows": 5833,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 800000,
+          "actual_rows": 8508,
+          "q_error": 94.02914903620122
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q21",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 135.144583,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 4141,
+          "q_error": 14.489253803429124
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 73089,
+          "q_error": 1.21815
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 60000,
+          "actual_rows": 75871,
+          "q_error": 1.2645166666666667
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 1828911,
+          "q_error": 6.09637
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 3793296,
+          "q_error": 3.1604400108977933
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q22",
+      "estimated_rows": 0,
+      "actual_rows": 7,
+      "q_error": null,
+      "latency_ms": 19.551561,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 6384,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 30000,
+          "actual_rows": 14086,
+          "q_error": 2.1297742439301435
+        }
+      ],
+      "trial_id": 2,
+      "status": "ok"
+    },
+    {
+      "name": "Q1",
+      "estimated_rows": 1200243,
+      "actual_rows": 4,
+      "q_error": 300060.75,
+      "latency_ms": 99.21556,
+      "per_join_q_errors": [],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q2",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 37.950587,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 460,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 32000,
+          "actual_rows": 642,
+          "q_error": 49.84423676012461
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 160000,
+          "actual_rows": 158960,
+          "q_error": 1.0065425264217414
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 7,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q3",
+      "estimated_rows": 10,
+      "actual_rows": 10,
+      "q_error": 1.0,
+      "latency_ms": 51.425013,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 30519,
+          "q_error": 1.965988400668436
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 147126,
+          "q_error": 2.4521
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q4",
+      "estimated_rows": 300000,
+      "actual_rows": 5,
+      "q_error": 60000.0,
+      "latency_ms": 29.739473,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 52523,
+          "q_error": 5.711783409173124
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q5",
+      "estimated_rows": 24004800,
+      "actual_rows": 5,
+      "q_error": 4800960.0,
+      "latency_ms": 75.17433,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 24004800,
+          "actual_rows": 7243,
+          "q_error": 3314.2068203782965
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300060,
+          "actual_rows": 910519,
+          "q_error": 3.0344564420449243
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 227597,
+          "q_error": 1.3181193073722413
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q6",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 19.600779,
+      "per_join_q_errors": [],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q7",
+      "estimated_rows": 48009,
+      "actual_rows": 4,
+      "q_error": 12002.25,
+      "latency_ms": 112.265377,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 48009,
+          "actual_rows": 5924,
+          "q_error": 8.104152599594869
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 240048,
+          "actual_rows": 145703,
+          "q_error": 1.6475158370109058
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q8",
+      "estimated_rows": 60000,
+      "actual_rows": 2,
+      "q_error": 30000.0,
+      "latency_ms": 90.278169,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 2603,
+          "q_error": 23.05032654629274
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q9",
+      "estimated_rows": 1500000,
+      "actual_rows": 175,
+      "q_error": 8571.42857142857,
+      "latency_ms": 131.040128,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 4800972,
+          "actual_rows": 319404,
+          "q_error": 15.031032798587368
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q10",
+      "estimated_rows": 20,
+      "actual_rows": 20,
+      "q_error": 1.0,
+      "latency_ms": 61.162420000000004,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 57069,
+          "q_error": 5.2567944067707515
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q11",
+      "estimated_rows": 0,
+      "actual_rows": 1048,
+      "q_error": null,
+      "latency_ms": 23.40315,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1048,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q12",
+      "estimated_rows": 1200243,
+      "actual_rows": 2,
+      "q_error": 600121.5,
+      "latency_ms": 37.326864,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 30988,
+          "q_error": 38.73250935846134
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q13",
+      "estimated_rows": 300000,
+      "actual_rows": 42,
+      "q_error": 7142.857142857143,
+      "latency_ms": 40.563518,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 1533923,
+          "q_error": 5.113076666666666
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q14",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 29.906388,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 75983,
+          "q_error": 15.796204414145269
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q15",
+      "estimated_rows": 0,
+      "actual_rows": 1,
+      "q_error": null,
+      "latency_ms": 47.475791,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": null,
+          "actual_rows": 10000,
+          "q_error": null
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q16",
+      "estimated_rows": 160000,
+      "actual_rows": 18314,
+      "q_error": 8.736485748607622,
+      "latency_ms": 19.139893,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 160000,
+          "actual_rows": 118274,
+          "q_error": 1.3527909768841841
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 118324,
+          "q_error": 1.352219329975322
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q17",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 126.07807400000002,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 587,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1200243,
+          "actual_rows": 6088,
+          "q_error": 197.14898160315374
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q18",
+      "estimated_rows": 100,
+      "actual_rows": 57,
+      "q_error": 1.7543859649122808,
+      "latency_ms": 136.50261899999998,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500303,
+          "actual_rows": 399,
+          "q_error": 3760.157894736842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500303,
+          "actual_rows": 6001215,
+          "q_error": 4.000001999596082
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1500000,
+          "actual_rows": 1500000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q19",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 46.470057000000004,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 240048,
+          "actual_rows": 121,
+          "q_error": 1983.8677685950413
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q20",
+      "estimated_rows": 2000,
+      "actual_rows": 186,
+      "q_error": 10.75268817204301,
+      "latency_ms": 46.926913,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 2000,
+          "actual_rows": 186,
+          "q_error": 10.75268817204301
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 2000,
+          "actual_rows": 412,
+          "q_error": 4.854368932038835
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": null,
+          "actual_rows": 5833,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 800000,
+          "actual_rows": 8508,
+          "q_error": 94.02914903620122
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q21",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 129.84986,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 4141,
+          "q_error": 14.489253803429124
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 73089,
+          "q_error": 1.21815
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 60000,
+          "actual_rows": 75871,
+          "q_error": 1.2645166666666667
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 1828911,
+          "q_error": 6.09637
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 3793296,
+          "q_error": 3.1604400108977933
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q22",
+      "estimated_rows": 0,
+      "actual_rows": 7,
+      "q_error": null,
+      "latency_ms": 27.637627000000002,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 6384,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 30000,
+          "actual_rows": 14086,
+          "q_error": 2.1297742439301435
+        }
+      ],
+      "trial_id": 3,
+      "status": "ok"
+    },
+    {
+      "name": "Q1",
+      "estimated_rows": 1200243,
+      "actual_rows": 4,
+      "q_error": 300060.75,
+      "latency_ms": 108.72525900000001,
+      "per_join_q_errors": [],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q2",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 43.613516,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 460,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 32000,
+          "actual_rows": 642,
+          "q_error": 49.84423676012461
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 160000,
+          "actual_rows": 158960,
+          "q_error": 1.0065425264217414
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 7,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q3",
+      "estimated_rows": 10,
+      "actual_rows": 10,
+      "q_error": 1.0,
+      "latency_ms": 50.521004,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 30519,
+          "q_error": 1.965988400668436
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 147126,
+          "q_error": 2.4521
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q4",
+      "estimated_rows": 300000,
+      "actual_rows": 5,
+      "q_error": 60000.0,
+      "latency_ms": 26.323204,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 52523,
+          "q_error": 5.711783409173124
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q5",
+      "estimated_rows": 24004800,
+      "actual_rows": 5,
+      "q_error": 4800960.0,
+      "latency_ms": 76.68733599999999,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 24004800,
+          "actual_rows": 7243,
+          "q_error": 3314.2068203782965
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300060,
+          "actual_rows": 910519,
+          "q_error": 3.0344564420449243
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 227597,
+          "q_error": 1.3181193073722413
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q6",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 21.451430000000002,
+      "per_join_q_errors": [],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q7",
+      "estimated_rows": 48009,
+      "actual_rows": 4,
+      "q_error": 12002.25,
+      "latency_ms": 113.066076,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 48009,
+          "actual_rows": 5924,
+          "q_error": 8.104152599594869
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 240048,
+          "actual_rows": 145703,
+          "q_error": 1.6475158370109058
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q8",
+      "estimated_rows": 60000,
+      "actual_rows": 2,
+      "q_error": 30000.0,
+      "latency_ms": 82.462087,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 2603,
+          "q_error": 23.05032654629274
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q9",
+      "estimated_rows": 1500000,
+      "actual_rows": 175,
+      "q_error": 8571.42857142857,
+      "latency_ms": 126.67327300000001,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 4800972,
+          "actual_rows": 319404,
+          "q_error": 15.031032798587368
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q10",
+      "estimated_rows": 20,
+      "actual_rows": 20,
+      "q_error": 1.0,
+      "latency_ms": 62.86971500000001,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 57069,
+          "q_error": 5.2567944067707515
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q11",
+      "estimated_rows": 0,
+      "actual_rows": 1048,
+      "q_error": null,
+      "latency_ms": 22.559929,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1048,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q12",
+      "estimated_rows": 1200243,
+      "actual_rows": 2,
+      "q_error": 600121.5,
+      "latency_ms": 34.879842000000004,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 30988,
+          "q_error": 38.73250935846134
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q13",
+      "estimated_rows": 300000,
+      "actual_rows": 42,
+      "q_error": 7142.857142857143,
+      "latency_ms": 36.627553999999996,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 1533923,
+          "q_error": 5.113076666666666
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q14",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 32.948040999999996,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 75983,
+          "q_error": 15.796204414145269
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q15",
+      "estimated_rows": 0,
+      "actual_rows": 1,
+      "q_error": null,
+      "latency_ms": 52.400655,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": null,
+          "actual_rows": 10000,
+          "q_error": null
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q16",
+      "estimated_rows": 160000,
+      "actual_rows": 18314,
+      "q_error": 8.736485748607622,
+      "latency_ms": 30.454905,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 160000,
+          "actual_rows": 118274,
+          "q_error": 1.3527909768841841
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 118324,
+          "q_error": 1.352219329975322
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q17",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 143.174201,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 587,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1200243,
+          "actual_rows": 6088,
+          "q_error": 197.14898160315374
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q18",
+      "estimated_rows": 100,
+      "actual_rows": 57,
+      "q_error": 1.7543859649122808,
+      "latency_ms": 147.150733,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500303,
+          "actual_rows": 399,
+          "q_error": 3760.157894736842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500303,
+          "actual_rows": 6001215,
+          "q_error": 4.000001999596082
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1500000,
+          "actual_rows": 1500000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q19",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 48.519882,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 240048,
+          "actual_rows": 121,
+          "q_error": 1983.8677685950413
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q20",
+      "estimated_rows": 2000,
+      "actual_rows": 186,
+      "q_error": 10.75268817204301,
+      "latency_ms": 48.058888,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 2000,
+          "actual_rows": 186,
+          "q_error": 10.75268817204301
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 2000,
+          "actual_rows": 412,
+          "q_error": 4.854368932038835
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": null,
+          "actual_rows": 5833,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 800000,
+          "actual_rows": 8508,
+          "q_error": 94.02914903620122
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q21",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 132.174513,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 4141,
+          "q_error": 14.489253803429124
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 73089,
+          "q_error": 1.21815
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 60000,
+          "actual_rows": 75871,
+          "q_error": 1.2645166666666667
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 1828911,
+          "q_error": 6.09637
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 3793296,
+          "q_error": 3.1604400108977933
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q22",
+      "estimated_rows": 0,
+      "actual_rows": 7,
+      "q_error": null,
+      "latency_ms": 20.213566,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 6384,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 30000,
+          "actual_rows": 14086,
+          "q_error": 2.1297742439301435
+        }
+      ],
+      "trial_id": 4,
+      "status": "ok"
+    },
+    {
+      "name": "Q1",
+      "estimated_rows": 1200243,
+      "actual_rows": 4,
+      "q_error": 300060.75,
+      "latency_ms": 111.407909,
+      "per_join_q_errors": [],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q2",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 33.34767,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 460,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 32000,
+          "actual_rows": 642,
+          "q_error": 49.84423676012461
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 160000,
+          "actual_rows": 2988,
+          "q_error": 53.5475234270415
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 160000,
+          "actual_rows": 158960,
+          "q_error": 1.0065425264217414
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 7,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q3",
+      "estimated_rows": 10,
+      "actual_rows": 10,
+      "q_error": 1.0,
+      "latency_ms": 46.945397,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 30519,
+          "q_error": 1.965988400668436
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 147126,
+          "q_error": 2.4521
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q4",
+      "estimated_rows": 300000,
+      "actual_rows": 5,
+      "q_error": 60000.0,
+      "latency_ms": 34.893714,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 52523,
+          "q_error": 5.711783409173124
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q5",
+      "estimated_rows": 24004800,
+      "actual_rows": 5,
+      "q_error": 4800960.0,
+      "latency_ms": 69.94624400000001,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 24004800,
+          "actual_rows": 7243,
+          "q_error": 3314.2068203782965
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 120024000,
+          "actual_rows": 36236,
+          "q_error": 3312.28612429628
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300060,
+          "actual_rows": 910519,
+          "q_error": 3.0344564420449243
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 227597,
+          "q_error": 1.3181193073722413
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q6",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 19.320161,
+      "per_join_q_errors": [],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q7",
+      "estimated_rows": 48009,
+      "actual_rows": 4,
+      "q_error": 12002.25,
+      "latency_ms": 119.24748100000001,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 48009,
+          "actual_rows": 5924,
+          "q_error": 8.104152599594869
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 240048,
+          "actual_rows": 145703,
+          "q_error": 1.6475158370109058
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 1828450,
+          "q_error": 1.5233998448647483
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q8",
+      "estimated_rows": 60000,
+      "actual_rows": 2,
+      "q_error": 30000.0,
+      "latency_ms": 97.01507400000001,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 2603,
+          "q_error": 23.05032654629274
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 300000,
+          "actual_rows": 13389,
+          "q_error": 22.406453058480842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 5,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 6,
+          "estimated_rows": 1200243,
+          "actual_rows": 43693,
+          "q_error": 27.469915089373583
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q9",
+      "estimated_rows": 1500000,
+      "actual_rows": 175,
+      "q_error": 8571.42857142857,
+      "latency_ms": 138.503196,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500000,
+          "actual_rows": 319404,
+          "q_error": 4.6962467595897355
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 4800972,
+          "actual_rows": 319404,
+          "q_error": 15.031032798587368
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 319404,
+          "q_error": 3.757758199646842
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q10",
+      "estimated_rows": 20,
+      "actual_rows": 20,
+      "q_error": 1.0,
+      "latency_ms": 64.681375,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 300000,
+          "actual_rows": 114705,
+          "q_error": 2.6154047338825683
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 300000,
+          "actual_rows": 57069,
+          "q_error": 5.2567944067707515
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q11",
+      "estimated_rows": 0,
+      "actual_rows": 1048,
+      "q_error": null,
+      "latency_ms": 22.769865,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1048,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 160000,
+          "actual_rows": 31680,
+          "q_error": 5.05050505050505
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 800000,
+          "actual_rows": 800000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q12",
+      "estimated_rows": 1200243,
+      "actual_rows": 2,
+      "q_error": 600121.5,
+      "latency_ms": 33.189312,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 30988,
+          "q_error": 38.73250935846134
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q13",
+      "estimated_rows": 300000,
+      "actual_rows": 42,
+      "q_error": 7142.857142857143,
+      "latency_ms": 38.453385,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 300000,
+          "actual_rows": 1533923,
+          "q_error": 5.113076666666666
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q14",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 33.242560999999995,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1200243,
+          "actual_rows": 75983,
+          "q_error": 15.796204414145269
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q15",
+      "estimated_rows": 0,
+      "actual_rows": 1,
+      "q_error": null,
+      "latency_ms": 45.370828,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 1,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": null,
+          "actual_rows": 10000,
+          "q_error": null
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q16",
+      "estimated_rows": 160000,
+      "actual_rows": 18314,
+      "q_error": 8.736485748607622,
+      "latency_ms": 18.954193,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 160000,
+          "actual_rows": 118274,
+          "q_error": 1.3527909768841841
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 160000,
+          "actual_rows": 118324,
+          "q_error": 1.352219329975322
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q17",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 126.966137,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 587,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1200243,
+          "actual_rows": 6088,
+          "q_error": 197.14898160315374
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q18",
+      "estimated_rows": 100,
+      "actual_rows": 57,
+      "q_error": 1.7543859649122808,
+      "latency_ms": 143.446899,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 1500303,
+          "actual_rows": 399,
+          "q_error": 3760.157894736842
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 1500303,
+          "actual_rows": 6001215,
+          "q_error": 4.000001999596082
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 1500000,
+          "actual_rows": 1500000,
+          "q_error": 1.0
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q19",
+      "estimated_rows": 1,
+      "actual_rows": 1,
+      "q_error": 1.0,
+      "latency_ms": 48.437928,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 240048,
+          "actual_rows": 121,
+          "q_error": 1983.8677685950413
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q20",
+      "estimated_rows": 2000,
+      "actual_rows": 186,
+      "q_error": 10.75268817204301,
+      "latency_ms": 50.524548,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 2000,
+          "actual_rows": 186,
+          "q_error": 10.75268817204301
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 2000,
+          "actual_rows": 412,
+          "q_error": 4.854368932038835
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": null,
+          "actual_rows": 5833,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 800000,
+          "actual_rows": 8508,
+          "q_error": 94.02914903620122
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q21",
+      "estimated_rows": 100,
+      "actual_rows": 100,
+      "q_error": 1.0,
+      "latency_ms": 153.11891699999998,
+      "per_join_q_errors": [
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 0,
+          "estimated_rows": 60000,
+          "actual_rows": 4141,
+          "q_error": 14.489253803429124
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 60000,
+          "actual_rows": 73089,
+          "q_error": 1.21815
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 2,
+          "estimated_rows": 60000,
+          "actual_rows": 75871,
+          "q_error": 1.2645166666666667
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 3,
+          "estimated_rows": 300000,
+          "actual_rows": 1828911,
+          "q_error": 6.09637
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 4,
+          "estimated_rows": 1200243,
+          "actual_rows": 3793296,
+          "q_error": 3.1604400108977933
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    },
+    {
+      "name": "Q22",
+      "estimated_rows": 0,
+      "actual_rows": 7,
+      "q_error": null,
+      "latency_ms": 18.795688000000002,
+      "per_join_q_errors": [
+        {
+          "node_type": "NestedLoopJoinExec",
+          "node_idx": 0,
+          "estimated_rows": null,
+          "actual_rows": 6384,
+          "q_error": null
+        },
+        {
+          "node_type": "HashJoinExec",
+          "node_idx": 1,
+          "estimated_rows": 30000,
+          "actual_rows": 14086,
+          "q_error": 2.1297742439301435
+        }
+      ],
+      "trial_id": 5,
+      "status": "ok"
+    }
+  ]
+}

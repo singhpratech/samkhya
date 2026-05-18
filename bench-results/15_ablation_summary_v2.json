@@ -1,0 +1,110 @@
+{
+  "raw_records": 1500,
+  "ablations": [
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "A4"
+  ],
+  "n_queries": 10,
+  "n_replicates_per_cell": 30,
+  "inf_cap_log10": 6.0,
+  "n_bootstrap": 10000,
+  "alpha": 0.05,
+  "headline": [
+    {
+      "ablation": "A0",
+      "median_qerror": 1000000.0,
+      "ci_low": 3.2010138669868886,
+      "ci_high": 1000000.0,
+      "p95_qerror": 1000000.0,
+      "inf_count": 210,
+      "n_finite_records": 90
+    },
+    {
+      "ablation": "A1",
+      "median_qerror": 1.0814904823487246,
+      "ci_low": 1.0301539140610618,
+      "ci_high": 1.1396804423189801,
+      "p95_qerror": 1.3746029604864227,
+      "inf_count": 0,
+      "n_finite_records": 300
+    },
+    {
+      "ablation": "A2",
+      "median_qerror": 1.0814904823487246,
+      "ci_low": 1.0301539140610618,
+      "ci_high": 1.1382102857041252,
+      "p95_qerror": 1.5467092461659584,
+      "inf_count": 0,
+      "n_finite_records": 300
+    },
+    {
+      "ablation": "A3",
+      "median_qerror": 1.9792055658334586,
+      "ci_low": 1.6874361614419005,
+      "ci_high": 2.0161615761777916,
+      "p95_qerror": 35.049333770925,
+      "inf_count": 0,
+      "n_finite_records": 300
+    },
+    {
+      "ablation": "A4",
+      "median_qerror": 4.309101040688502,
+      "ci_low": 2.013948644629699,
+      "ci_high": 9.656818268604194,
+      "p95_qerror": 81.39234175692582,
+      "inf_count": 0,
+      "n_finite_records": 300
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A0",
+      "to": "A1",
+      "delta_pct_median_qerror": -99.99636045273806,
+      "delta_pct_ci_low": -99.99970839592005,
+      "delta_pct_ci_high": -99.8117131244335,
+      "wilcoxon_W": 0,
+      "wilcoxon_p": 0.00506203212626799,
+      "bh_significant_alpha_0.05": true
+    },
+    {
+      "from": "A1",
+      "to": "A2",
+      "delta_pct_median_qerror": 2.4727538404512472,
+      "delta_pct_ci_low": -0.5381128525848711,
+      "delta_pct_ci_high": 10.860526054298457,
+      "wilcoxon_W": 1.0,
+      "wilcoxon_p": 0.6547208460185772,
+      "bh_significant_alpha_0.05": false
+    },
+    {
+      "from": "A2",
+      "to": "A3",
+      "delta_pct_median_qerror": 137.1476595279318,
+      "delta_pct_ci_low": 58.47260073388656,
+      "delta_pct_ci_high": 533.403920873034,
+      "wilcoxon_W": 1.0,
+      "wilcoxon_p": 0.01086222470481557,
+      "bh_significant_alpha_0.05": true
+    },
+    {
+      "from": "A3",
+      "to": "A4",
+      "delta_pct_median_qerror": 108.6653810241438,
+      "delta_pct_ci_low": 49.39798556567738,
+      "delta_pct_ci_high": 236.58948449019982,
+      "wilcoxon_W": 0,
+      "wilcoxon_p": 0.01171868559976863,
+      "bh_significant_alpha_0.05": true
+    }
+  ],
+  "citations": [
+    "Efron & Tibshirani 1993 \u2014 An Introduction to the Bootstrap (BCa).",
+    "Wilcoxon 1945 \u2014 Individual comparisons by ranking methods (signed-rank test).",
+    "Benjamini & Hochberg 1995 \u2014 Controlling the FDR: a practical and powerful approach.",
+    "Moerkotte, Neumann, Steidl 2009 \u2014 Preventing bad plans by bounding q-error."
+  ]
+}
