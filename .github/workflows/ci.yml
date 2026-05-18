@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # Cancel in-flight runs for the same ref when a new commit lands.
 concurrency:
