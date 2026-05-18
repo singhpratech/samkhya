@@ -76,6 +76,17 @@ jobs:
           # Default `command = "check"` runs all four checks: bans,
           # licenses, advisories, sources.
           command: check
+          # `arguments: --workspace` aligns with the v1.0.0 pre-flight
+          # verification (default features). cargo-deny-action's default
+          # is --all-features which activates samkhya-postgres's pgrx 0.12
+          # path (pulling unmaintained serde_cbor via RUSTSEC-2021-0127)
+          # and produces ~60 duplicate-version bans from
+          # arrow/brotli/hashbrown/rand co-activation across pgrx +
+          # polars-all-features + iceberg + duckdb. Retire this argument
+          # override when (a) pgrx ≥ 0.13 lands and drops serde_cbor, and
+          # (b) we have a strategy for the cross-engine arrow / hashbrown
+          # version sprawl under all-features.
+          arguments: --workspace
 
   # ---------------------------------------------------------------------------
   # Python wheel build — disabled until the PyO3 surface stabilises and we
