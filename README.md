@@ -27,15 +27,22 @@ and gpudb.
   by a provable pessimistic ceiling derived from Zhang et al., SIGMOD 2025 Best
   Paper — LP relaxation over ℓp-norms of degree sequences, no machine learning
   involved. Cold start equals the native plan or better, never worse.
-- **Pluggable corrector backend (GBT default · TabPFN-2.5 · LLM TODO).**
+- **Pluggable corrector backend (GBT default · TabPFN-2.5 · LLM-pluggable, all shipping).**
   The `Corrector` trait is the pluggable surface and the *contribution*: one
   trait, multiple production backends. Default ships a sub-MB
   gradient-boosted-tree backend (gbdt-rs, Baidu). TabPFN-2.5 (Hollmann ICLR
   2023 + Prior Labs 2026 update) opt-in behind `tabpfn_http` feature —
   **measured P95 31.15 ms at B=8 L=128 on RTX 4090 Laptop, BCa 95% CI [29.39,
-  35.32]**, q-error reduction 7.84% vs GBT on synthetic. LLM corrector backend
-  framework forward-pointing to v1.1. Every backend gated behind a Cargo
-  feature flag and capped from above by the LpBound safety envelope.
+  35.32]**, q-error reduction 7.84% vs GBT on synthetic. **LLM-pluggable
+  HTTP corrector ships dual transport in v1.0:** canonical Python FastAPI
+  server (`samkhya-gpudb/scripts/llm_infer_server.py`, port 8766 —
+  this is what `bench-results/19_llm_corrector.md` §4.1 measured) and a
+  parity Node TypeScript port (`llm_infer_server.ts`, port 8767, same
+  wire contract, broader operator appeal). Four reference backends in
+  each: Anthropic, OpenAI, local Ollama, dummy. The TS port's 30-trial
+  paired benchmark campaign is a v1.1 item (smoke-tested at v1.0).
+  Every backend gated behind a Cargo feature flag and capped from above
+  by the LpBound safety envelope.
 
 samkhya is a library, not a service. No daemon, no background thread, no GPU
 requirement in the default build. The entire workspace builds in under two
@@ -111,7 +118,11 @@ Layer 2 — engine adapters (5 production engines + 2 reservations):
 Layer 3 — corrector backends + GPU + Python:
 - `samkhya-gpudb` — Layer 4 reservation. `GpuCorrector` trait +
   `CpuFallbackCorrector` reference impl. TabPFN-2.5 backend via opt-in
-  HTTP transport (`tabpfn_http` feature).
+  HTTP transport (`tabpfn_http` feature). **LLM-pluggable HTTP
+  corrector** ships dual transport (Python FastAPI + Node TypeScript,
+  same wire contract) under `scripts/llm_infer_server.{py,ts}`, with
+  Anthropic / OpenAI / local Ollama / dummy backends for each. See
+  `bench-results/19_llm_corrector.md` for the end-to-end campaign.
 - `samkhya-py` — PyO3 0.22 bindings, single abi3-py39 wheel, published to
   PyPI as `samkhya`.
 
@@ -162,7 +173,8 @@ native plan:
 ```
 +----------------------------------------------------------------+
 | Layer 5  Pluggable corrector backend  (Corrector trait surface)
-|          GBT default · TabPFN-2.5 opt-in · LLM TODO (v1.1)     |
+|          GBT default · TabPFN-2.5 opt-in · LLM dual transport  |
+|          (FastAPI :8766 + TypeScript :8767), all shipping v1.0 |
 +----------------------------------------------------------------+
 | Layer 4  GPU Batch Inference  (optional, via gpudb)            |
 |          one CUDA / Metal launch scores thousands of subplans  |
@@ -193,7 +205,7 @@ including data-flow diagrams and the `samkhya-core` module map.
 | Postgres   | `samkhya-postgres`  | Scaffold      | pgrx-shaped stub. Double-gated behind `pg_extension` feature + `samkhya_pgrx_enabled` rustc cfg, pg17 pin (per WAVE5-A); real planner / executor hooks v1.1 after pgrx ≥ 0.13. |
 | Iceberg    | `samkhya-iceberg`   | Production    | Puffin sidecar reader/writer with KIND-tag registration for all 5 sketch types. |
 | Arrow      | `samkhya-arrow`     | Production    | Arrow IPC round-trip helpers; byte-identical for all 5 sketch types. |
-| GPU        | `samkhya-gpudb`     | CPU prod + GPU opt-in | `GpuCorrector` trait + `CpuFallbackCorrector` reference impl. TabPFN-2.5 HTTP backend via `tabpfn_http` feature (measured P95 31.15 ms on RTX 4090 Laptop). |
+| GPU        | `samkhya-gpudb`     | CPU prod + GPU opt-in | `GpuCorrector` trait + `CpuFallbackCorrector` reference impl. TabPFN-2.5 HTTP backend via `tabpfn_http` feature (measured P95 31.15 ms on RTX 4090 Laptop). LLM-pluggable HTTP corrector dual transport — Python FastAPI :8766 + Node TypeScript :8767, same wire contract. |
 
 ---
 
