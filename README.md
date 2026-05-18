@@ -201,11 +201,14 @@ including data-flow diagrams and the `samkhya-core` module map.
 
 Public, tracked files only:
 
+- **[Publication on The AI Vibe](https://theaivibe.org/publications/samkhya-portable-feedback-driven-cardinality-correction-embedded-analytics)**
+  — long-form v1.0 launch article: motivation, architecture, the
+  honest 1.038× falsification, what samkhya is actually for.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — five-layer design, crate layout, data
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
   the GitHub Security Advisories channel.
-- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.0.0-rc.2).
+- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.0.0).
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — how to file bugs, PRs, and run the
   test suite.
 - [REPRODUCIBILITY.md](./REPRODUCIBILITY.md) — ACM AE v1.1 reviewer entry,
