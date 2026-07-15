@@ -4,6 +4,7 @@
 >
 > Every number here is pre-registered and measured, including the ones that missed. On the real Join-Order Benchmark (JOB-Slow — n=55 paired warm-cache queries from the 113-query IMDb suite, vs unmodified DataFusion 46), the geomean is **1.038×** (17 wins / 38 ties / 0 losses, BCa 95% CI [1.026, 1.056], Wilcoxon p=3×10⁻⁶) — statistically real, but **below the ≥1.35× I pre-registered, which is therefore falsified and reported as such.** The `LpJoinBound` is up to 40.95× *tighter than the AGM bound* on a synthetic star-5 microbenchmark (bound-tightness, not wallclock); see the [scoped headlines](#measured-headlines) for where that does and does not carry.
 
+[![Live site](https://img.shields.io/badge/site-live-a86a12?logo=github&logoColor=white)](https://singhpratech.github.io/samkhya/)
 [![CI](https://github.com/singhpratech/samkhya/workflows/CI/badge.svg)](https://github.com/singhpratech/samkhya/actions)
 [![crates.io](https://img.shields.io/crates/v/samkhya-core.svg)](https://crates.io/crates/samkhya-core)
 [![docs.rs](https://img.shields.io/docsrs/samkhya-core)](https://docs.rs/samkhya-core)
