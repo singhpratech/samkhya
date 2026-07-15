@@ -6,7 +6,12 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The release candidate targets **v1.1.0** because it adds public adapter APIs.
+## [1.1.0] — 2026-07-14
+
+This minor release adds public adapter APIs — a safe DataFusion pre-join
+correction path and a portable Puffin statistics handoff shared across
+Iceberg, DataFusion, and DuckDB — which is why it is a minor rather than a
+patch release.
 
 ### Added
 
@@ -1170,7 +1175,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/singhpratech/samkhya/compare/v1.0.0...v1.1.0
 [v1.0.0-rc.2]: https://github.com/singhpratech/samkhya/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/singhpratech/samkhya/releases/tag/v1.0.0
 [0.9.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.9.0
