@@ -1,8 +1,8 @@
 # Security policy
 
-samkhya is **v1.0+ software**. The public API and on-disk formats (Puffin
-sidecar layout, sketch payload codecs, SQLite feedback-store schema) are
-covered by semver. Breaking changes require a major-version bump and the
+samkhya is **post-1.0 software (currently v1.1.x)**. The public API and
+on-disk formats (Puffin sidecar layout, sketch payload codecs, SQLite
+feedback-store schema) are covered by semver. Breaking changes require a major-version bump and the
 deprecation window in `docs/SEMVER.md`. The supply-chain guarantees in
 this document apply across all supported lines.
 
@@ -82,6 +82,13 @@ In-scope:
   schema. **Every `from_bytes` constructor is adversarial-input scope:**
   any panic, OOB read, allocator-DoS, or silent corruption on attacker
   -supplied bytes is a security bug.
+* **The v1.1 portable-statistics handoff** — `PortableStatsSnapshot`, the
+  Iceberg `load_portable_stats_from_table` loader, and the shared DataFusion /
+  DuckDB consumers. These read Puffin blobs referenced from real Iceberg table
+  metadata; rejecting corrupt payloads, duplicate or unknown blob kinds, and
+  schema / snapshot / sequence-number mismatches (including explicitly declared
+  future schema versions) is security scope. A malformed or stale sidecar that
+  reaches engine internals unvalidated is a security bug.
 * The build pipeline (CI workflows, `deny.toml`, `Cargo.lock`).
 
 Out-of-scope:
