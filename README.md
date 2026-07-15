@@ -269,10 +269,11 @@ including data-flow diagrams and the `samkhya-core` module map.
 
 Reading and reference:
 
-- **The honest writeup** *(self-hosted under the author's own name — link
-  forthcoming)* — *"I pre-registered a 1.35× speedup for my cardinality-correction
-  SDK. It came in at 1.038×."* The narrative-first account of what samkhya is, the
-  never-regress guarantee, and the honest falsification.
+- **[samkhya v1.1: Never Regress](https://theaivibe.org/blog/samkhya-never-regress-cardinality-correction-deep-dive)**
+  — the long-form deep dive: *putting a model in your query optimizer without
+  letting it wreck the plan.* The narrative-first account of what samkhya is, the
+  never-regress guarantee and the LpBound clamp, and the honest empirical results
+  (including the pre-registered 1.35× that came in at 1.038×).
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — five-layer design, crate layout, data
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
