@@ -2,9 +2,9 @@
 
 samkhya is **post-1.0 software (currently v1.1.x)**. The public API and
 on-disk formats (Puffin sidecar layout, sketch payload codecs, SQLite
-feedback-store schema) are covered by semver. Breaking changes require a major-version bump and the
-deprecation window in `docs/SEMVER.md`. The supply-chain guarantees in
-this document apply across all supported lines.
+feedback-store schema) are covered by semver. Breaking changes require a
+major-version bump and the deprecation window in `docs/SEMVER.md`. The
+supply-chain guarantees in this document apply across all supported lines.
 
 Sole author and security contact: **Prateek Singh** (via GitHub Security
 Advisories on the `singhpratech/samkhya` repository — see the
