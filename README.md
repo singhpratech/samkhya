@@ -190,9 +190,12 @@ receipts remain under `bench-results/`.
 <a name="measured-headlines"></a>
 ## Measured headlines (WAVE4-F + WAVE5-L2)
 
-samkhya v1.0 reports the *honest* head-to-head measurement, not a projection.
-The end-to-end real-workload number leads; the synthetic microbenchmarks are
-scoped to exactly what they measure. Where a pre-registered target was missed,
+samkhya reports the *honest* head-to-head measurement, not a projection. The
+numbers below are from the v1.0 empirical campaign (WAVE-4 / WAVE-5); v1.1 is
+semver-compatible and carries them forward unchanged — a full re-run of the
+JOB-Slow / TPC-H campaign is deferred past v1.1. The end-to-end real-workload
+number leads; the synthetic microbenchmarks are scoped to exactly what they
+measure. Where a pre-registered target was missed,
 the row says so.
 
 | Headline | Measured | CI / significance | Receipt |
@@ -274,7 +277,7 @@ Reading and reference:
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
   the GitHub Security Advisories channel.
-- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.0.0).
+- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.1.0).
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — how to file bugs, PRs, and run the
   test suite.
 - [REPRODUCIBILITY.md](./REPRODUCIBILITY.md) — ACM AE v1.1 reviewer entry,

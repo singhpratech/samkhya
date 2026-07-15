@@ -19,7 +19,8 @@ backports — operators on those lines must upgrade.
 
 | Version  | Supported          |
 | -------- | ------------------ |
-| 1.0.x    | yes (current)      |
+| 1.1.x    | yes (current)      |
+| 1.0.x    | yes                |
 | < 1.0.0  | no                 |
 
 The previous-major row will populate once v2.0 ships.
