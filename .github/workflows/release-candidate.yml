@@ -83,7 +83,7 @@ jobs:
         run: sha256sum *.crate *.whl cargo-metadata.json sbom.cdx.json > SHA256SUMS
 
       - name: Upload candidate bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: samkhya-1.1.0-local-candidate
           path: target/release-candidate/
