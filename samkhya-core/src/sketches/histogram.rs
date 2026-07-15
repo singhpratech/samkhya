@@ -208,6 +208,16 @@ impl EquiDepthHistogram {
         self.counts.len()
     }
 
+    /// Smallest value represented by the histogram.
+    pub fn min(&self) -> Option<f64> {
+        self.boundaries.first().copied()
+    }
+
+    /// Largest value represented by the histogram.
+    pub fn max(&self) -> Option<f64> {
+        self.boundaries.last().copied()
+    }
+
     /// Validate the structural invariants of a deserialised payload:
     /// at least [`MIN_BUCKETS`] buckets (so boundaries.len() >= 3),
     /// boundaries.len() matches counts.len() + 1, no NaN bin edges,

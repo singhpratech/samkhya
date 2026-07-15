@@ -72,8 +72,8 @@
 //!
 //! # Scope
 //!
-//! This is the v1.0 scaffold. A v1.1 target is the operator-side
-//! cardinality hook (replacing `get_relation_info_hook` and friends)
+//! This is the current scaffold. A future compatibility release can add the
+//! operator-side cardinality hook (replacing `get_relation_info_hook` and friends)
 //! so the planner picks up samkhya's portable, feedback-driven,
 //! self-correcting row estimates without per-query SQL changes. The
 //! `get_relation_info_hook` integration is intentionally deferred

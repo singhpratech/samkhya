@@ -1,10 +1,9 @@
 //! samkhya-duckdb — client-side DuckDB integration for samkhya.
 //!
-//! This crate uses the embedded `duckdb` Rust client (no `cxx` required)
-//! to populate samkhya's portable sketches from DuckDB query results.
-//! The resulting [`HllSketch`]/[`BloomFilter`] payloads are serialized
-//! through the same Puffin-blob path used by every other engine adapter,
-//! so cardinality stats round-trip across engines without re-scanning.
+//! This crate exposes an always-on, client-side [`sidecar`] module for
+//! consuming validated portable Puffin statistics. With the `bundled` feature,
+//! it also uses the embedded `duckdb` Rust client (no `cxx` required) to build
+//! sketches from query results and capture feedback observations.
 //!
 //! A true `.duckdb_extension` (registered server-side, with cxx-bridged
 //! sketch functions) remains a future deliverable. The integration here
@@ -13,18 +12,17 @@
 //!
 //! ## Features
 //!
-//! - `bundled` (off by default) — enables the `duckdb` crate with its
-//!   `bundled` feature so neither `libduckdb` nor a C++ toolchain need
-//!   to be present in the consumer's environment beyond what
-//!   `duckdb-sys` already vendors. With the feature disabled this crate
-//!   is essentially empty — no symbols, no link-time deps — which keeps
-//!   default workspace builds and CI exclusion-friendly.
+//! - `bundled` (off by default) — enables SQL-backed sketch construction and
+//!   feedback capture through the embedded `duckdb` crate. Portable sidecar
+//!   decoding remains available without this feature or any C++ compilation.
 //!
 //! [`HllSketch`]: samkhya_core::sketches::HllSketch
 //! [`BloomFilter`]: samkhya_core::sketches::BloomFilter
 
 #![deny(rust_2018_idioms)]
 #![deny(rustdoc::broken_intra_doc_links)]
+
+pub mod sidecar;
 
 #[cfg(feature = "bundled")]
 pub mod sketcher;

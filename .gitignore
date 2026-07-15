@@ -12,6 +12,7 @@ __pycache__/
 .venv-acceptance/
 *.egg-info/
 **/node_modules/
+**/dist/
 **/fuzz/target/
 **/fuzz/corpus/
 **/fuzz/artifacts/

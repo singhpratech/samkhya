@@ -1,7 +1,7 @@
-//! samkhya-duckdb-ext — v1.0 Rust <-> C++ FFI scaffold for samkhya
+//! samkhya-duckdb-ext — Rust <-> C++ FFI scaffold for samkhya
 //! statistics injection into DuckDB.
 //!
-//! # What ships in v1.0
+//! # Current scope
 //!
 //! A working cxx bridge with a small, deliberate surface:
 //!
@@ -15,7 +15,7 @@
 //! The crate compiles to a `staticlib` so DuckDB's C++ build can link
 //! the archive directly.
 //!
-//! # What waits for v1.1
+//! # Deferred optimizer integration
 //!
 //! The actual DuckDB optimizer extension — the hook that walks
 //! `LogicalGet` nodes, looks up sketches in a `_samkhya_stats` table,
@@ -23,8 +23,8 @@
 //! DuckDB Issue #11638 ("OptimizerExtension API for cardinality
 //! overrides"). Until that lands upstream there is no stable C++
 //! surface to plug into. The wrapper's `samkhya_register` function is
-//! forward-declared so v1.1 can fill in the body without touching the
-//! cxx layer below.
+//! forward-declared so a future release can fill in the body without touching
+//! the cxx layer below.
 //!
 //! Reference: <https://github.com/duckdb/duckdb/issues/11638>
 //!
@@ -76,7 +76,7 @@ pub fn hll_add(h: &mut HllHandle, bytes: &[u8]) {
 /// Return the current cardinality estimate as `f64`.
 ///
 /// The core API returns `u64`; we widen to `f64` because the DuckDB
-/// optimizer extension (v1.1) consumes cardinality estimates as
+/// future optimizer extension can consume cardinality estimates as
 /// floating-point selectivity multipliers.
 pub fn hll_estimate(h: &HllHandle) -> f64 {
     h.0.estimate() as f64
@@ -115,9 +115,8 @@ pub fn puffin_inspect(path: &str) -> Vec<ffi::PuffinBlobInfo> {
 #[cxx::bridge(namespace = "samkhya")]
 mod ffi {
     /// Per-blob view returned by [`puffin_inspect`]. Kept deliberately
-    /// thin: kind tag, byte offset, byte length. Anything richer
-    /// (snapshot ID, properties) ships in v1.1 once the optimizer hook
-    /// actually needs it.
+    /// thin: kind tag, byte offset, byte length. Snapshot IDs and properties
+    /// can be added when a stable optimizer hook actually needs them.
     struct PuffinBlobInfo {
         kind: String,
         offset: u64,

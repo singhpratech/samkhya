@@ -38,7 +38,7 @@
 # guarding our manifest, pgrx-pg-sys's build script panics before our
 # guard ever fires under `--all-features` (build-script execution
 # precedes proc-macro/source compilation). A single-version pin
-# sidesteps the multiplexing entirely. v1.1 will restore pg13..pg16
+# sidesteps the multiplexing entirely. A future compatibility release can restore pg13..pg16
 # when either:
 #   - pgrx 0.13+ removes the feature-multiplexing constraint, or
 #   - the pgrx-using code is moved to a non-workspace sub-crate that

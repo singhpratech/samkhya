@@ -119,7 +119,7 @@ function parseFirstInteger(text: string): bigint | null {
   try {
     const v = BigInt(m[0]);
     if (v < 0n) return null;
-    if (v > U64_MAX) return U64_MAX - 1n;
+    if (v > U64_MAX) return U64_MAX;
     return v;
   } catch {
     return null;
@@ -406,6 +406,38 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(buf);
 }
 
+function parseU64Baseline(rawJson: string, body: any): bigint | null {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (typeof body.baseline_estimate !== 'number' || !Number.isInteger(body.baseline_estimate)) {
+    return null;
+  }
+  // JSON.parse rounds integers above 2^53. Recover the one wire field from
+  // its original decimal token and reject duplicate/nested keys.
+  const matches = [...rawJson.matchAll(/"baseline_estimate"\s*:\s*(0|[1-9]\d*)(?![\d.eE])/g)];
+  if (matches.length !== 1) return null;
+  try {
+    const value = BigInt(matches[0][1]);
+    return value <= U64_MAX ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function sendExactEstimate(
+  res: http.ServerResponse,
+  estimate: bigint,
+  metadata: Record<string, unknown> = {},
+): void {
+  const encodedMetadata = JSON.stringify(metadata);
+  const suffix = encodedMetadata === '{}' ? '' : `,${encodedMetadata.slice(1, -1)}`;
+  const buf = Buffer.from(`{"estimate":${estimate.toString()}${suffix}}`);
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Content-Length': buf.byteLength,
+  });
+  res.end(buf);
+}
+
 async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer | null> {
   // SECURITY-REVIEW-2026-05-17.md (H4): refuse upfront on
   // Content-Length and also enforce a streaming cap so chunked /
@@ -415,6 +447,7 @@ async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Bu
   if (declared !== undefined) {
     const n = Number(declared);
     if (Number.isFinite(n) && n > maxBytes) {
+      req.resume();
       return null;
     }
   }
@@ -427,7 +460,7 @@ async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Bu
       total += c.byteLength;
       if (total > maxBytes) {
         aborted = true;
-        req.destroy();
+        chunks.length = 0;
         resolve(null);
         return;
       }
@@ -447,8 +480,9 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
     return;
   }
   let body: any;
+  const rawJson = bodyBytes.toString('utf8');
   try {
-    body = JSON.parse(bodyBytes.toString('utf8'));
+    body = JSON.parse(rawJson);
   } catch (exc) {
     // See SECURITY-REVIEW-2026-05-17.md (C3): full parse detail to
     // stderr, only the exception class on the wire.
@@ -458,13 +492,22 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
     return;
   }
 
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    sendJson(res, 400, { detail: 'json body must be an object' });
+    return;
+  }
+
   const features = body.features;
-  const baseline = body.baseline_estimate;
+  const baseline = parseU64Baseline(rawJson, body);
   if (!Array.isArray(features) || features.length === 0) {
     sendJson(res, 400, { detail: "missing or empty 'features'" });
     return;
   }
-  if (typeof baseline !== 'number' || !Number.isInteger(baseline) || baseline < 0) {
+  if (!features.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) {
+    sendJson(res, 400, { detail: "'features' must contain only finite numbers" });
+    return;
+  }
+  if (baseline === null) {
     sendJson(res, 400, { detail: "missing or non-u64 'baseline_estimate'" });
     return;
   }
@@ -483,33 +526,26 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
     return;
   }
 
-  const baselineBig = BigInt(baseline);
-  const userPrompt = renderUserPrompt(features as number[], baselineBig);
+  const userPrompt = renderUserPrompt(features as number[], baseline);
   const backendFn = BACKENDS[state.backend];
 
   const t0 = process.hrtime.bigint();
-  const [estimateRaw] = await backendFn(userPrompt, baselineBig);
+  const [estimateRaw] = await backendFn(userPrompt, baseline);
   const elapsedMs = Number(process.hrtime.bigint() - t0) / 1_000_000;
 
   if (estimateRaw === null) {
     logLine(state.backend, state.model, elapsedMs, 'parse_err');
-    sendJson(res, 200, { estimate: Number(baselineBig), _status: 'parse_err' });
+    sendExactEstimate(res, baseline, { _status: 'parse_err' });
     return;
   }
 
   let estimate = estimateRaw < 0n ? 0n : estimateRaw;
-  if (estimate >= U64_MAX) estimate = U64_MAX - 1n;
+  if (estimate > U64_MAX) estimate = U64_MAX;
 
   logLine(state.backend, state.model, elapsedMs, 'ok');
-  // u64 → JSON number: BigInt is not JSON-serialisable by default.
-  // Estimates above Number.MAX_SAFE_INTEGER (2^53) are extremely rare
-  // for cardinality and the Rust client parses as u64 either way; we
-  // round-trip via String when above safe range.
-  const safe = estimate <= BigInt(Number.MAX_SAFE_INTEGER);
-  sendJson(res, 200, {
-    estimate: safe ? Number(estimate) : estimate.toString(),
-    _latency_ms: elapsedMs,
-  });
+  // Emit the BigInt as a raw JSON number token. JSON.stringify cannot encode
+  // BigInt, and converting through Number would corrupt values above 2^53.
+  sendExactEstimate(res, estimate, { _latency_ms: elapsedMs });
 }
 
 function handleHealth(_req: http.IncomingMessage, res: http.ServerResponse): void {

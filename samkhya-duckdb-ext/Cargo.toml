@@ -10,11 +10,11 @@
 #      those Rust symbols under a `samkhya::` namespace plus a
 #      forward-declared `samkhya_register(DatabaseInstance &)` hook.
 #
-# What is intentionally NOT here yet (v1.1 target): the DuckDB optimizer
+# What is intentionally NOT here yet: the DuckDB optimizer
 # extension that consumes the FFI. That work waits on DuckDB Issue
 # #11638, which tracks a stable C++ hook for plan-time cardinality
 # overrides. Until the upstream API lands the cxx layer is the part we
-# can finish today, so we finish it cleanly and ship the rest in v1.1.
+# can finish today; optimizer integration remains a future release.
 #
 # Crate type is `staticlib + rlib` so the DuckDB build (a C++ binary)
 # can link against the .a archive directly, and so other Rust crates
@@ -31,7 +31,7 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "v1.0 cxx FFI scaffold linking samkhya's portable sketches into DuckDB; the optimizer hook ships in v1.1 (tracks DuckDB Issue #11638)"
+description = "cxx FFI scaffold linking samkhya portable sketches into DuckDB; optimizer integration awaits DuckDB Issue #11638"
 readme = "README.md"
 keywords = ["duckdb", "extension", "cardinality", "sketches", "cxx"]
 categories = ["database"]

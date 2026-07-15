@@ -14,7 +14,7 @@
 //!   custom optimizer rules. We still implement it for completeness, but
 //!   we do not rely on it as the injection path.
 //!
-//! samkhya therefore wires corrections in at three layers, which together
+//! samkhya therefore wires corrections in at four layers, which together
 //! form the integration model:
 //!
 //! 1. [`SamkhyaTableProvider`] —
@@ -39,6 +39,13 @@
 //!    ceremony — operators audit the
 //!    `SessionState::physical_optimizers()` slice to confirm samkhya is
 //!    wired in.
+//! 4. [`SamkhyaPreJoinRule`] —
+//!    an opt-in v1.x path for a [`samkhya_core::residual::Corrector`]. It
+//!    rewrites direct join-input statistics before DataFusion's built-in
+//!    `join_selection` rule, allowing corrections to affect hash build-side
+//!    and partition-mode decisions. Use [`install_pre_join_corrector`] rather
+//!    than appending it with `with_physical_optimizer_rule`: appended rules run
+//!    after DataFusion's defaults and are too late to affect join selection.
 //!
 //! ```ignore
 //! use std::sync::Arc;
@@ -90,10 +97,15 @@
 
 pub mod optimizer_rule;
 pub mod physical_plan;
+pub mod pre_join;
 pub mod stats_provider;
 pub mod table_provider;
 
 pub use optimizer_rule::SamkhyaOptimizerRule;
 pub use physical_plan::SamkhyaStatsExec;
+pub use pre_join::{
+    PreJoinCorrectionMetrics, PreJoinCorrectionOptions, SamkhyaPreJoinRule,
+    install_pre_join_corrector,
+};
 pub use stats_provider::to_datafusion_column_statistics;
 pub use table_provider::SamkhyaTableProvider;

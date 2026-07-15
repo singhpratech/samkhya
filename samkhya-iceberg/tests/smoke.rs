@@ -57,26 +57,6 @@ fn snapshot_paths_walk_returns_expected_entry() {
     );
 }
 
-// TODO: Once the iceberg-rust test fixtures are stable enough to
-// embed in a unit test (current iceberg 0.9.1 ships
-// `TableBuilder::build_for_test` but the statistics-file API is in
-// flux), add an end-to-end test that:
-//
-//   1. Builds an in-memory `iceberg::table::Table` with a current
-//      snapshot and one `StatisticsFile` entry pointing at the
-//      tempfile written above.
-//   2. Calls `snapshot::discover_puffin_sidecars(&table)` and
-//      asserts the returned `SnapshotPuffinPaths` matches.
-//   3. Calls `snapshot::load_column_stats(&table)` and asserts the
-//      same `HllSketch` distinct count is recovered as in the
-//      smoke test above.
-//
-// Marked `#[ignore]` and feature-gated so default `cargo test
-// -p samkhya-iceberg --features iceberg` still passes.
-#[test]
-#[ignore = "needs stable iceberg-rust in-memory table fixture; see TODO"]
-fn end_to_end_via_iceberg_table() {
-    // Placeholder — fill in once `iceberg::TableBuilder::build_for_test`
-    // (or equivalent) exposes a stable surface for attaching a
-    // `StatisticsFile` to the current snapshot.
-}
+// The real `iceberg::table::Table` path, including stale/current statistics
+// files and FileIO-backed loading, is the cross-engine release gate in
+// `samkhya-it/tests/puffin_cross_engine.rs`.

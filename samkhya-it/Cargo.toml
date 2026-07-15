@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "samkhya integration tests placeholder"
+description = "Cross-engine integration and release-gate tests for samkhya"
 publish = false
 
 [lib]
@@ -23,3 +23,23 @@ path = "src/bin/burst_harness.rs"
 [dependencies]
 samkhya-core.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+samkhya-datafusion = { path = "../samkhya-datafusion", optional = true }
+samkhya-duckdb = { path = "../samkhya-duckdb", optional = true }
+samkhya-iceberg = { path = "../samkhya-iceberg", optional = true, features = ["iceberg"] }
+datafusion = { version = "46", optional = true }
+iceberg = { version = "0.9.1", optional = true }
+tempfile = { version = "3", optional = true }
+
+[features]
+default = []
+# The release-gate fixture intentionally opts into the heavy native engines.
+# Run it with Rust 1.94 because iceberg 0.9.1 declares Rust 1.92 or newer.
+puffin-cross-engine = [
+    "dep:datafusion",
+    "dep:iceberg",
+    "dep:samkhya-datafusion",
+    "dep:samkhya-duckdb",
+    "dep:samkhya-iceberg",
+    "dep:tempfile",
+    "samkhya-duckdb/bundled",
+]

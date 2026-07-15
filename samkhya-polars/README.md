@@ -58,7 +58,7 @@ println!("buckets = {:?}", hist.buckets());
 - `engine` (off by default) — pulls in `polars = "0.44"` with every
   `dtype-*` sub-feature except `dtype-decimal` (excluded to avoid a
   resolver collision through workspace feature unification with other
-  crates depending on `pyo3 0.22`). With the feature off, the default
+  crates depending on `pyo3 0.29`). With the feature off, the default
   build keeps a single `samkhya-core` dependency and a back-compat stub —
   workspace builds that do not need Polars stay lean.
 

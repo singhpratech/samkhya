@@ -16,6 +16,7 @@ import * as http from 'node:http';
 import { URL } from 'node:url';
 
 const FEATURE_LEN = 7;
+const U64_MAX = (1n << 64n) - 1n;
 // SECURITY-REVIEW-2026-05-17.md (H4 + M1).
 const BODY_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_INFER_BATCHES = 1024;
@@ -41,13 +42,42 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(buf);
 }
 
+function parseU64Baseline(rawJson: string, body: any): bigint | null {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (typeof body.baseline_estimate !== 'number' || !Number.isInteger(body.baseline_estimate)) {
+    return null;
+  }
+  // JSON.parse rounds integers above 2^53. Recover the one top-level wire
+  // field from its original decimal token and reject duplicate/nested keys.
+  const matches = [...rawJson.matchAll(/"baseline_estimate"\s*:\s*(0|[1-9]\d*)(?![\d.eE])/g)];
+  if (matches.length !== 1) return null;
+  try {
+    const value = BigInt(matches[0][1]);
+    return value <= U64_MAX ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function sendExactEstimate(res: http.ServerResponse, estimate: bigint): void {
+  const buf = Buffer.from(`{"estimate":${estimate.toString()}}`);
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Content-Length': buf.byteLength,
+  });
+  res.end(buf);
+}
+
 async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer | null> {
   // SECURITY-REVIEW-2026-05-17.md (H4): same body-size guard as the
   // primary llm_infer_server.ts. Returns null on overflow.
   const declared = req.headers['content-length'];
   if (declared !== undefined) {
     const n = Number(declared);
-    if (Number.isFinite(n) && n > maxBytes) return null;
+    if (Number.isFinite(n) && n > maxBytes) {
+      req.resume();
+      return null;
+    }
   }
   return new Promise<Buffer | null>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -58,7 +88,7 @@ async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<Bu
       total += c.byteLength;
       if (total > maxBytes) {
         aborted = true;
-        req.destroy();
+        chunks.length = 0;
         resolve(null);
         return;
       }
@@ -88,8 +118,9 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
     return;
   }
   let body: any;
+  const rawJson = bodyBytes.toString('utf8');
   try {
-    body = JSON.parse(bodyBytes.toString('utf8'));
+    body = JSON.parse(rawJson);
   } catch (exc) {
     // See SECURITY-REVIEW-2026-05-17.md (C3): log full detail to stderr
     // but echo only the exception class on the wire.
@@ -98,13 +129,21 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
     sendJson(res, 400, { detail: `invalid json: ${name}` });
     return;
   }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    sendJson(res, 400, { detail: 'json body must be an object' });
+    return;
+  }
   const features = body.features;
-  const baseline = body.baseline_estimate;
+  const baseline = parseU64Baseline(rawJson, body);
   if (!Array.isArray(features) || features.length === 0) {
     sendJson(res, 400, { detail: "missing or empty 'features'" });
     return;
   }
-  if (typeof baseline !== 'number' || !Number.isInteger(baseline) || baseline < 0) {
+  if (!features.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) {
+    sendJson(res, 400, { detail: "'features' must contain only finite numbers" });
+    return;
+  }
+  if (baseline === null) {
     sendJson(res, 400, { detail: "missing or non-u64 'baseline_estimate'" });
     return;
   }
@@ -121,7 +160,7 @@ async function handleInfer(req: http.IncomingMessage, res: http.ServerResponse):
     });
     return;
   }
-  sendJson(res, 200, { estimate: baseline });
+  sendExactEstimate(res, baseline);
 }
 
 function parseArgs(argv: string[]): { host: string; port: number } {

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "samkhya"
-version = "1.0.0"
+version = "1.1.0"
 description = "Portable, feedback-driven cardinality correction"
 readme = "README.md"
 license = { text = "Apache-2.0" }

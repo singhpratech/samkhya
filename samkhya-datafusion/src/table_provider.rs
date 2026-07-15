@@ -1,33 +1,19 @@
 //! `SamkhyaTableProvider` — the primary integration point for injecting
 //! samkhya-corrected column statistics into DataFusion's query planning.
 //!
-//! # Wrapping point: `TableProvider::statistics()`
+//! # Wrapping point: scan-time `ExecutionPlan::statistics()`
 //!
-//! DataFusion attaches statistics to table providers, not to logical-plan
-//! nodes. The [`TableProvider`] trait exposes a `statistics()` hook
-//! (returning `Option<Statistics>`) that the planner consults when reasoning
-//! about cardinality, join order, and filter selectivity. Rewriting a
-//! `LogicalPlan` to "inject" stats is the wrong layer — that is observe-only
-//! plumbing. The right layer is a `TableProvider` shim that delegates every
-//! method to an inner provider *except* `statistics()`, where it folds in
-//! samkhya's feedback-driven corrections.
+//! DataFusion 46 exposes `TableProvider::statistics()` for downstream users,
+//! but its mainline physical planner relies on statistics from the
+//! [`ExecutionPlan`] returned by [`TableProvider::scan`]. This wrapper folds
+//! samkhya overrides into the provider statistics surface and also wraps the
+//! scan result in [`crate::SamkhyaStatsExec`], which publishes the same values
+//! at the physical layer. The logical optimizer rule remains observe-only.
 //!
-//! We considered three wrapping points and chose the first:
-//!
-//! 1. **`TableProvider::statistics()`** (this module). Clean, stable surface
-//!    in DataFusion 46. The planner calls it during analysis. Every adapter
-//!    (Parquet, CSV, MemTable, Iceberg) flows through the same hook, so the
-//!    shim is provider-agnostic.
-//! 2. `ExecutionPlan::statistics()`. Lower in the stack — would require
-//!    wrapping the scan-side `ExecutionPlan` returned from `scan()`. Useful
-//!    when the inner provider's logical stats are absent but its physical
-//!    plan has them; not our situation today.
-//! 3. `OptimizerRule` rewriting `TableScan::source`. The original scaffold
-//!    direction. The rewrite must construct a new `TableSource` (the logical
-//!    counterpart of `TableProvider`) — duplicate state, version-fragile,
-//!    and never propagates into the physical layer where the planner
-//!    actually consults stats. Kept around as observe-only telemetry
-//!    ([`crate::SamkhyaOptimizerRule`]).
+//! Portable snapshots carry Iceberg field IDs, whereas DataFusion addresses
+//! columns by zero-based schema ordinal. [`SamkhyaTableProvider::try_with_portable_stats`]
+//! requires both values explicitly so schema evolution cannot silently bind a
+//! sketch to the wrong column.
 //!
 //! # LpBound posture
 //!
@@ -47,11 +33,12 @@ use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::Session;
 use datafusion::common::stats::Precision;
-use datafusion::common::{ColumnStatistics, Constraints, Result, Statistics};
+use datafusion::common::{ColumnStatistics, Constraints, DataFusionError, Result, Statistics};
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{Expr, LogicalPlan, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
+use samkhya_core::portable::PortableStatsSnapshot;
 use samkhya_core::stats::ColumnStats;
 
 use crate::physical_plan::SamkhyaStatsExec;
@@ -112,6 +99,59 @@ impl SamkhyaTableProvider {
         self
     }
 
+    /// Decode one Iceberg field from a portable snapshot and bind it to an
+    /// explicit DataFusion column ordinal.
+    ///
+    /// Iceberg field IDs are stable schema identifiers, while DataFusion uses
+    /// zero-based positions in the provider schema. They are intentionally
+    /// separate arguments: this adapter never casts a field ID into an ordinal
+    /// or assumes that the two numbering schemes coincide.
+    ///
+    /// The binding fails when the field ID or ordinal is invalid, the portable
+    /// payload is malformed, or the field has no scalar statistic DataFusion
+    /// can publish. In particular, an equi-depth histogram remains available
+    /// from [`PortableStatsSnapshot`] but cannot by itself populate
+    /// DataFusion 46's [`ColumnStatistics`].
+    pub fn try_with_portable_stats(
+        self,
+        snapshot: &PortableStatsSnapshot,
+        iceberg_field_id: i32,
+        datafusion_column_ordinal: usize,
+    ) -> Result<Self> {
+        if iceberg_field_id <= 0 {
+            return Err(DataFusionError::Plan(format!(
+                "Iceberg field id must be positive; got {iceberg_field_id}"
+            )));
+        }
+
+        let field_count = self.inner.schema().fields().len();
+        if datafusion_column_ordinal >= field_count {
+            return Err(DataFusionError::Plan(format!(
+                "DataFusion column ordinal {datafusion_column_ordinal} is out of range for a \
+                 provider with {field_count} columns"
+            )));
+        }
+
+        let decoded = snapshot
+            .decode_column(iceberg_field_id)
+            .map_err(|error| DataFusionError::External(Box::new(error)))?
+            .ok_or_else(|| {
+                DataFusionError::Plan(format!(
+                    "portable snapshot has no supported statistics for Iceberg field id \
+                     {iceberg_field_id}"
+                ))
+            })?;
+        let stats = decoded.column_stats().clone();
+        if !has_datafusion_planner_stats(&stats) {
+            return Err(DataFusionError::Plan(format!(
+                "portable snapshot has no DataFusion-compatible scalar statistics for Iceberg \
+                 field id {iceberg_field_id}"
+            )));
+        }
+
+        Ok(self.with_column_stats(datafusion_column_ordinal, stats))
+    }
+
     /// Number of times `statistics()` has been called on this wrapper.
     ///
     /// Useful for assertions in integration tests that verify the planner
@@ -124,6 +164,14 @@ impl SamkhyaTableProvider {
     pub fn overrides(&self) -> &HashMap<usize, ColumnStats> {
         &self.overrides
     }
+}
+
+fn has_datafusion_planner_stats(stats: &ColumnStats) -> bool {
+    stats.row_count.is_some()
+        || stats.null_count.is_some()
+        || stats.distinct_count.is_some()
+        || stats.min.is_some()
+        || stats.max.is_some()
 }
 
 #[async_trait]
@@ -347,6 +395,8 @@ mod tests {
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::arrow::record_batch::RecordBatch;
     use datafusion::datasource::MemTable;
+    use samkhya_core::portable::{PortableSketchBlob, PortableStatsSnapshot};
+    use samkhya_core::sketches::{EquiDepthHistogram, HllSketch, Sketch};
 
     fn tiny_mem_table() -> Arc<MemTable> {
         let schema = Arc::new(Schema::new(vec![
@@ -364,6 +414,23 @@ mod tests {
         Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap())
     }
 
+    fn portable_hll_snapshot(field_id: i32) -> (PortableStatsSnapshot, u64) {
+        let mut hll = HllSketch::new(10).unwrap();
+        for value in 0..256_u32 {
+            hll.add(&value.to_le_bytes());
+        }
+        let expected_distinct = hll.estimate();
+        let snapshot = PortableStatsSnapshot::new(
+            Some(42),
+            vec![PortableSketchBlob::new(
+                HllSketch::KIND,
+                vec![field_id],
+                hll.to_bytes().unwrap(),
+            )],
+        );
+        (snapshot, expected_distinct)
+    }
+
     #[test]
     fn builder_records_overrides() {
         let inner = tiny_mem_table();
@@ -371,6 +438,87 @@ mod tests {
             .with_column_stats(0, ColumnStats::new().with_row_count(999));
         assert_eq!(wrapped.overrides().len(), 1);
         assert_eq!(wrapped.overrides()[&0].row_count, Some(999));
+    }
+
+    #[test]
+    fn portable_stats_bind_field_id_to_explicit_column_ordinal() {
+        let (snapshot, expected_distinct) = portable_hll_snapshot(17);
+        let wrapped = SamkhyaTableProvider::new(tiny_mem_table())
+            .try_with_portable_stats(&snapshot, 17, 1)
+            .expect("field 17 should bind to caller-selected ordinal 1");
+
+        assert_eq!(wrapped.overrides().len(), 1);
+        assert_eq!(
+            wrapped.overrides()[&1].distinct_count,
+            Some(expected_distinct)
+        );
+        assert!(
+            !wrapped.overrides().contains_key(&17),
+            "Iceberg field ID must never be cast into a DataFusion ordinal"
+        );
+
+        let stats = wrapped.statistics().expect("statistics present");
+        assert_eq!(stats.column_statistics[0].distinct_count, Precision::Absent);
+        assert_eq!(
+            stats.column_statistics[1].distinct_count,
+            Precision::Inexact(expected_distinct as usize)
+        );
+    }
+
+    #[test]
+    fn portable_stats_reject_missing_supported_field_stats() {
+        let snapshot = PortableStatsSnapshot::new(
+            Some(42),
+            vec![PortableSketchBlob::new(
+                "vendor.future-v1",
+                vec![17],
+                b"opaque".to_vec(),
+            )],
+        );
+        let error = SamkhyaTableProvider::new(tiny_mem_table())
+            .try_with_portable_stats(&snapshot, 17, 0)
+            .expect_err("unknown kinds must not install an empty override");
+
+        assert!(matches!(&error, DataFusionError::Plan(_)));
+        assert!(error.to_string().contains("no supported statistics"));
+    }
+
+    #[test]
+    fn portable_stats_reject_histogram_without_scalar_planner_stats() {
+        let histogram = EquiDepthHistogram::from_values(
+            &(0..100).map(|value| value as f64).collect::<Vec<_>>(),
+            10,
+        )
+        .unwrap();
+        let snapshot = PortableStatsSnapshot::new(
+            Some(42),
+            vec![PortableSketchBlob::new(
+                EquiDepthHistogram::KIND,
+                vec![17],
+                histogram.to_bytes().unwrap(),
+            )],
+        );
+        let error = SamkhyaTableProvider::new(tiny_mem_table())
+            .try_with_portable_stats(&snapshot, 17, 0)
+            .expect_err("a histogram alone has no DataFusion 46 statistics slot");
+
+        assert!(matches!(&error, DataFusionError::Plan(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("no DataFusion-compatible scalar statistics")
+        );
+    }
+
+    #[test]
+    fn portable_stats_reject_out_of_range_column_ordinal() {
+        let (snapshot, _) = portable_hll_snapshot(17);
+        let error = SamkhyaTableProvider::new(tiny_mem_table())
+            .try_with_portable_stats(&snapshot, 17, 2)
+            .expect_err("two-column schema has no ordinal 2");
+
+        assert!(matches!(&error, DataFusionError::Plan(_)));
+        assert!(error.to_string().contains("ordinal 2 is out of range"));
     }
 
     #[test]

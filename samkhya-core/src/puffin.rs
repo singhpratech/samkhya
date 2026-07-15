@@ -28,6 +28,27 @@ use crate::{Error, Result};
 
 const MAGIC: &[u8; 4] = b"PFA1";
 
+/// Puffin file property declaring the samkhya portability contract version.
+pub const SAMKHYA_SCHEMA_VERSION_PROPERTY: &str = "samkhya.schema-version";
+
+/// Current samkhya portability contract version.
+pub const SAMKHYA_SCHEMA_VERSION: &str = "1";
+
+/// Validate an optional samkhya file-schema marker.
+///
+/// Absence is accepted for v1 files written before the marker was introduced.
+/// An explicit future or malformed value fails closed so readers do not
+/// silently reinterpret a changed cross-engine contract.
+pub fn validate_samkhya_schema_version(version: Option<&str>) -> Result<()> {
+    match version {
+        None | Some(SAMKHYA_SCHEMA_VERSION) => Ok(()),
+        Some(other) => Err(Error::InvalidPuffin(format!(
+            "unsupported {} {other:?}; expected {SAMKHYA_SCHEMA_VERSION}",
+            SAMKHYA_SCHEMA_VERSION_PROPERTY
+        ))),
+    }
+}
+
 /// Maximum permitted size for a single blob payload, in bytes.
 ///
 /// Caps untrusted `length` and decompressed-size values read from the
@@ -86,10 +107,13 @@ impl CompressionCodec {
         }
     }
 
-    fn from_meta(meta: Option<&str>) -> Self {
+    fn from_meta(meta: Option<&str>) -> Result<Self> {
         match meta {
-            Some("zstd") => CompressionCodec::Zstd,
-            _ => CompressionCodec::None,
+            None | Some("none") => Ok(CompressionCodec::None),
+            Some("zstd") => Ok(CompressionCodec::Zstd),
+            Some(other) => Err(Error::InvalidPuffin(format!(
+                "unsupported blob compression codec {other:?}"
+            ))),
         }
     }
 }
@@ -197,18 +221,35 @@ impl<'a> Blob<'a> {
 pub struct PuffinWriter<W: Write + Seek> {
     inner: W,
     blobs: Vec<BlobMetadata>,
+    properties: BTreeMap<String, String>,
     pos: u64,
     wrote_head: bool,
 }
 
 impl<W: Write + Seek> PuffinWriter<W> {
     pub fn new(inner: W) -> Self {
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            "created-by".to_owned(),
+            format!("samkhya-core version {}", env!("CARGO_PKG_VERSION")),
+        );
+        properties.insert(
+            SAMKHYA_SCHEMA_VERSION_PROPERTY.to_owned(),
+            SAMKHYA_SCHEMA_VERSION.to_owned(),
+        );
         Self {
             inner,
             blobs: Vec::new(),
+            properties,
             pos: 0,
             wrote_head: false,
         }
+    }
+
+    /// Set a file-level Puffin footer property.
+    pub fn with_file_property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.properties.insert(key.into(), value.into());
+        self
     }
 
     fn ensure_head(&mut self) -> Result<()> {
@@ -233,6 +274,18 @@ impl<W: Write + Seek> PuffinWriter<W> {
     /// let _bytes = writer.finish().unwrap().into_inner();
     /// ```
     pub fn add_blob(&mut self, blob: Blob<'_>) -> Result<()> {
+        // Puffin v1 requires both fields even when the Iceberg snapshot is not
+        // known yet; -1 is the specification's unassigned sentinel.
+        self.add_blob_for_snapshot(blob, -1, -1)
+    }
+
+    /// Append an uncompressed blob with required Iceberg snapshot metadata.
+    pub fn add_blob_for_snapshot(
+        &mut self,
+        blob: Blob<'_>,
+        snapshot_id: i64,
+        sequence_number: i64,
+    ) -> Result<()> {
         self.ensure_head()?;
         let offset = self.pos;
         self.inner.write_all(blob.payload)?;
@@ -241,8 +294,8 @@ impl<W: Write + Seek> PuffinWriter<W> {
         self.blobs.push(BlobMetadata {
             kind: blob.kind,
             fields: blob.fields,
-            snapshot_id: None,
-            sequence_number: None,
+            snapshot_id: Some(snapshot_id),
+            sequence_number: Some(sequence_number),
             offset,
             length,
             compression_codec: None,
@@ -257,14 +310,32 @@ impl<W: Write + Seek> PuffinWriter<W> {
     /// `CompressionCodec::Zstd` requires the `zstd` feature; otherwise this
     /// returns an [`Error::InvalidPuffin`] explaining the missing feature.
     pub fn add_blob_compressed(&mut self, blob: Blob<'_>, codec: CompressionCodec) -> Result<()> {
+        self.add_blob_compressed_for_snapshot(blob, codec, -1, -1)
+    }
+
+    /// Append a blob with compression and required snapshot metadata.
+    pub fn add_blob_compressed_for_snapshot(
+        &mut self,
+        blob: Blob<'_>,
+        codec: CompressionCodec,
+        snapshot_id: i64,
+        sequence_number: i64,
+    ) -> Result<()> {
         match codec {
-            CompressionCodec::None => self.add_blob(blob),
-            CompressionCodec::Zstd => self.add_blob_zstd(blob),
+            CompressionCodec::None => {
+                self.add_blob_for_snapshot(blob, snapshot_id, sequence_number)
+            }
+            CompressionCodec::Zstd => self.add_blob_zstd(blob, snapshot_id, sequence_number),
         }
     }
 
     #[cfg(feature = "zstd")]
-    fn add_blob_zstd(&mut self, blob: Blob<'_>) -> Result<()> {
+    fn add_blob_zstd(
+        &mut self,
+        blob: Blob<'_>,
+        snapshot_id: i64,
+        sequence_number: i64,
+    ) -> Result<()> {
         self.ensure_head()?;
         let compressed = zstd::encode_all(blob.payload, 0)
             .map_err(|e| Error::InvalidPuffin(format!("zstd encode: {e}")))?;
@@ -275,8 +346,8 @@ impl<W: Write + Seek> PuffinWriter<W> {
         self.blobs.push(BlobMetadata {
             kind: blob.kind,
             fields: blob.fields,
-            snapshot_id: None,
-            sequence_number: None,
+            snapshot_id: Some(snapshot_id),
+            sequence_number: Some(sequence_number),
             offset,
             length,
             compression_codec: Some(CompressionCodec::Zstd.as_str().to_string()),
@@ -286,7 +357,12 @@ impl<W: Write + Seek> PuffinWriter<W> {
     }
 
     #[cfg(not(feature = "zstd"))]
-    fn add_blob_zstd(&mut self, _blob: Blob<'_>) -> Result<()> {
+    fn add_blob_zstd(
+        &mut self,
+        _blob: Blob<'_>,
+        _snapshot_id: i64,
+        _sequence_number: i64,
+    ) -> Result<()> {
         Err(Error::InvalidPuffin(
             "zstd codec requested but the `zstd` cargo feature is disabled".into(),
         ))
@@ -297,7 +373,7 @@ impl<W: Write + Seek> PuffinWriter<W> {
         self.ensure_head()?;
         let footer = FooterPayload {
             blobs: self.blobs,
-            properties: BTreeMap::new(),
+            properties: self.properties,
         };
         let payload = serde_json::to_vec(&footer)
             .map_err(|e| Error::InvalidPuffin(format!("footer JSON encode: {e}")))?;
@@ -334,6 +410,7 @@ impl<W: Write + Seek> PuffinWriter<W> {
 pub struct PuffinReader<R: Read + Seek> {
     inner: R,
     footer: FooterPayload,
+    blob_data_end: u64,
 }
 
 impl<R: Read + Seek> PuffinReader<R> {
@@ -354,9 +431,19 @@ impl<R: Read + Seek> PuffinReader<R> {
             return Err(Error::InvalidPuffin("trailing magic missing".into()));
         }
 
-        // Flags (4 bytes before trailing magic) — read but ignored for now.
+        // A compressed footer (bit 0) and all reserved flags are unsupported
+        // by this synchronous reader. Reject explicitly instead of trying to
+        // parse compressed bytes as JSON or silently accepting future flags.
         inner.seek(SeekFrom::End(-8))?;
-        let _flags = inner.read_u32::<LittleEndian>()?;
+        let flags = inner.read_u32::<LittleEndian>()?;
+        if flags != 0 {
+            let reason = if flags & 1 == 1 {
+                "compressed Puffin footers are not supported"
+            } else {
+                "Puffin footer contains unsupported reserved flags"
+            };
+            return Err(Error::InvalidPuffin(format!("{reason}: 0x{flags:08x}")));
+        }
 
         // Payload length (4 bytes before flags)
         inner.seek(SeekFrom::End(-12))?;
@@ -407,7 +494,11 @@ impl<R: Read + Seek> PuffinReader<R> {
             )));
         }
 
-        Ok(Self { inner, footer })
+        Ok(Self {
+            inner,
+            footer,
+            blob_data_end: payload_start - 4,
+        })
     }
 
     pub fn footer(&self) -> &FooterPayload {
@@ -431,6 +522,18 @@ impl<R: Read + Seek> PuffinReader<R> {
                 meta.length
             )));
         }
+        let blob_end = meta
+            .offset
+            .checked_add(meta.length)
+            .ok_or_else(|| Error::InvalidPuffin(format!("blob {idx} offset overflow")))?;
+        if meta.offset < MAGIC.len() as u64 || blob_end > self.blob_data_end {
+            return Err(Error::InvalidPuffin(format!(
+                "blob {idx} range {}..{blob_end} falls outside payload region {}..{}",
+                meta.offset,
+                MAGIC.len(),
+                self.blob_data_end
+            )));
+        }
         self.inner.seek(SeekFrom::Start(meta.offset))?;
         let mut buf = vec![0u8; meta.length as usize];
         self.inner.read_exact(&mut buf)?;
@@ -449,7 +552,7 @@ impl<R: Read + Seek> PuffinReader<R> {
                 self.footer.blobs.get(idx).ok_or_else(|| {
                     Error::InvalidPuffin(format!("blob index {idx} out of range"))
                 })?;
-            CompressionCodec::from_meta(meta.compression_codec.as_deref())
+            CompressionCodec::from_meta(meta.compression_codec.as_deref())?
         };
         let raw = self.read_blob(idx)?;
         match codec {
@@ -561,7 +664,25 @@ mod tests {
         let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
         assert_eq!(reader.blobs().len(), 1);
         assert_eq!(reader.blobs()[0].kind, "samkhya.test-v1");
+        assert_eq!(reader.blobs()[0].snapshot_id, Some(-1));
+        assert_eq!(reader.blobs()[0].sequence_number, Some(-1));
+        assert!(reader.footer().properties["created-by"].starts_with("samkhya-core version "));
         assert_eq!(reader.read_blob(0).unwrap(), b"hello puffin");
+    }
+
+    #[test]
+    fn snapshot_aware_blob_metadata_round_trips() {
+        let mut writer =
+            PuffinWriter::new(Cursor::new(Vec::new())).with_file_property("deployment", "golden");
+        writer
+            .add_blob_for_snapshot(Blob::new("samkhya.test-v1", vec![17], b"payload"), 4_242, 7)
+            .unwrap();
+        let cursor = writer.finish().unwrap();
+
+        let reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+        assert_eq!(reader.blobs()[0].snapshot_id, Some(4_242));
+        assert_eq!(reader.blobs()[0].sequence_number, Some(7));
+        assert_eq!(reader.footer().properties["deployment"], "golden");
     }
 
     #[test]
@@ -634,6 +755,35 @@ mod tests {
 
         let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
         assert_eq!(reader.read_blob_decompressed(0).unwrap(), b"plain payload");
+    }
+
+    #[test]
+    fn read_blob_decompressed_rejects_unknown_codec() {
+        let mut writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        writer
+            .add_blob(Blob::new("samkhya.test-v1", vec![0], b"plain payload"))
+            .unwrap();
+        let cursor = writer.finish().unwrap();
+        let mut reader = PuffinReader::open(Cursor::new(cursor.into_inner())).unwrap();
+        reader.footer.blobs[0].compression_codec = Some("gzip".to_owned());
+
+        let error = reader.read_blob_decompressed(0).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported blob compression codec")
+        );
+    }
+
+    #[test]
+    fn open_rejects_unsupported_footer_flags() {
+        let writer = PuffinWriter::new(Cursor::new(Vec::new()));
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let flags_offset = bytes.len() - 8;
+        bytes[flags_offset..flags_offset + 4].copy_from_slice(&2_u32.to_le_bytes());
+
+        let error = PuffinReader::open(Cursor::new(bytes)).err().unwrap();
+        assert!(error.to_string().contains("unsupported reserved flags"));
     }
 
     #[test]

@@ -1,0 +1,91 @@
+name: Release candidate artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  artifacts:
+    name: Build unsigned candidate artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache cargo registry, index, and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-candidate
+
+      - name: Check cross-ecosystem versions
+        run: python3 scripts/check_version_sync.py
+
+      - name: Verify and archive all publishable crates
+        shell: bash
+        run: |
+          rm -rf target/package target/wheels
+          rm -rf target/release-candidate target/release-venv
+          cargo package --locked -p samkhya-core
+          while IFS= read -r package; do
+            if [[ "$package" != "samkhya-core" ]]; then
+              cargo package --locked -p "$package" \
+                --config "patch.crates-io.samkhya-core.path=\"${GITHUB_WORKSPACE}/samkhya-core\""
+            fi
+          done < <(python3 scripts/check_version_sync.py --print-publishable)
+
+      - name: Build and smoke-test Python wheel
+        run: |
+          python -m pip install "maturin>=1.7,<2.0" "pytest>=7"
+          maturin build --locked --release --interpreter python \
+            --out target/wheels -m samkhya-py/Cargo.toml
+          python -m venv target/release-venv
+          target/release-venv/bin/python -m pip install \
+            pytest target/wheels/samkhya-*.whl
+          target/release-venv/bin/python -m pytest samkhya-py/tests
+
+      - name: Assemble candidate directory
+        run: |
+          mkdir -p target/release-candidate
+          cp target/package/*.crate target/release-candidate/
+          cp target/wheels/samkhya-*.whl target/release-candidate/
+          cargo metadata --locked --format-version 1 \
+            > target/release-candidate/cargo-metadata.json
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: target/release-candidate/sbom.cdx.json
+          upload-artifact: false
+          dependency-snapshot: false
+
+      - name: Generate SHA-256 manifest
+        working-directory: target/release-candidate
+        run: sha256sum *.crate *.whl cargo-metadata.json sbom.cdx.json > SHA256SUMS
+
+      - name: Upload candidate bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: samkhya-1.1.0-local-candidate
+          path: target/release-candidate/
+          if-no-files-found: error
+          retention-days: 14

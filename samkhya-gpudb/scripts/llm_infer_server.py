@@ -164,7 +164,7 @@ def _parse_first_integer(text: str) -> Optional[int]:
     if v < 0:
         return None
     if v > U64_MAX:
-        return U64_MAX - 1
+        return U64_MAX
     return v
 
 
@@ -417,12 +417,18 @@ async def infer(request: Request) -> dict[str, Any]:
                 status_code=413,
                 detail=f"request body {declared} exceeds {BODY_MAX_BYTES}",
             )
-    body_bytes = await request.body()
-    if len(body_bytes) > BODY_MAX_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"request body {len(body_bytes)} exceeds {BODY_MAX_BYTES}",
-        )
+    # Bound memory while consuming chunked or headerless requests. Starlette's
+    # request.body() buffers the entire payload before returning, which would
+    # make a post-read size check too late for an allocation-DoS guard.
+    body_buffer = bytearray()
+    async for chunk in request.stream():
+        if len(body_buffer) + len(chunk) > BODY_MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"request body exceeds {BODY_MAX_BYTES}",
+            )
+        body_buffer.extend(chunk)
+    body_bytes = bytes(body_buffer)
     try:
         body = json.loads(body_bytes)
     except Exception as exc:
@@ -433,11 +439,24 @@ async def infer(request: Request) -> dict[str, Any]:
             status_code=400, detail=f"invalid json: {type(exc).__name__}"
         ) from exc
 
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="json body must be an object")
+
     features = body.get("features")
     baseline = body.get("baseline_estimate")
     if not isinstance(features, list) or not features:
         raise HTTPException(status_code=400, detail="missing or empty 'features'")
-    if not isinstance(baseline, int) or baseline < 0:
+    if not all(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and (not isinstance(value, float) or value == value)
+        and value not in (float("inf"), float("-inf"))
+        for value in features
+    ):
+        raise HTTPException(
+            status_code=400, detail="'features' must contain only finite numbers"
+        )
+    if type(baseline) is not int or not 0 <= baseline <= U64_MAX:
         raise HTTPException(
             status_code=400, detail="missing or non-u64 'baseline_estimate'"
         )
@@ -473,8 +492,8 @@ async def infer(request: Request) -> dict[str, Any]:
         return {"estimate": int(baseline), "_status": "parse_err"}
 
     estimate = max(0, int(estimate))
-    if estimate >= U64_MAX:
-        estimate = U64_MAX - 1
+    if estimate > U64_MAX:
+        estimate = U64_MAX
 
     _log(_state["backend"], _state["model"], elapsed_ms, "ok")
     return {"estimate": estimate, "_latency_ms": elapsed_ms}

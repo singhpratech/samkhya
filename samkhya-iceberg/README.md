@@ -52,19 +52,16 @@ sidecar paths samkhya should look at."
 ## Quick start
 
 ```rust
-use samkhya_iceberg::{SnapshotPuffinPaths, Schema, SchemaField, column_stats_from_paths};
+use samkhya_iceberg::{Schema, SnapshotPuffinPaths, try_column_stats_from_paths};
 
 let paths = SnapshotPuffinPaths::from_strings(
     Some(42),
     ["orders.puffin", "lineitem.puffin"],
 );
 
-let schema = Schema::from_fields(vec![
-    SchemaField { field_id: 1, name: "order_id".into() },
-    SchemaField { field_id: 2, name: "customer_id".into() },
-]);
+let schema = Schema::from_fields([(1, "order_id"), (2, "customer_id")]);
 
-let stats = column_stats_from_paths(&paths, &schema)?;
+let stats = try_column_stats_from_paths(&paths, &schema)?;
 for (field_id, col_stats) in &stats {
     println!("field {field_id}: distinct ~= {:?}", col_stats.distinct_count);
 }

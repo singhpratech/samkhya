@@ -27,20 +27,20 @@ samkhya-bench.
 -->
 
 - [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --exclude samkhya-duckdb --exclude samkhya-py --exclude samkhya-postgres --all-features -- -D warnings`
-- [ ] `cargo test --workspace --exclude samkhya-duckdb --exclude samkhya-py --no-fail-fast`
+- [ ] `cargo clippy --locked --workspace --exclude samkhya-py -- -D warnings`
+- [ ] `cargo test --locked --workspace --exclude samkhya-py`
+- [ ] `cargo deny --locked --workspace check`
 - [ ] Added or updated tests for changed behavior
 - [ ] Public API changes are documented (rustdoc on the changed item)
 - [ ] **Industry-standard metrics applied** if this PR touches measurement code: BCa bootstrap CIs (Efron-Tibshirani 1993), Wilcoxon paired signed-rank (1945), BH-FDR correction (1995), q-error per Moerkotte VLDB 2009 — see `bench-results/METHODOLOGY.md`
 
 # Naming-compliance checklist
 
-- [ ] No "learned" / "adaptive" / "AI" framing in primary user-facing
-  text (see [[feedback-samkhya-naming]] rule: prefer "portable" /
-  "feedback-driven" / "self-correcting" / "LLM-pluggable")
+- [ ] Primary user-facing text uses the established "portable" /
+  "feedback-driven" / "self-correcting" / "LLM-pluggable" terminology.
 - [ ] If this PR touches the `Corrector` trait surface, the
   pluggable-corrector-backend framing (GBT default · TabPFN-2.5 ·
-  LLM TODO) is preserved (no single-backend framing in trait docs)
+  LLM-pluggable) is preserved (no single-backend framing in trait docs).
 
 # Breaking changes
 

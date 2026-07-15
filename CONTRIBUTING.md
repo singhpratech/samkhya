@@ -39,21 +39,21 @@ cd samkhya
 
 # rustup reads rust-toolchain.toml and installs Rust 1.94 with rustfmt
 # and clippy automatically. This first build will take a few minutes.
-cargo build --workspace --exclude samkhya-duckdb --exclude samkhya-py
+cargo build --locked --workspace --exclude samkhya-py
 ```
 
-`samkhya-duckdb` and `samkhya-py` have system dependencies (DuckDB C++
-headers and Python dev headers respectively) and are excluded from the
-default workspace build until you opt in explicitly. See below.
+`samkhya-duckdb` is dependency-free with default features and is included in
+this build. Its `bundled` feature needs a C++ toolchain. `samkhya-py` needs
+Python development prerequisites and is excluded until you opt in explicitly.
 
 ### Optional: building `samkhya-duckdb`
 
-You need a C++17 toolchain and DuckDB headers on the include path. On
-Debian/Ubuntu:
+You need a C++17 toolchain. The `bundled` feature builds the vendored DuckDB,
+so separate DuckDB headers are not required. On Debian/Ubuntu:
 
 ```sh
 sudo apt-get install build-essential
-cargo build -p samkhya-duckdb
+cargo build --locked -p samkhya-duckdb --features bundled
 ```
 
 ### Optional: building `samkhya-py`
@@ -76,22 +76,22 @@ The full test suite for the parts of the workspace that build without
 extra system dependencies:
 
 ```sh
-cargo test --workspace --exclude samkhya-duckdb --exclude samkhya-py
+cargo test --locked --workspace --exclude samkhya-py
 ```
 
-If you have the DuckDB or PyO3 prerequisites set up, you can include
-those crates by dropping the corresponding `--exclude` flag.
+If you have the PyO3 prerequisites set up, include `samkhya-py` by dropping
+the `--exclude` flag. Exercise DuckDB separately with `--features bundled`.
 
 For a single crate:
 
 ```sh
-cargo test -p samkhya-core
+cargo test --locked -p samkhya-core
 ```
 
 For a single test:
 
 ```sh
-cargo test -p samkhya-core --test <test_name> -- <pattern>
+cargo test --locked -p samkhya-core --test <test_name> -- <pattern>
 ```
 
 The sketches under `samkhya-core/src/sketches/` ship with property and
@@ -111,10 +111,8 @@ mismatch fails the build, so always run:
 cargo fmt --all
 ```
 
-before committing. Some of the import-related options in
-`rustfmt.toml` (`group_imports`, `imports_granularity`,
-`reorder_imports`) are nightly-only and ignored by stable rustfmt; they
-are documented for contributors who run a nightly toolchain locally.
+before committing. `rustfmt.toml` intentionally uses only stable options so
+local formatting matches CI without toolchain-specific warnings.
 
 ---
 
@@ -123,7 +121,7 @@ are documented for contributors who run a nightly toolchain locally.
 We use `cargo clippy` with `-D warnings`. The CI runs:
 
 ```sh
-cargo clippy --workspace --exclude samkhya-duckdb --exclude samkhya-py -- -D warnings
+cargo clippy --locked --workspace --exclude samkhya-py -- -D warnings
 ```
 
 Run the same command locally before opening a PR. Clippy's complexity
@@ -169,12 +167,14 @@ new feature second, tests third).
 
 ### What to test
 
-Before opening a PR, run the three CI gates locally:
+Before opening a PR, run the CI gates locally (`cargo-deny` must be installed
+for the supply-chain check):
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --exclude samkhya-duckdb --exclude samkhya-py -- -D warnings
-cargo test --workspace --exclude samkhya-duckdb --exclude samkhya-py
+cargo clippy --locked --workspace --exclude samkhya-py -- -D warnings
+cargo test --locked --workspace --exclude samkhya-py
+cargo deny --locked --workspace check
 ```
 
 The PR template includes a checklist for these. If your change touches

@@ -4,10 +4,9 @@
 [![docs.rs](https://docs.rs/samkhya-duckdb/badge.svg)](https://docs.rs/samkhya-duckdb)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/singhpratech/samkhya/blob/main/LICENSE)
 
-Client-side DuckDB integration for samkhya. Runs SQL against an embedded
-DuckDB connection and digests the result rows into samkhya's portable HLL
-and Bloom-filter sketches, which then serialize through the same Puffin-blob
-path used by every other engine adapter.
+Client-side DuckDB integration for samkhya. It consumes validated portable
+Puffin statistics without requiring DuckDB, and optionally runs SQL against an
+embedded DuckDB connection to build HLL and Bloom-filter sketches.
 
 Part of the [samkhya](https://github.com/singhpratech/samkhya) project —
 portable, feedback-driven cardinality correction for embedded analytical
@@ -15,6 +14,9 @@ engines.
 
 ## What this crate provides
 
+- **`sidecar::decode_portable_column(snapshot, field_id)`** — decode the
+  canonical `ColumnStats`, HLL, and equi-depth histogram for one Iceberg field
+  ID. This always-on API does not require the `bundled` feature.
 - **`sketcher::build_hll_from_query(conn, sql, precision)`** — execute SQL
   against an embedded DuckDB connection, digest column 0 of each row, and
   return an `HllSketch` ready to serialize.
@@ -30,6 +32,27 @@ SQL (`SELECT col FROM t`, optionally with `WHERE` / `GROUP BY`) and we feed
 the values in. A true server-side `.duckdb_extension` (with cxx-bridged
 sketch aggregates that DuckDB builds inside vectorized operators) is on the
 roadmap but not delivered here.
+
+## Consume portable Puffin statistics
+
+Load a `PortableStatsSnapshot` through `samkhya-iceberg`, then select an
+Iceberg field ID through this crate:
+
+```rust
+use samkhya_duckdb::sidecar::decode_portable_column;
+
+let column = decode_portable_column(&snapshot, 7)?;
+if let Some(column) = column {
+    println!("NDV: {:?}", column.column_stats().distinct_count);
+    if let Some(histogram) = column.histogram() {
+        println!("rows in [10, 20]: {}", histogram.estimate_range(10.0, 20.0));
+    }
+}
+# Ok::<(), samkhya_core::Error>(())
+```
+
+This exposes client-side statistics only. It does not register a DuckDB
+catalog object or alter DuckDB optimizer estimates.
 
 ## Quick start
 
@@ -59,11 +82,9 @@ let bloom = build_bloom_from_query(
 
 - `bundled` (off by default) — pulls in the `duckdb` crate with its own
   `bundled` feature, so `libduckdb` is compiled from source by `duckdb-sys`
-  and no system-installed `libduckdb` is required. With the feature
-  disabled, this crate exposes no symbols and a bare
-  `cargo check -p samkhya-duckdb` builds in seconds with no C++ toolchain
-  in scope — deliberate so workspace CI can exclude the heavy build until
-  it's needed.
+  and no system-installed `libduckdb` is required. With the feature disabled,
+  portable sidecar decoding remains available and a bare
+  `cargo check -p samkhya-duckdb` needs no DuckDB C++ build.
 
 ## v0 hashing caveat
 
@@ -83,10 +104,11 @@ already approximate) and will tighten over time.
 
 ## DuckDB version
 
-Tested against `duckdb = "1.0"`. The sketches this crate produces are
-byte-for-byte compatible with sketches built by `samkhya-datafusion`,
-`samkhya-polars`, or any other adapter — that is the point of pushing the
-digest into `samkhya-core` rather than into engine-specific code.
+Tested against `duckdb = "1.0"`. Serialized sketches use the shared
+`samkhya-core` codecs. Producers must still use the same value-byte convention:
+the current DuckDB helper renders numeric values as text, so numeric sketches
+are not byte-identical to adapters that hash little-endian primitives. Raw
+UTF-8 and binary values do share their byte representation.
 
 ## Roadmap
 
@@ -100,11 +122,11 @@ digest into `samkhya-core` rather than into engine-specific code.
 
 ## Integration
 
-A standalone application embedding DuckDB pulls in `samkhya-duckdb` with
-`features = ["bundled"]`, builds sketches against its tables, and writes
-them to Puffin sidecars via `samkhya-core::puffin`. Another DuckDB process
-(or DataFusion, or Polars) reads the same sidecars later — without
-re-scanning, and without coupling either engine to the other.
+A standalone application can load a snapshot through `samkhya-iceberg` and
+inspect it through `sidecar::decode_portable_column`. With `bundled` enabled,
+it can also build sketches from DuckDB queries and persist them through
+`samkhya-core::puffin`. These are client APIs; native DuckDB optimizer
+injection remains outside this crate's current contract.
 
 ## License
 

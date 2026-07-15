@@ -4,7 +4,7 @@ title: "samkhya: portable, feedback-driven cardinality correction for embedded a
 abstract: >
   samkhya is the engine-agnostic Rust SDK for feedback-driven cardinality
   correction in embedded analytical engines. It provides a pluggable
-  `Corrector` trait (GBT default, TabPFN-2.5 opt-in, LLM TODO), an
+  `Corrector` trait (GBT default, TabPFN-2.5 and LLM-HTTP opt-in), an
   `LpJoinBound` pessimistic envelope (strict-tighter than AGM by 40.95×
   on star-5 join topologies, p<10⁻⁵), portable Iceberg Puffin sidecars
   for five classical sketches (HLL, Bloom, Count-Min, equi-depth

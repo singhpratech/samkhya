@@ -67,8 +67,9 @@ on the CVSS v3.1 scale.
 
 In-scope:
 
-* All 12 publishable workspace crates (the 13th, `samkhya-it`, is
-  `publish = false` integration-test harness):
+* All 13 workspace crates, whether or not they are released independently.
+  Eleven are publishable; `samkhya-bench` and the `samkhya-it`
+  integration-test harness set `publish = false`:
   `samkhya-core`, `samkhya-cli`, `samkhya-arrow`, `samkhya-bench`,
   `samkhya-datafusion`, `samkhya-duckdb`, `samkhya-duckdb-ext`,
   `samkhya-polars`, `samkhya-iceberg`, `samkhya-postgres`, `samkhya-gpudb`,
@@ -91,13 +92,10 @@ Out-of-scope:
   the version we bump to, or the audit task that retires the ignore).
   Operators should re-run `cargo deny check advisories` after every
   pull.
-* The **v1.0 `samkhya-duckdb-ext` static-link path** (the C++ extension
-  glue) is out of scope for this policy revision; it ships behind a
-  feature flag and will get its own threat model when the static-link
-  story stabilises in v1.0.
 * **Every corrector backend equally — operator-chosen.** The `Corrector`
-  trait surface (GBT default, AdditiveGBT opt-in, TabPFN-2.5 opt-in
-  via `tabpfn_http`, LLM TODO v1.1) is opt-in and operator-controlled.
+  trait surface (GBT default, AdditiveGBT opt-in, TabPFN-2.5 via
+  `tabpfn_http`, and LLM-pluggable via `llm_http`) is opt-in and
+  operator-controlled.
   Network behaviour, credential handling (including `TABPFN_TOKEN`),
   telemetry disablement (`TABPFN_DISABLE_TELEMETRY=1`), and the choice of
   inference endpoint are operator concerns. samkhya commits only that
@@ -146,7 +144,7 @@ the previous API could drive multi-EiB allocation attempts. The cap
 fails closed (returns `Err`) rather than silently clamping, so callers
 get a clear signal that their parameters are out of range.
 
-## Fuzz coverage (continuous)
+## Fuzz coverage (local and pre-release)
 
 samkhya ships **7 cargo-fuzz targets** that exercise every adversarial
 -input surface:
@@ -163,13 +161,13 @@ Per the H01 fortress run (bench-results/H01_samkhya_core_fortress.md):
 **60 s × 7 targets = ~31.4 M total executions, 0 crashes, 0 OOMs**.
 This is the floor, not the ceiling.
 
-**CI nightly obligation.** A scheduled CI workflow runs every fuzz
-target for at least 60 s on every nightly build; a new crash artefact
-is a release blocker. The 60 s budget is the *minimum* — the nightly
-job also runs an extended 30-minute pass on a rotating target so that
-each target gets ≥3 h of cumulative fuzz time per week.
+**Automation status.** The current GitHub Actions workflow does not schedule
+fuzzing. Maintainers run every target locally for at least 60 s before a
+release tag and retain the campaign receipts under `bench-results/`. A newly
+discovered crash artefact is a release blocker. Scheduled fuzzing remains a
+planned hardening step, not a property of the current CI configuration.
 
-## Sanitizer coverage (continuous)
+## Sanitizer coverage (local and pre-release)
 
 Per B11 (bench-results/B11_sanitizer.md):
 
@@ -180,9 +178,10 @@ Per B11 (bench-results/B11_sanitizer.md):
 * **MSan** — green on the subset that builds with MSan-instrumented
   std.
 
-**CI nightly obligation.** The sanitizer matrix runs on the same
-nightly schedule as the fuzz job. A regression in any of the four
-sanitizers is a release blocker.
+**Automation status.** These sanitizer campaigns are run locally during
+release hardening; they are not part of the current scheduled CI. A sanitizer
+regression found during that process is a release blocker. A future nightly
+workflow should make this gate continuous and publish its artefacts.
 
 ## Operator obligations
 
@@ -207,8 +206,8 @@ behavior*. Two operator-side validation points:
    or bound-construction detail moves.
 3. **Choose your corrector backend.** GBT default is the safe production
    choice. TabPFN-2.5 requires `TABPFN_TOKEN` license acceptance and is
-   an opt-in research evaluator. LLM backend slot is forward-pointing
-   to v1.1.
+   an opt-in research evaluator. The LLM-HTTP backend is also opt-in and
+   must be pointed at an operator-controlled endpoint.
 
 ## Acknowledgements
 

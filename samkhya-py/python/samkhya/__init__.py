@@ -1,7 +1,7 @@
 """samkhya — portable, feedback-driven cardinality correction.
 
 This package is a thin Python facade over the ``samkhya-core`` Rust crate.
-The native extension (``samkhya._samkhya``) is built by maturin and the
+The native extension (``samkhya._native``) is built by maturin and the
 public surface is re-exported here so that ``import samkhya`` is the only
 entry point users need.
 
@@ -13,11 +13,9 @@ keep corrected estimates honest.
 
 from __future__ import annotations
 
-# The PyO3 module is compiled as ``samkhya`` itself (see ``[lib] name`` in
+# The PyO3 module is compiled as ``samkhya._native`` (see ``[lib] name`` in
 # Cargo.toml and ``module-name`` in pyproject.toml's ``[tool.maturin]``).
-# Maturin places it on the Python search path as the package's compiled
-# component, so we import its symbols by re-exporting from the package
-# namespace once maturin has installed it.
+# Re-export its symbols here so users only need the package namespace.
 from samkhya._native import (  # type: ignore[attr-defined]
     BloomFilter,
     CountMinSketch,

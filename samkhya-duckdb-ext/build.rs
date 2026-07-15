@@ -14,9 +14,9 @@
 //! minimal images that lack a C++ toolchain entirely (some sandboxed
 //! CI runners and the `cargo deny` job in particular).
 //!
-//! The DuckDB-side optimizer hook (DuckDB Issue #11638) is wired up in
-//! v1.1; this build script intentionally does not look for DuckDB
-//! headers, because nothing in src/wrapper.cc includes them yet.
+//! The DuckDB-side optimizer hook remains deferred pending a stable upstream
+//! surface (DuckDB Issue #11638). This build script intentionally does not
+//! look for DuckDB headers because nothing in src/wrapper.cc includes them.
 
 #[cfg(not(feature = "no_cxx"))]
 fn main() {

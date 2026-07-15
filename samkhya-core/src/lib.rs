@@ -4,12 +4,14 @@
 pub mod error;
 pub mod feedback;
 pub mod lpbound;
+pub mod portable;
 pub mod puffin;
 pub mod residual;
 pub mod sketches;
 pub mod stats;
 
 pub use error::{Error, Result};
+pub use portable::{DecodedColumnStats, PortableSketchBlob, PortableStatsSnapshot};
 pub use stats::ColumnStats;
 
 /// Top-level re-export for the LLM-pluggable corrector backend

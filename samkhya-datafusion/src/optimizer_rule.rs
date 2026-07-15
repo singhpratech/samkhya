@@ -211,22 +211,16 @@ impl PhysicalOptimizerRule for SamkhyaOptimizerRule {
     }
 }
 
-/// Placeholder for the Puffin-backed cardinality correction lookup.
+/// Inert compatibility helper retained for callers of the original scaffold.
 ///
-/// In the production wiring this will:
-/// 1. Resolve the table to its Iceberg/Parquet location.
-/// 2. Locate the companion Puffin sidecar.
-/// 3. Read the relevant blob (HLL / theta / bloom) for `col_idx`.
-/// 4. Apply the LpBound-clamped, feedback-driven correction.
-///
-/// For the scaffold it returns fake-but-typed stats so the integration
-/// surface compiles and runs end-to-end.
+/// The v1.x adapter does not perform table-name-based sidecar discovery from
+/// this logical observe-only rule. Returning unknown statistics is deliberate:
+/// fabricated values here could look authoritative even though the logical
+/// plan has nowhere to attach them. Use [`crate::SamkhyaTableProvider`] for
+/// explicit leaf statistics and [`crate::SamkhyaPreJoinRule`] for a runtime
+/// [`samkhya_core::residual::Corrector`] that can affect physical join choices.
 pub fn compute_corrected_stats(_table: &str, _col_idx: usize) -> ColumnStats {
     ColumnStats::new()
-        .with_row_count(1_000)
-        .with_distinct_count(100)
-        .with_null_count(0)
-        .with_upper_bound(10_000)
 }
 
 #[cfg(test)]
@@ -249,11 +243,14 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_stats_are_populated() {
+    fn compatibility_stats_are_inert() {
         let s = compute_corrected_stats("t", 0);
-        assert_eq!(s.row_count, Some(1_000));
-        assert_eq!(s.distinct_count, Some(100));
-        assert_eq!(s.upper_bound_rows, Some(10_000));
+        assert!(s.row_count.is_none());
+        assert!(s.distinct_count.is_none());
+        assert!(s.null_count.is_none());
+        assert!(s.upper_bound_rows.is_none());
+        assert!(s.min.is_none());
+        assert!(s.max.is_none());
     }
 
     #[test]

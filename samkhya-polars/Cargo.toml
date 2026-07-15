@@ -15,7 +15,7 @@ description = "samkhya Polars 0.44 adapter: Series → Sketch helpers"
 [dependencies]
 samkhya-core.workspace = true
 # polars 0.44 is the highest minor that compiles under Rust 1.94 / edition 2024
-# *and* coexists with this workspace's samkhya-py crate (pyo3 0.22). polars
+# *and* coexists with this workspace's samkhya-py crate (pyo3 0.29). polars
 # 0.43 / 0.42 / 0.41 fail to build because polars-core uses
 # hashbrown::HashMap::raw_table_mut without enabling the corresponding
 # `raw` feature on hashbrown 0.14 — see
@@ -23,7 +23,7 @@ samkhya-core.workspace = true
 # downgrade hashbrown without breaking DataFusion. The full `dtype-full`
 # meta-feature also activates `dtype-decimal`, whose feature graph in
 # polars-mem-engine 0.44 ends up pulling pyo3 0.21 (optional → required
-# through workspace feature unification with samkhya-py's pyo3 0.22) and
+# through workspace feature unification with samkhya-py's pyo3 0.29) and
 # triggers a "links = python" collision. We therefore enable every
 # `dtype-*` sub-feature except `dtype-decimal`, which gives the sketcher
 # full coverage of integer / boolean / temporal / array / struct /

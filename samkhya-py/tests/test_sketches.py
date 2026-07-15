@@ -8,8 +8,35 @@ PyO3 surface.
 
 from __future__ import annotations
 
+import importlib.metadata
+
 import pytest
 import samkhya
+
+
+def test_public_module_contract() -> None:
+    """The facade must expose version metadata and its dedicated error type."""
+    assert samkhya.__version__ == samkhya.samkhya_version()
+    assert issubclass(samkhya.SamkhyaError, Exception)
+    with pytest.raises(samkhya.SamkhyaError):
+        samkhya.HllSketch(3)
+
+
+def test_installed_wheel_version_matches_native_module() -> None:
+    """Wheel metadata, Python facade, and Cargo-derived native version must agree."""
+    assert importlib.metadata.version("samkhya") == samkhya.__version__
+    assert samkhya.__version__ == samkhya.samkhya_version()
+
+
+def test_serializers_return_builtin_bytes() -> None:
+    """Every sketch serializer must return Python's built-in bytes type."""
+    sketches = [
+        samkhya.HllSketch(14),
+        samkhya.BloomFilter(10, 0.01),
+        samkhya.CountMinSketch(16, 2),
+        samkhya.EquiDepthHistogram([0.0, 1.0, 2.0], [1, 1]),
+    ]
+    assert all(type(sketch.to_bytes()) is bytes for sketch in sketches)
 
 
 def test_hll_estimates_within_relative_error() -> None:

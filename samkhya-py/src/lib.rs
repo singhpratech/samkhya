@@ -4,16 +4,9 @@
 //! can consume samkhya's portable, feedback-driven cardinality correction
 //! primitives without a Rust toolchain.
 //!
-//! Module name: `samkhya` (so `import samkhya; samkhya.HllSketch(14)`
-//! works out of the box).
+//! The compiled module is `samkhya._native`; the `samkhya` package
+//! re-exports its public API so `samkhya.HllSketch(14)` works directly.
 
-// pyo3 0.22's procedural macros emit code that triggers two clippy
-// false-positives in any crate that uses them: useless `Into<PyErr>`
-// conversions on `PyResult<...>` return types, and an undeclared
-// `gil_refs` cfg used by the macro for backwards-compat detection.
-// Both go away once we move to pyo3 >= 0.23 in samkhya-py v1.1.
-#![allow(clippy::useless_conversion)]
-#![allow(unexpected_cfgs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use pyo3::create_exception;
@@ -23,12 +16,12 @@ use pyo3::types::{PyBytes, PyType};
 
 use serde::{Deserialize, Serialize};
 
+use samkhya_core::Error as CoreError;
 use samkhya_core::lpbound::{AgmBound, ProductBound, UpperBound};
 use samkhya_core::sketches::{
     BloomFilter as CoreBloom, CountMinSketch as CoreCms, EquiDepthHistogram as CoreHistogram,
     HllSketch as CoreHll, Sketch,
 };
-use samkhya_core::Error as CoreError;
 
 create_exception!(samkhya, SamkhyaError, PyException);
 
@@ -44,7 +37,7 @@ fn map_err(e: CoreError) -> PyErr {
 ///
 /// Precision `p` controls register count (`2^p`) and relative error
 /// (~ 1.04 / sqrt(2^p)). Valid range: `p` in `[4, 18]`.
-#[pyclass(module = "samkhya", name = "HllSketch")]
+#[pyclass(module = "samkhya", name = "HllSketch", from_py_object)]
 #[derive(Clone)]
 pub struct PyHllSketch {
     inner: CoreHll,
@@ -81,7 +74,7 @@ impl PyHllSketch {
     /// Serialize the sketch to a portable byte payload.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = self.inner.to_bytes().map_err(map_err)?;
-        Ok(PyBytes::new_bound(py, &bytes))
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Deserialize a sketch produced by `to_bytes`.
@@ -106,7 +99,7 @@ impl PyHllSketch {
 // =============================================================================
 
 /// Bloom filter sized for `n_items` at the given false-positive rate.
-#[pyclass(module = "samkhya", name = "BloomFilter")]
+#[pyclass(module = "samkhya", name = "BloomFilter", from_py_object)]
 #[derive(Clone)]
 pub struct PyBloomFilter {
     inner: CoreBloom,
@@ -147,7 +140,7 @@ impl PyBloomFilter {
     /// Serialize the filter to a portable byte payload.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = self.inner.to_bytes().map_err(map_err)?;
-        Ok(PyBytes::new_bound(py, &bytes))
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Deserialize a filter produced by `to_bytes`.
@@ -175,7 +168,7 @@ impl PyBloomFilter {
 ///
 /// `width` is the number of counters per row; `depth` is the number of
 /// rows (independent hash functions). Memory: `4 * width * depth` bytes.
-#[pyclass(module = "samkhya", name = "CountMinSketch")]
+#[pyclass(module = "samkhya", name = "CountMinSketch", from_py_object)]
 #[derive(Clone)]
 pub struct PyCountMinSketch {
     inner: CoreCms,
@@ -230,7 +223,7 @@ impl PyCountMinSketch {
     /// Serialize the sketch to a portable byte payload.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = self.inner.to_bytes().map_err(map_err)?;
-        Ok(PyBytes::new_bound(py, &bytes))
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Deserialize a sketch produced by `to_bytes`.
@@ -272,7 +265,7 @@ struct HistogramSerde {
 /// Constructed directly from `(boundaries, counts)`: `boundaries` has
 /// `len() == counts.len() + 1` and is non-decreasing; `counts[i]` is the
 /// number of items in the half-open bin `[boundaries[i], boundaries[i+1]]`.
-#[pyclass(module = "samkhya", name = "EquiDepthHistogram")]
+#[pyclass(module = "samkhya", name = "EquiDepthHistogram", from_py_object)]
 #[derive(Clone)]
 pub struct PyEquiDepthHistogram {
     inner: CoreHistogram,
@@ -331,7 +324,7 @@ impl PyEquiDepthHistogram {
     /// Serialize the histogram to a portable byte payload.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = self.inner.to_bytes().map_err(map_err)?;
-        Ok(PyBytes::new_bound(py, &bytes))
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Deserialize a histogram produced by `to_bytes`.
@@ -427,10 +420,10 @@ fn samkhya_version() -> &'static str {
 /// Maturin's mixed Rust/Python layout puts the compiled extension at
 /// `samkhya._native`; the Python package's `__init__.py` re-exports the
 /// public names so end-users only see `import samkhya`.
-#[pymodule]
+#[pymodule(gil_used = true)]
 fn _native(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    m.add("SamkhyaError", py.get_type_bound::<SamkhyaError>())?;
+    m.add("SamkhyaError", py.get_type::<SamkhyaError>())?;
 
     m.add_class::<PyHllSketch>()?;
     m.add_class::<PyBloomFilter>()?;

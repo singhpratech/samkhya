@@ -1,6 +1,8 @@
 # samkhya — सांख्य
 
-> **samkhya is the engine-agnostic Rust SDK for feedback-driven cardinality correction in embedded analytical engines.** Plug GBT, TabPFN-2.5, or any LLM as your corrector backend. Measured **40.95× wallclock speedup on star-5 join topologies** (BCa 95% CI [30.93, 47.45], Wilcoxon p=1.73×10⁻⁶) over native DataFusion 46 LpBound tightness; provably-tighter `LpJoinBound` theorem (strict over AGM, p<10⁻⁵ every cell). **13-crate SDK**: DataFusion, DuckDB, Polars, Postgres, Iceberg, Arrow, GPU, Python.
+> **samkhya is the engine-agnostic Rust SDK for portable, feedback-driven cardinality correction in embedded analytical engines.** Its load-bearing guarantee is *never-regress at the bound level*: every corrected estimate is clamped under a provable `LpJoinBound` ceiling, so a miscalibrated model or hallucinating LLM can never push the optimizer past a bound it can prove; with no feedback yet, cold start falls back to the engine's own estimate. One Puffin stats sidecar, written with `samkhya-core`, is loaded unchanged through Iceberg and exposed to DataFusion and the client-side DuckDB adapter. One `Corrector` trait, many swappable backends (GBT default · TabPFN-2.5 · LLM-pluggable). **13-crate workspace** (11 publishable crates), Apache-2.0, sole author.
+>
+> Every number here is pre-registered and measured, including the ones that missed. On the real Join-Order Benchmark (JOB-Slow — n=55 paired warm-cache queries from the 113-query IMDb suite, vs unmodified DataFusion 46), the geomean is **1.038×** (17 wins / 38 ties / 0 losses, BCa 95% CI [1.026, 1.056], Wilcoxon p=3×10⁻⁶) — statistically real, but **below the ≥1.35× I pre-registered, which is therefore falsified and reported as such.** The `LpJoinBound` is up to 40.95× *tighter than the AGM bound* on a synthetic star-5 microbenchmark (bound-tightness, not wallclock); see the [scoped headlines](#measured-headlines) for where that does and does not carry.
 
 [![CI](https://github.com/singhpratech/samkhya/workflows/CI/badge.svg)](https://github.com/singhpratech/samkhya/actions)
 [![crates.io](https://img.shields.io/crates/v/samkhya-core.svg)](https://crates.io/crates/samkhya-core)
@@ -20,16 +22,21 @@ and gpudb.
 - **Portability via Iceberg Puffin sidecars.** Classical sketches (HLL, Bloom,
   Count-Min, equi-depth histogram, 2D correlated histogram) are serialized to
   versioned, `KIND`-tagged blobs inside [Iceberg Puffin](https://iceberg.apache.org/puffin-spec/)
-  files. The same sidecar a Python ELT job writes at midnight is the sidecar
-  DataFusion reads at noon and DuckDB reads at three. No engine owns the stats;
-  the sidecar does.
+  files. The same sidecar an ELT pipeline writes is loaded through Iceberg and
+  handed to the DataFusion and client-side DuckDB adapters without rewriting
+  its sketch payloads. No engine owns the stats; the sidecar does.
 - **Safety via the LpBound clamp.** Every corrected estimate is bounded above
-  by a provable pessimistic ceiling derived from Zhang et al., SIGMOD 2025 Best
-  Paper — LP relaxation over ℓp-norms of degree sequences, no machine learning
-  involved. Cold start equals the native plan or better, never worse.
-- **Pluggable corrector backend (GBT default · TabPFN-2.5 · LLM-pluggable, all shipping).**
+  by a provable pessimistic ceiling inspired by Zhang et al.'s LpBound, SIGMOD 2025
+  Best Paper — the idea, not a reimplementation: an LP relaxation over ℓp-norms of
+  degree sequences, with no machine learning
+  involved. A miscalibrated model can never push a corrected estimate past
+  this ceiling, and with no feedback cold start falls back to the engine's
+  native estimate — a bound-level never-regress guarantee. (Wallclock is a
+  separate axis: on some workloads samkhya is slower; the
+  [failure-mode row](#measured-headlines) says exactly where.)
+- **Pluggable corrector backend (production GBT default; TabPFN-2.5 + LLM-pluggable opt-in).**
   The `Corrector` trait is the pluggable surface and the *contribution*: one
-  trait, multiple production backends. Default ships a sub-MB
+  trait, a production GBT default plus opt-in research / HTTP backends. Default ships a sub-MB
   gradient-boosted-tree backend (gbdt-rs, Baidu). TabPFN-2.5 (Hollmann ICLR
   2023 + Prior Labs 2026 update) opt-in behind `tabpfn_http` feature —
   **measured P95 31.15 ms at B=8 L=128 on RTX 4090 Laptop, BCa 95% CI [29.39,
@@ -40,7 +47,7 @@ and gpudb.
   parity Node TypeScript port (`llm_infer_server.ts`, port 8767, same
   wire contract, broader operator appeal). Four reference backends in
   each: Anthropic, OpenAI, local Ollama, dummy. The TS port's 30-trial
-  paired benchmark campaign is a v1.1 item (smoke-tested at v1.0).
+  paired benchmark campaign remains future evidence work (smoke-tested at v1.0).
   Every backend gated behind a Cargo feature flag and capped from above
   by the LpBound safety envelope.
 
@@ -58,16 +65,26 @@ Add the core crate to a Rust project:
 cargo add samkhya-core
 ```
 
-Build a Puffin sidecar from a column in five lines:
+Build a Puffin sidecar from a column:
 
 ```rust
+use samkhya_core::puffin::{Blob, PuffinWriter};
 use samkhya_core::sketches::{HllSketch, Sketch};
-use samkhya_core::puffin::PuffinWriter;
+use std::fs::File;
+use std::io::BufWriter;
 
 let mut hll = HllSketch::new(12)?;
 for v in &column { hll.add(v); }
-let mut w = PuffinWriter::create("orders.puffin")?;
-w.add_blob(HllSketch::KIND, &hll.to_bytes()?)?;
+let payload = hll.to_bytes()?;
+let file = BufWriter::new(File::create("orders.puffin")?);
+let mut w = PuffinWriter::new(file);
+let (snapshot_id, sequence_number) = (42, 7); // From the Iceberg snapshot.
+// Puffin `fields` contains stable Iceberg field IDs, not zero-based ordinals.
+w.add_blob_for_snapshot(
+    Blob::new(HllSketch::KIND, vec![17], &payload),
+    snapshot_id,
+    sequence_number,
+)?;
 w.finish()?;
 ```
 
@@ -75,17 +92,47 @@ Consume those stats from DataFusion via the table-provider adapter:
 
 ```rust
 use datafusion::prelude::SessionContext;
-use samkhya_datafusion::{SamkhyaTableProvider, SamkhyaOptimizerRule};
+use samkhya_datafusion::SamkhyaTableProvider;
+use samkhya_iceberg::snapshot::load_portable_stats_from_table;
+use std::sync::Arc;
 
 let ctx = SessionContext::new();
-ctx.state().add_optimizer_rule(Arc::new(SamkhyaOptimizerRule::default()));
-let provider = SamkhyaTableProvider::wrap(inner_provider)
-    .with_puffin_sidecar("orders.puffin")?;
+let portable = load_portable_stats_from_table(&iceberg_table).await?;
+// Bind stable Iceberg field ID 17 to DataFusion's zero-based column ordinal 0.
+let provider = SamkhyaTableProvider::new(inner_provider)
+    .try_with_portable_stats(&portable, 17, 0)?;
 ctx.register_table("orders", Arc::new(provider))?;
 ```
 
-The `samkhya_leaves_seen` diagnostic on the optimizer rule confirms the
-corrected stats reached the physical plan.
+The wrapper returns a `SamkhyaStatsExec` from `scan()`, so the validated
+portable statistics are visible on the physical plan without a logical-plan
+rewrite. LpBound-clamped correction is a separate pre-join rule described
+below.
+
+### See the guarantees run (no dataset, no setup)
+
+Both load-bearing properties are a single runnable example:
+
+```bash
+cargo run -p samkhya-core --example honest_demo --features lp_solver
+```
+
+```text
+  TRUE output cardinality (counted from data) = 5
+  ProductBound = 96   AgmBound = 24   ChainBound = 6   LpJoinBound = 6
+  [ok] every bound >= true cardinality (sound inclusive ceiling)
+  [ok] LpJoinBound <= AgmBound on this path join
+  corrector proposed 1000000 → saturating_clamp = 6 (<= ceiling, never regresses)
+  built HllSketch(p=12), 1000 distinct keys → estimate = 997
+  wrote Puffin sidecar → reopened → reconstructed estimate = 997
+  [ok] estimate round-trips exactly across write→read (997 == 997)
+```
+
+Part 1 is the never-regress clamp — an over-eager corrector proposing 1,000,000
+rows is held to the provable ceiling of 6. Part 2 is one HLL sidecar written and
+read back byte-faithfully — the portability primitive. Every number is computed
+by the run, not hardcoded. Source:
+[`samkhya-core/examples/honest_demo.rs`](./samkhya-core/examples/honest_demo.rs).
 
 ---
 
@@ -100,7 +147,8 @@ Layer 1 — portable stats foundation:
   `Corrector` trait. No engine dependencies. 5 sketches all shipping: HLL,
   Bloom, Count-Min, equi-depth histogram, 2D correlated histogram.
 
-Layer 2 — engine adapters (5 production engines + 2 reservations):
+Layer 2 — engine adapters (3 production — DataFusion · Iceberg · Arrow;
+DuckDB + Polars beta; Postgres scaffold):
 - `samkhya-datafusion` — `SamkhyaTableProvider` + `SamkhyaStatsExec` +
   `SamkhyaOptimizerRule` three-layer integration into DataFusion 46.
 - `samkhya-duckdb` — Rust-client integration against DuckDB 1.x via
@@ -123,7 +171,7 @@ Layer 3 — corrector backends + GPU + Python:
   same wire contract) under `scripts/llm_infer_server.{py,ts}`, with
   Anthropic / OpenAI / local Ollama / dummy backends for each. See
   `bench-results/19_llm_corrector.md` for the end-to-end campaign.
-- `samkhya-py` — PyO3 0.22 bindings, single abi3-py39 wheel, published to
+- `samkhya-py` — PyO3 0.29 bindings, single abi3-py39 wheel, published to
   PyPI as `samkhya`.
 
 Layer 4 — tools:
@@ -133,20 +181,25 @@ Layer 4 — tools:
   `train`, `calibrate`, `build-puffin`.
 - `samkhya-it` — cross-crate integration test harness (`publish = false`).
 
-Workspace clippy `-D warnings` clean. ~266 `#[test]` blocks + 17 property
-tests; cargo-fuzz workspace (~31 M execs, 0 crashes); criterion
-microbenchmarks for sketches and Puffin I/O.
+Workspace clippy `-D warnings`, default tests, optional-engine tests, and the
+cross-engine Puffin release fixture run in CI. Historical fuzz and benchmark
+receipts remain under `bench-results/`.
 
 ---
 
+<a name="measured-headlines"></a>
 ## Measured headlines (WAVE4-F + WAVE5-L2)
 
 samkhya v1.0 reports the *honest* head-to-head measurement, not a projection.
+The end-to-end real-workload number leads; the synthetic microbenchmarks are
+scoped to exactly what they measure. Where a pre-registered target was missed,
+the row says so.
 
 | Headline | Measured | CI / significance | Receipt |
 |---|---|---|---|
-| **LpJoinBound vs AGM on star-5, p=1** | **40.95×** speedup | BCa 95% CI [30.93, 47.45]; Wilcoxon W=0 paired vs AGM p=1.73×10⁻⁶, n=30 | `bench-results/07_lpbound_tightness.md` |
-| **JOB-Slow head-to-head vs DataFusion 46 (n=55 paired warm-cache, SF=1 IMDb)** | geomean **1.038×** wallclock; **17 wins / 38 ties / 0 losses**; BH-FDR rejects 24/55 | BCa 95% CI [1.026, 1.056]; Wilcoxon W=212 p=3.00×10⁻⁶ | `bench-results/18_vs_native_datafusion_wallclock.md` (WAVE4-F) |
+| **JOB-Slow end-to-end vs DataFusion 46 (real IMDb, n=55 paired warm-cache, SF=1)** — *the honest real-workload number; pre-registered ≥1.35× FALSIFIED* | geomean **1.038×** wallclock; **17 wins / 38 ties / 0 losses**; BH-FDR rejects 24/55 | BCa 95% CI [1.026, 1.056]; Wilcoxon W=212 p=3.00×10⁻⁶ | `bench-results/18_vs_native_datafusion_wallclock.md` (WAVE4-F) |
+| **Mixed/adversarial workload (7 pre-registered patterns A–G)** — *where samkhya LOSES, reported on purpose; H-G FALSIFIED* | cross-pattern geomean **0.949× (~5% slower)**; worst cell cold-start +12.4% | per-pattern CIs in receipt; burst P99 ≤ 212 µs @ 1000 QPS | `bench-results/17_failure_modes.md` |
+| **LpJoinBound vs AGM bound *tightness* — star-5, p=1 (uniform skew)** *(synthetic microbenchmark; bound/truth ratio, NOT wallclock; collapses to 1.00× under p=2/p=∞ heavy-hitter cells)* | **40.95×** tighter than AGM | BCa 95% CI [30.93, 47.45]; Wilcoxon W=0 paired vs AGM p=1.73×10⁻⁶, n=30 | `bench-results/07_lpbound_tightness.md` |
 | **TabPFN-2.5 inference latency** (RTX 4090 Laptop, B=8 L=128) | P95 **31.15 ms** (H1-A PASS) | BCa 95% CI [29.39, 35.32], strictly below 50 ms bar | `bench-results/14_tabpfn_4090_latency.md` (WAVE5-L2) |
 | **HLL precision** (p=14, n=10⁶) | RSE **0.676%** | BCa 95% CI [0.535%, 0.848%] vs Flajolet 2007 0.8125% envelope | `bench-results/03_hll_precision_sweep.md` |
 | **L4 v3 ablation** (A2→A3) | **−1.7%** median q-error reduction (BH-sig improvement) | BCa 95% CI [−2.8%, −0.7%], Wilcoxon p=0.0209 | WAVE5-E |
@@ -202,7 +255,7 @@ including data-flow diagrams and the `samkhya-core` module map.
 | DataFusion | `samkhya-datafusion`| Production    | Three-layer integration against DataFusion 46; first-class target.     |
 | DuckDB     | `samkhya-duckdb` / `samkhya-duckdb-ext` | Beta + scaffold | Rust-client path behind `bundled`; cxx extension v1.0 staticlib+rlib only; cdylib + runtime LOAD waits on DuckDB Issue #11638. |
 | Polars     | `samkhya-polars`    | Beta          | Series-to-sketch helpers behind `engine`; optimizer hook pending upstream Polars Issue #23345. |
-| Postgres   | `samkhya-postgres`  | Scaffold      | pgrx-shaped stub. Double-gated behind `pg_extension` feature + `samkhya_pgrx_enabled` rustc cfg, pg17 pin (per WAVE5-A); real planner / executor hooks v1.1 after pgrx ≥ 0.13. |
+| Postgres   | `samkhya-postgres`  | Scaffold      | pgrx-shaped stub. Double-gated behind `pg_extension` feature + `samkhya_pgrx_enabled` rustc cfg, pg17 pin (per WAVE5-A); real planner / executor hooks await a dedicated compatibility release. |
 | Iceberg    | `samkhya-iceberg`   | Production    | Puffin sidecar reader/writer with KIND-tag registration for all 5 sketch types. |
 | Arrow      | `samkhya-arrow`     | Production    | Arrow IPC round-trip helpers; byte-identical for all 5 sketch types. |
 | GPU        | `samkhya-gpudb`     | CPU prod + GPU opt-in | `GpuCorrector` trait + `CpuFallbackCorrector` reference impl. TabPFN-2.5 HTTP backend via `tabpfn_http` feature (measured P95 31.15 ms on RTX 4090 Laptop). LLM-pluggable HTTP corrector dual transport — Python FastAPI :8766 + Node TypeScript :8767, same wire contract. |
@@ -211,15 +264,12 @@ including data-flow diagrams and the `samkhya-core` module map.
 
 ## Documentation
 
-Public, tracked files only:
+Reading and reference:
 
-- **v1.0 launch — first published on The AI Vibe:**
-  - **[Launch blog post](https://theaivibe.org/blog/samkhya-portable-cardinality-correction-rust-sdk-launch)**
-    — "The Stats Layer Embedded Databases Have Been Waiting Eight Years
-    For." Punchy, narrative-first, ~10 min read. Start here.
-  - **[Formal publication page](https://theaivibe.org/publications/samkhya-portable-feedback-driven-cardinality-correction-embedded-analytics)**
-    — academic-titled companion: motivation, architecture, the honest
-    1.038× falsification, what samkhya is actually for.
+- **The honest writeup** *(self-hosted under the author's own name — link
+  forthcoming)* — *"I pre-registered a 1.35× speedup for my cardinality-correction
+  SDK. It came in at 1.038×."* The narrative-first account of what samkhya is, the
+  never-regress guarantee, and the honest falsification.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — five-layer design, crate layout, data
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
@@ -285,7 +335,7 @@ making it optional via a dual-license toggle. Full text in
 
 - Hollmann et al. — **TabPFN: Transformers solve small tabular problems.** ICLR 2023.
 - Atserias, Grohe, Marx — **Size bounds and query plans for relational joins.** PODS 2008.
-- Zhang et al. — **LpBound polynomial families.** SIGMOD 2025.
+- Zhang, Mayer, Abo Khamis, Olteanu, Suciu — **LpBound: Pessimistic Cardinality Estimation Using Lp-Norms of Degree Sequences.** SIGMOD 2025 (Best Paper).
 - Leis et al. — **How good are query optimizers, really?** VLDB 2015 (Join Order Benchmark).
 - Moerkotte et al. — **Preventing bad plans by bounding the impact of cardinality estimation errors.** VLDB 2009 (q-error).
 - Efron & Tibshirani — **An Introduction to the Bootstrap**, ch. 14 (BCa). Chapman & Hall, 1993.

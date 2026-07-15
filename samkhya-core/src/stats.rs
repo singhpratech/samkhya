@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 /// assert_eq!(stats.null_count, Some(7));
 /// assert_eq!(stats.upper_bound_rows, Some(10_000));
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ColumnStats {
     pub row_count: Option<u64>,
     pub null_count: Option<u64>,
@@ -33,7 +33,7 @@ pub struct ColumnStats {
     pub upper_bound_rows: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Bound {
     Int(i64),
     Float(f64),

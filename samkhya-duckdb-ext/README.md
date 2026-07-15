@@ -2,8 +2,8 @@
 
 **v1.0 cxx FFI scaffold** linking samkhya's portable cardinality
 primitives into DuckDB. The Rust <-> C++ bridge is complete and
-linkable today; the DuckDB optimizer hook that consumes the bridge
-ships in **v1.1**, pending [DuckDB Issue #11638][issue-11638]
+linkable today; a DuckDB optimizer hook that consumes the bridge remains a
+future deliverable, pending [DuckDB Issue #11638][issue-11638]
 ("OptimizerExtension API for cardinality overrides").
 
 [issue-11638]: https://github.com/duckdb/duckdb/issues/11638
@@ -19,14 +19,14 @@ exposes the following symbols under the `samkhya::` C++ namespace:
 | `samkhya::hll_add(h, bytes)` | Insert one byte-string item into the sketch. |
 | `samkhya::hll_estimate(h)` | Return the current cardinality estimate as `double`. |
 | `samkhya::puffin_inspect(path)` | Read a Puffin sidecar and return its blob metadata. |
-| `samkhya::samkhya_register(db)` | v1.1 entrypoint, declared today, no-op body. |
+| `samkhya::samkhya_register(db)` | Reserved future entrypoint; declared today with a no-op body. |
 
 The FFI surface is declared exactly once, in `src/lib.rs`, inside a
 `#[cxx::bridge(namespace = "samkhya")]` module. The cxx-build crate
 generates the matching C++ header at build time; `src/wrapper.cc`
 includes it and re-exposes the symbols through `src/wrapper.h`.
 
-## What v1.1 will add
+## Future optimizer integration
 
 The actual DuckDB integration:
 
@@ -40,7 +40,7 @@ The actual DuckDB integration:
    sidecar via the bridge's `puffin_inspect`, hydrates the sketches,
    and inserts rows into `_samkhya_stats`.
 
-All of v1.1 lives inside the body of `samkhya::samkhya_register` and
+The future implementation belongs inside `samkhya::samkhya_register` and
 the new `duckdb::OptimizerExtension` subclass — the cxx bridge itself
 does not need to change.
 
@@ -78,7 +78,7 @@ cargo build -p samkhya-duckdb-ext --release
 The default build invokes `cxx_build`, generates the bridge header,
 and compiles `src/wrapper.cc` with `-std=c++17`. It needs a C++17
 compiler (clang++ >= 7 or g++ >= 7) on PATH. It does **not** need any
-DuckDB headers — those only become relevant in v1.1 when
+DuckDB headers — those only become relevant when
 `samkhya_register` gains a body.
 
 ### Minimal CI (`no_cxx` feature)
@@ -102,7 +102,7 @@ target/release/libsamkhya_duckdb_ext.a   # staticlib for the DuckDB C++ build
 target/release/libsamkhya_duckdb_ext.rlib # rlib for sibling Rust crates
 ```
 
-The staticlib is what `samkhya-duckdb-ext`'s v1.1 wiring will link
+The staticlib is what future `samkhya-duckdb-ext` wiring can link
 into the DuckDB extension binary. The rlib lets sibling crates
 (notably `samkhya-bench`'s planned `--engine duckdb` runner) call the
 Rust API directly without going through C++.
@@ -114,12 +114,12 @@ This crate is **not** the same as `samkhya-duckdb`:
 | Crate | Role |
 |---|---|
 | `samkhya-duckdb` | Rust *client* that opens a DuckDB connection from outside the engine. |
-| `samkhya-duckdb-ext` *(this crate)* | FFI shipped *into* DuckDB. v1.0: bridge only; v1.1: optimizer hook. |
+| `samkhya-duckdb-ext` *(this crate)* | FFI shipped *into* DuckDB; currently bridge-only. |
 
 `samkhya-duckdb` is the workaround tier from earlier releases;
-`samkhya-duckdb-ext` is the graduation path. Once v1.1 lands, the
-bench harness will exercise both paths against the same Puffin
-sidecars DataFusion already consumes.
+`samkhya-duckdb-ext` is the possible graduation path once DuckDB exposes a
+stable cardinality override hook. Until then, cross-engine v1.1 coverage uses
+the honest client-side consumer in `samkhya-duckdb`.
 
 ## License
 

@@ -61,15 +61,6 @@ ignore = [
     # community-maintained fork) or removes the dep entirely.
     "RUSTSEC-2024-0436",
 
-    # RUSTSEC-2025-0020 — PyO3 < 0.24.1 PyString::from_object buffer
-    # overflow. samkhya-py uses pyo3 0.22 (abi3-py39), but only
-    # exposes byte buffers through PyBytes — neither PyString nor
-    # from_object appears in samkhya-py source (verified via grep
-    # before adding this ignore). The vulnerable code path is
-    # therefore unreachable. Retires when samkhya-py v1.1 bumps to
-    # pyo3 0.24.1+ (the edition-2024-compatible macro line).
-    "RUSTSEC-2025-0020",
-
     # RUSTSEC-2025-0141 — bincode 1.3.3 unmaintained. The bincode
     # team ceased development in 2025 after an off-platform incident;
     # they state v1.3.3 is a complete release that needs no further

@@ -22,11 +22,9 @@
 //! # Crate shape
 //!
 //! - The always-on surface (no cargo features) exposes
-//!   [`SnapshotPuffinPaths`] (a list of sidecar paths discovered from
-//!   a snapshot manifest) and the always-on
-//!   [`column_stats_from_paths`] placeholder. Downstream consumers
-//!   can take a dependency on this crate as a *contract type*
-//!   without ever pulling the heavy `iceberg` dependency tree.
+//!   [`SnapshotPuffinPaths`], strict local Puffin loading, and a
+//!   compatibility projection to [`ColumnStats`]. Downstream consumers can
+//!   load local sidecars without pulling the heavy `iceberg` dependency tree.
 //! - The optional `snapshot` module — gated behind the `iceberg`
 //!   feature — contains the actual snapshot-walking logic that
 //!   resolves [`SnapshotPuffinPaths`] from an open
@@ -38,7 +36,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! samkhya-iceberg = { version = "0.0.1", features = ["iceberg"] }
+//! samkhya-iceberg = { version = "1.1", features = ["iceberg"] }
 //! ```
 //!
 //! Without the feature, you can still construct
@@ -47,10 +45,14 @@
 //! hand it to [`column_stats_from_paths`].
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-use samkhya_core::stats::ColumnStats;
+mod loader;
+
+pub use loader::{
+    column_stats_from_paths, column_stats_from_snapshot, load_portable_stats,
+    try_column_stats_from_paths,
+};
 
 /// List of Puffin sidecar paths attached to a single Iceberg snapshot.
 ///
@@ -107,13 +109,13 @@ impl SnapshotPuffinPaths {
 /// samkhya Puffin blobs onto `ColumnStats`, we only need the
 /// `(field_id, name)` projection. Keeping a local type here lets
 /// the no-feature build still expose a meaningful API surface.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Schema {
     fields: Vec<SchemaField>,
 }
 
 /// One column entry in [`Schema`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaField {
     /// Iceberg field id (corresponds to `BlobMetadata::fields[0]` in
     /// samkhya Puffin blobs).
@@ -145,31 +147,13 @@ impl Schema {
     pub fn fields(&self) -> &[SchemaField] {
         &self.fields
     }
-}
 
-/// Placeholder that returns an empty `ColumnStats` map for every
-/// schema column. Once the snapshot-walking loader in
-/// `crate::snapshot` (the `iceberg`-feature-gated module) lands, this
-/// function will defer to it; for now it satisfies the contract type
-/// so downstream code can call it from the no-feature build without
-/// conditionally compiling.
-///
-/// The key is the Iceberg field id (matches `BlobMetadata::fields`
-/// in samkhya Puffin blobs); the value is the assembled
-/// [`ColumnStats`] for that field.
-pub fn column_stats_from_paths(
-    _paths: &SnapshotPuffinPaths,
-    schema: &Schema,
-) -> HashMap<usize, ColumnStats> {
-    // The real walker lives behind the `iceberg` feature in
-    // `crate::snapshot::load_column_stats`. Outside that feature
-    // we still hand back a well-typed (empty) map so callers can
-    // unconditionally depend on this function.
-    schema
-        .fields()
-        .iter()
-        .map(|f| (f.field_id as usize, ColumnStats::default()))
-        .collect()
+    /// Position of `field_id` in this schema's declared order.
+    pub fn position_of(&self, field_id: i32) -> Option<usize> {
+        self.fields
+            .iter()
+            .position(|field| field.field_id == field_id)
+    }
 }
 
 #[cfg(feature = "iceberg")]
@@ -195,12 +179,20 @@ mod tests {
     }
 
     #[test]
-    fn column_stats_placeholder_keys_by_field_id() {
+    fn column_stats_compatibility_keys_by_field_id() {
         let schema = Schema::from_fields([(7, "a"), (11, "b")]);
         let paths = SnapshotPuffinPaths::new();
         let stats = column_stats_from_paths(&paths, &schema);
         assert_eq!(stats.len(), 2);
         assert!(stats.contains_key(&7));
         assert!(stats.contains_key(&11));
+    }
+
+    #[test]
+    fn schema_position_is_explicit_not_field_id_cast() {
+        let schema = Schema::from_fields([(17, "target"), (23, "other")]);
+        assert_eq!(schema.position_of(17), Some(0));
+        assert_eq!(schema.position_of(23), Some(1));
+        assert_eq!(schema.position_of(0), None);
     }
 }

@@ -43,6 +43,7 @@ import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 
 FEATURE_LEN = 7
 U64_MAX = (1 << 64) - 1
@@ -57,6 +58,81 @@ class Handler(BaseHTTPRequestHandler):
 
     server_version = "samkhya-llm-dummy/1.0"
 
+    def _read_request_body(self) -> Optional[bytes]:
+        """Read a bounded Content-Length or chunked request body."""
+        transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
+        if transfer_encoding:
+            if transfer_encoding != "chunked":
+                self.send_error(400, "unsupported Transfer-Encoding")
+                return None
+
+            body = bytearray()
+            overflow = False
+            while True:
+                size_line = self.rfile.readline(128)
+                if (
+                    not size_line
+                    or len(size_line) >= 128
+                    or not size_line.endswith(b"\r\n")
+                ):
+                    self.send_error(400, "invalid chunk size")
+                    return None
+                size_token = size_line[:-2].split(b";", 1)[0]
+                if not size_token or any(
+                    byte not in b"0123456789abcdefABCDEF" for byte in size_token
+                ):
+                    self.send_error(400, "invalid chunk size")
+                    return None
+                chunk_size = int(size_token, 16)
+                if chunk_size == 0:
+                    # Consume a bounded trailer section through its blank line.
+                    for _ in range(32):
+                        trailer = self.rfile.readline(8192)
+                        if trailer == b"\r\n":
+                            break
+                        if not trailer or len(trailer) >= 8192:
+                            self.send_error(400, "invalid chunk trailer")
+                            return None
+                    else:
+                        self.send_error(400, "too many chunk trailers")
+                        return None
+                    break
+
+                remaining = chunk_size
+                while remaining:
+                    block = self.rfile.read(min(remaining, 64 * 1024))
+                    if not block:
+                        self.send_error(400, "truncated chunk")
+                        return None
+                    remaining -= len(block)
+                    if not overflow:
+                        if len(body) + len(block) > BODY_MAX_BYTES:
+                            body.clear()
+                            overflow = True
+                        else:
+                            body.extend(block)
+                if self.rfile.read(2) != b"\r\n":
+                    self.send_error(400, "invalid chunk terminator")
+                    return None
+
+            if overflow:
+                self.send_error(413, f"request body exceeds {BODY_MAX_BYTES}")
+                return None
+            return bytes(body)
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_error(400, "invalid Content-Length")
+            return None
+        if length < 0:
+            self.send_error(400, "invalid Content-Length")
+            return None
+        if length > BODY_MAX_BYTES:
+            self.send_error(413, f"body {length} exceeds {BODY_MAX_BYTES}")
+            return None
+        return self.rfile.read(length)
+
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
         if self.path != "/health":
             self.send_error(404, "not found")
@@ -70,16 +146,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/infer":
             self.send_error(404, "not found")
             return
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            self.send_error(400, "invalid Content-Length")
-            return
-        if length > BODY_MAX_BYTES:
-            self.send_error(413, f"body {length} exceeds {BODY_MAX_BYTES}")
+        raw = self._read_request_body()
+        if raw is None:
             return
         try:
-            raw = self.rfile.read(length)
             body = json.loads(raw)
         except Exception as exc:
             # See SECURITY-REVIEW-2026-05-17.md (C3): log full detail to
@@ -88,13 +158,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400, f"bad json: {type(exc).__name__}")
             return
 
+        if not isinstance(body, dict):
+            self.send_error(400, "json body must be an object")
+            return
+
         features = body.get("features")
         baseline = body.get("baseline_estimate")
         if not isinstance(features, list) or not features:
             self.send_error(400, "missing features")
             return
-        if not isinstance(baseline, int) or baseline < 0:
-            self.send_error(400, "missing baseline_estimate")
+        if not all(
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and (not isinstance(value, float) or value == value)
+            and value not in (float("inf"), float("-inf"))
+            for value in features
+        ):
+            self.send_error(400, "features must contain only finite numbers")
+            return
+        if type(baseline) is not int or not 0 <= baseline <= U64_MAX:
+            self.send_error(400, "invalid baseline_estimate")
             return
         if len(features) % FEATURE_LEN != 0:
             self.send_error(
@@ -106,8 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(413, f"features batch count {batches} exceeds {MAX_INFER_BATCHES}")
             return
 
-        estimate = max(0, min(int(baseline), U64_MAX - 1))
-        reply = json.dumps({"estimate": estimate}).encode()
+        reply = json.dumps({"estimate": baseline}).encode()
         self._respond(200, reply)
 
     def log_message(self, *_args: object, **_kwargs: object) -> None:

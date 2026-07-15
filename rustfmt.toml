@@ -1,12 +1,6 @@
 # samkhya — rustfmt configuration.
 #
-# Stable rustfmt ignores nightly-only options, so the unstable keys below
-# only take effect when running rustfmt from a nightly toolchain. The CI
-# uses stable, so they act as a soft preference for local development.
+# Keep this file stable-toolchain compatible so CI formatting is warning-free.
 edition = "2024"
 max_width = 100
-
-# Nightly-only options (no-op on stable rustfmt, kept for local use):
-group_imports = "StdExternalCrate"
-imports_granularity = "Module"
 reorder_imports = true

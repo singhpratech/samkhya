@@ -86,7 +86,7 @@ This is the v1.0 scaffold. It establishes the extension surface,
 crate layout, and pgrx feature gating. The operator-side cardinality
 hook (replacing `get_relation_info_hook` so the planner picks up
 samkhya's corrected row estimates without per-query SQL changes) is a
-**v1.1** target.
+future-release target.
 
 ## Testing
 
@@ -95,7 +95,7 @@ samkhya's corrected row estimates without per-query SQL changes) is a
 cargo check -p samkhya-postgres
 
 # Extension-side unit tests (requires cargo-pgrx).
-cargo pgrx test pg16 --features pg_extension,pg16,pg_test \
+cargo pgrx test pg17 --features pg_extension,pg17,pg_test \
     --package samkhya-postgres
 ```
 

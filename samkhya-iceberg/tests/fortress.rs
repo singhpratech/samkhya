@@ -327,7 +327,7 @@ fn adversarial_blob_offset_out_of_bounds_errors_not_panics() {
 }
 
 // ---------------------------------------------------------------------
-// Cross-check: the no-feature `column_stats_from_paths` placeholder
+// Cross-check: the compatibility `column_stats_from_paths` projection
 // must not panic on a nonsense path and must hand back default
 // `ColumnStats` for declared schema fields.
 // ---------------------------------------------------------------------

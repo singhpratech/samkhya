@@ -18,18 +18,16 @@ version string (`1.0.0`) is used.
 
 ---
 
-## Pre-1.0 versioning (where we are now)
+## Historical pre-1.0 versioning
 
-Until the first `v1.0.0` tag, samkhya is in the **pre-release**
-iteration phase. Per Semver 2.0.0 §4, the public API SHOULD NOT be
-considered stable before 1.0.0; in practice we treat each pre-1.0
-release as a candidate that may break any surface between minor bumps
-in order to land the right v1.0 shape. Pre-1.0 tags ship as
+Before the first `v1.0.0` tag, samkhya was in the **pre-release**
+iteration phase. Per Semver 2.0.0 §4, the public API was not considered
+stable; each pre-1.0 release could break surfaces between minor bumps in
+order to land the v1.0 shape. Pre-1.0 tags used
 `v0.MAJOR.MINOR` (e.g., `v0.4.0`) with no patch component.
 
-When v1.0.0 is tagged (gated by explicit maintainer signal — see the
-[release gate](#release-gate) section), the Public Surface becomes
-locked: subsequent breaks bump MAJOR, not minor.
+The Public Surface has been locked since v1.0.0; subsequent breaks bump
+MAJOR, not MINOR.
 
 ---
 
@@ -50,7 +48,8 @@ without notice.
 | **CLI argument surface** | `samkhya-cli` flag names, `samkhya-bench` flag names, exit-code semantics. | Reproducer scripts in the wild hard-code these. |
 | **Sketch on-disk encoding** | `HllSketch::from_bytes`, `BloomFilter::from_bytes`, `CountMinSketch::from_bytes`, `EquiDepthHistogram::from_bytes`, `CorrelatedHistogram2D::from_bytes` — bytes written by version N must decode under version N+PATCH within the same MAJOR. | Sketches are persisted into Puffin sidecars and replayed; cross-version readability is a hard requirement. |
 | **Environment variables** | `SAMKHYA_LLM_BACKEND`, `SAMKHYA_LLM_MODEL`, `SAMKHYA_LLM_TEMPERATURE`, `SAMKHYA_LLM_MAX_TOKENS`, `SAMKHYA_LLM_HOST`, `SAMKHYA_LLM_PORT`, `SAMKHYA_LLM_LOCAL_URL`, `TABPFN_HOST`, `TABPFN_PORT`, `TABPFN_DEVICE`, `TABPFN_SUPPORT`. | Operator-facing knobs; renames break running deployments. |
-| **MSRV (Minimum Supported Rust Version)** | The minimum `rustc` version every crate compiles with. | Bumping MSRV is a MINOR change with a [release-notes call-out](https://blog.rust-lang.org/category/community.html); a *drop* of MSRV support is a MAJOR. |
+| **Default-feature MSRV** | The minimum `rustc` version on which every workspace crate compiles with its default feature set. | Bumping the floor is a MINOR change with a release-notes call-out. |
+| **Optional-feature toolchain floors** | A higher floor imposed by an opt-in upstream engine dependency. | Each exception is documented; raising one is a MINOR change. |
 
 ---
 
@@ -93,11 +92,20 @@ parse failure that previously succeeded.
 
 ## MSRV policy
 
-samkhya supports the latest stable Rust at v1.0.0 release time, and
-the two prior `1.x` rustc lines (the "N, N-1, N-2" window). Bumping
-the floor of that window is a **MINOR** change. Dropping a still-in-window
-stable line is a **MAJOR** change. The MSRV is recorded in the workspace
-`Cargo.toml`'s `rust-version` field and in `samkhya-core`'s README.
+The workspace `rust-version` is **1.85**. CI checks every crate, including
+`samkhya-py`, on Rust 1.85 with default features. This is the v1.x
+default-feature compatibility guarantee.
+
+Opt-in engine features may inherit a higher floor from the engine SDK they
+activate. Those combinations are tested separately on the pinned development
+toolchain. The current exception is `samkhya-iceberg/iceberg`, whose
+`iceberg 0.9.1` dependency requires Rust 1.92. Cargo cannot encode a
+per-feature `rust-version`, so the exception is also documented beside the
+dependency in `samkhya-iceberg/Cargo.toml`.
+
+Raising either the default-feature floor or a documented optional-feature
+floor is a **MINOR** change and must be called out in release notes. Lowering a
+floor is compatible.
 
 ---
 

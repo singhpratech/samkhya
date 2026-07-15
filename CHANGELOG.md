@@ -6,8 +6,75 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Tracking work after v1.0.0. Empty at release time; populated as v1.1
-items land.
+The release candidate targets **v1.1.0** because it adds public adapter APIs.
+
+### Added
+
+- `SamkhyaPreJoinRule`, `PreJoinCorrectionOptions`, correction metrics, and
+  `install_pre_join_corrector` apply a `Corrector` immediately before
+  DataFusion 46's `join_selection`. Native estimates remain the safe default
+  floor; below-native estimates require explicit opt-in. Plan-impact tests
+  cover build-side choice, partition mode, rule ordering, ceilings, floors,
+  abstention, and model errors.
+- End-to-end Python and TypeScript tests now enforce the stable LLM HTTP wire
+  contract, including malformed input, batch limits, and lossless JSON `u64`
+  handling in Node.
+- CI now covers Rust 1.85 default-feature compatibility, optional engine
+  features, Python 3.9/3.12/3.13 wheels, TypeScript, dependency audits, and both
+  transport implementations. Dependabot monitors all four dependency surfaces.
+- `AGENTS.md` and `docs/V1_1_ROADMAP.md` document contributor workflow and the
+  measurable promotion gates for v1.1.
+- A shared, strict `PortableStatsSnapshot` handoff applies the same HLL and
+  equi-depth-histogram validation and decoding rules across Iceberg,
+  DataFusion, and DuckDB consumers.
+- A table-backed cross-engine release fixture verifies core/Apache Iceberg
+  Puffin interoperability, explicit field-ID mapping, raw payload identity,
+  planner-visible DataFusion NDV, client-visible DuckDB stats, and unchanged
+  query results. Frozen v1 payload fixtures protect read compatibility.
+
+### Changed
+
+- Migrated `samkhya-py` to PyO3 0.29 and Rust edition 2024 while preserving the
+  Python API, abi3-py39 wheel floor, clone extraction, and GIL-bound module
+  behavior.
+- Synchronized the Node transport package version with v1.1.0 and validated its
+  distributable dependency lockfile.
+- Clarified the MSRV guarantee: Rust 1.85 covers all default-feature crates;
+  `samkhya-iceberg/iceberg` inherits Rust 1.92 from Iceberg 0.9.1.
+- Iceberg snapshot loading now uses the table's configured `FileIO`, filters
+  stale snapshot statistics deterministically, and preserves field IDs rather
+  than treating them as engine column positions.
+
+### Fixed
+
+- Pre-planning corrections can now affect DataFusion join decisions instead of
+  being observable only after physical planning. The old
+  `compute_corrected_stats` compatibility helper no longer fabricates row and
+  distinct-count values.
+- TypeScript transports preserve integer estimates above JavaScript's
+  `Number.MAX_SAFE_INTEGER` by parsing and emitting exact decimal JSON tokens.
+- Python and TypeScript transports reject non-numeric features and invalid
+  baseline ranges before invoking a backend.
+- Chunked request bodies are capped while streaming. Both primary transports
+  accept the 8 MiB boundary and return HTTP 413 above it without buffering the
+  full payload or resetting the client connection.
+- Core Puffin output now includes required snapshot and sequence metadata,
+  stamps `created-by`, rejects unknown compression codecs and footer flags,
+  and bounds every blob read to the payload region.
+
+### Security
+
+- Updated `crossbeam-epoch` to 0.9.20, the CXX family to 1.0.195, and PyO3 to
+  0.29.0, resolving RUSTSEC-2026-0204, RUSTSEC-2026-0202, and
+  RUSTSEC-2026-0177. Removed the retired PyO3 advisory exception.
+
+### Historical documentation correction
+
+- The v1.0.0 notes below claimed `cargo install samkhya-bench` and counted it
+  among five published crates. Its v1.0.0 manifest had `publish = false`; the
+  current workspace instead has eleven publishable crates, with
+  `samkhya-bench` and `samkhya-it` remaining private workspace tools. The
+  original text is retained below as an audit trail.
 
 ## [1.0.0] — 2026-05-17
 

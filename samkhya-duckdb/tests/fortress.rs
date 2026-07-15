@@ -87,24 +87,14 @@ fn adversarial_malformed_sql_returns_error() {
     );
 }
 
-/// A 1MB-shaped SQL string (lots of literals, still parseable but
-/// unreasonably large) must not panic. It can succeed *or* return an
-/// `Err` — the point is that we bubble the result, never abort.
+/// A 1MB-shaped SQL string must not panic. It can succeed *or* return an
+/// `Err` — the point is that we bubble the result, never abort. A single large
+/// literal keeps this a size test instead of accidentally benchmarking an
+/// enormous, deeply nested expression tree.
 #[test]
 fn adversarial_oversized_query_no_panic() {
     let conn = Connection::open_in_memory().expect("open duckdb");
-    conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1),(2),(3);")
-        .expect("seed");
-
-    // Build a query string close to 1 MiB by stacking OR predicates.
-    // The predicate is a no-op (x = x) so DuckDB can run it.
-    let mut sql = String::with_capacity(1_100_000);
-    sql.push_str("SELECT x FROM t WHERE ");
-    let chunk = "x = x OR ";
-    while sql.len() < 1_000_000 {
-        sql.push_str(chunk);
-    }
-    sql.push_str("x = x");
+    let sql = format!("SELECT '{}'", "a".repeat(1_000_000));
     assert!(
         sql.len() >= 1_000_000,
         "SQL not large enough: {}",

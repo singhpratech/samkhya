@@ -1,193 +1,167 @@
-//! Live snapshot walker — resolves Puffin sidecar paths from an open
-//! `iceberg::table::Table` and (optionally) loads the samkhya
-//! sketches stored inside those sidecars into [`ColumnStats`].
+//! Snapshot-aware Puffin discovery and loading through Iceberg's `FileIO`.
 //!
-//! Behind the `iceberg` cargo feature. The default build skips this
-//! module entirely so the heavy `iceberg` crate (which pulls in
-//! `opendal`, `arrow`, `parquet`, etc.) is never compiled.
-//!
-//! # API stability note
-//!
-//! The exact "current snapshot's stats files" accessor in the
-//! `iceberg` crate has shifted between releases — `Snapshot::statistics`,
-//! `Table::metadata().statistics()`, and
-//! `TableMetadata::statistics_for_snapshot(...)` have all existed at
-//! various points. The walker below is written against the
-//! `iceberg = 0.9.1` shape: `Table::metadata().current_snapshot()`
-//! returns the current snapshot, and the table metadata exposes
-//! `statistics()` -> `&[StatisticsFile]` plus a snapshot-id field on
-//! each entry. If a future iceberg release renames or reshuffles
-//! these accessors, only the body of [`discover_puffin_sidecars`]
-//! has to change — its signature and the [`SnapshotPuffinPaths`]
-//! contract type are independent of the iceberg crate.
+//! This module is available with the `iceberg` feature. It keeps field IDs
+//! intact and uses the table's configured storage implementation, so local,
+//! object-store, and catalog-backed tables follow the same decoding path.
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
-use samkhya_core::Result as SamkhyaResult;
-use samkhya_core::puffin::PuffinReader;
-use samkhya_core::sketches::{HllSketch, Sketch};
+use iceberg::puffin::PuffinReader as IcebergPuffinReader;
+use samkhya_core::portable::{PortableSketchBlob, PortableStatsSnapshot, is_supported_column_kind};
+use samkhya_core::puffin::{SAMKHYA_SCHEMA_VERSION_PROPERTY, validate_samkhya_schema_version};
 use samkhya_core::stats::ColumnStats;
+use samkhya_core::{Error, Result as SamkhyaResult};
 
-use crate::{Schema, SnapshotPuffinPaths};
+use crate::{Schema, SnapshotPuffinPaths, column_stats_from_snapshot};
 
-/// Discover the Puffin sidecar paths attached to the current snapshot
-/// of `table`.
+/// Discover sidecars attached to the table's current snapshot.
 ///
-/// Resolution order (best-effort against the iceberg 0.9.1 API):
-///
-/// 1. Read `table.metadata().current_snapshot_id()`.
-/// 2. Filter `table.metadata().statistics()` (the slice of
-///    `StatisticsFile` entries on `TableMetadata`) to those whose
-///    `snapshot_id` matches the current snapshot.
-/// 3. Return the `statistics_path` of each matching entry as a
-///    [`SnapshotPuffinPaths`] entry.
-///
-/// If the iceberg crate's accessor shape differs from the assumption
-/// above, this function returns an empty set rather than panicking;
-/// callers can fall back to constructing [`SnapshotPuffinPaths`] by
-/// hand.
+/// Files for stale snapshots are excluded. A table without a current snapshot
+/// returns an empty, snapshot-less set. Paths are sorted and deduplicated so
+/// consumers see deterministic input regardless of metadata iteration order.
 pub async fn discover_puffin_sidecars(
     table: &iceberg::table::Table,
 ) -> SamkhyaResult<SnapshotPuffinPaths> {
-    let metadata = table.metadata();
-    let current_snapshot_id = metadata.current_snapshot().map(|s| s.snapshot_id());
-
-    let mut paths: Vec<std::path::PathBuf> = Vec::new();
-
-    // `TableMetadata::statistics_iter()` in iceberg 0.9.1 returns
-    // an iterator over `&StatisticsFile`. Each entry carries
-    // `snapshot_id` and `statistics_path` (the Puffin sidecar
-    // path). We filter by the current snapshot id and collect the
-    // paths.
-    //
-    // The accessor name has drifted across iceberg versions
-    // (`statistics()` slice in earlier prototypes,
-    // `statistics_for_snapshot(id)` in another iteration); 0.9.1
-    // settled on `statistics_iter()`. The contract type
-    // `SnapshotPuffinPaths` is independent of this rename.
-    for stats_file in metadata.statistics_iter() {
-        if let Some(current_id) = current_snapshot_id {
-            if stats_file.snapshot_id != current_id {
-                continue;
-            }
-        }
-        paths.push(std::path::PathBuf::from(&stats_file.statistics_path));
-    }
+    let Some(current_snapshot) = table.metadata().current_snapshot() else {
+        return Ok(SnapshotPuffinPaths::new());
+    };
+    let snapshot_id = current_snapshot.snapshot_id();
+    let mut paths: Vec<PathBuf> = table
+        .metadata()
+        .statistics_iter()
+        .filter(|statistics| statistics.snapshot_id == snapshot_id)
+        .map(|statistics| PathBuf::from(&statistics.statistics_path))
+        .collect();
+    paths.sort();
+    paths.dedup();
 
     Ok(SnapshotPuffinPaths {
-        snapshot_id: current_snapshot_id,
+        snapshot_id: Some(snapshot_id),
         paths,
     })
 }
 
-/// Combine [`discover_puffin_sidecars`] with samkhya-core's
-/// `PuffinReader` to deserialize every samkhya sketch in every
-/// sidecar of the current snapshot and project the results into a
-/// `{ field_id -> ColumnStats }` map.
+/// Load supported samkhya blobs for the current snapshot through Iceberg.
 ///
-/// Unknown blob kinds (Iceberg's own `apache-datasketches-theta-v1`,
-/// `deletion-vector-v1`, etc.) are silently skipped — readers
-/// ignore kinds they do not understand.
+/// Unknown Puffin blob kinds are skipped without fetching their payloads.
+/// Known corrupt payloads, duplicate sketches, schema-independent metadata
+/// conflicts, and snapshot/sequence mismatches fail closed.
+pub async fn load_portable_stats_from_table(
+    table: &iceberg::table::Table,
+) -> SamkhyaResult<PortableStatsSnapshot> {
+    let sidecars = discover_puffin_sidecars(table).await?;
+    let current_sequence_number = table
+        .metadata()
+        .current_snapshot()
+        .map(|snapshot| snapshot.sequence_number());
+    let mut blobs = Vec::new();
+
+    for sidecar in &sidecars.paths {
+        let location = sidecar.to_str().ok_or_else(|| {
+            Error::InvalidPuffin("Iceberg statistics path is not valid UTF-8".to_owned())
+        })?;
+        let input = table.file_io().new_input(location).map_err(iceberg_error)?;
+        let reader = IcebergPuffinReader::new(input);
+        let file_metadata = reader.file_metadata().await.map_err(iceberg_error)?.clone();
+        validate_samkhya_schema_version(
+            file_metadata
+                .properties()
+                .get(SAMKHYA_SCHEMA_VERSION_PROPERTY)
+                .map(String::as_str),
+        )?;
+
+        for metadata in file_metadata.blobs() {
+            if !is_supported_column_kind(metadata.blob_type()) {
+                continue;
+            }
+            validate_snapshot_id(
+                sidecars.snapshot_id,
+                metadata.snapshot_id(),
+                metadata.blob_type(),
+            )?;
+            validate_sequence_number(
+                current_sequence_number,
+                metadata.sequence_number(),
+                metadata.blob_type(),
+            )?;
+            let blob = reader.blob(metadata).await.map_err(iceberg_error)?;
+            let properties: BTreeMap<String, String> = metadata
+                .properties()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            blobs.push(
+                PortableSketchBlob::new(
+                    metadata.blob_type(),
+                    metadata.fields().to_vec(),
+                    blob.data().to_vec(),
+                )
+                .with_snapshot_metadata(metadata.snapshot_id(), metadata.sequence_number())
+                .with_properties(properties),
+            );
+        }
+    }
+
+    let snapshot = PortableStatsSnapshot::new(sidecars.snapshot_id, blobs);
+    snapshot.validate()?;
+    Ok(snapshot)
+}
+
+/// Load and schema-check the scalar planner statistics for the current table.
+///
+/// The returned map is keyed by Iceberg field ID, not engine column position.
 pub async fn load_column_stats(
     table: &iceberg::table::Table,
 ) -> SamkhyaResult<HashMap<usize, ColumnStats>> {
-    let paths = discover_puffin_sidecars(table).await?;
-    let mut out: HashMap<usize, ColumnStats> = HashMap::new();
-
-    for sidecar in &paths.paths {
-        // Best-effort filesystem open. Iceberg in production reads
-        // through an `opendal::Operator` — that path will land when
-        // the streaming reader is wired in; today we lean on the
-        // filesystem so the smoke test and local-development case
-        // both Just Work.
-        if let Ok(stats) = read_sidecar(sidecar) {
-            for (field_id, sketch_stats) in stats {
-                let entry = out.entry(field_id).or_default();
-                merge_into(entry, sketch_stats);
-            }
-        }
-    }
-    Ok(out)
+    let snapshot = load_portable_stats_from_table(table).await?;
+    let schema = Schema::from_fields(
+        table
+            .current_schema_ref()
+            .as_struct()
+            .fields()
+            .iter()
+            .map(|field| (field.id, field.name.clone())),
+    );
+    column_stats_from_snapshot(&snapshot, &schema)
 }
 
-/// Open a single Puffin sidecar and project every samkhya sketch
-/// inside it into a `(field_id, ColumnStats)` pair. Unknown blob
-/// kinds are silently skipped.
-fn read_sidecar(path: &Path) -> SamkhyaResult<Vec<(usize, ColumnStats)>> {
-    let file = File::open(path)?;
-    let mut reader = PuffinReader::open(file)?;
-    let mut out: Vec<(usize, ColumnStats)> = Vec::new();
-
-    // Clone metadata up front so we can both iterate and call
-    // `&mut self` methods on the reader.
-    let blobs = reader.blobs().to_vec();
-    for (idx, meta) in blobs.iter().enumerate() {
-        let Some(field_id) = meta.fields.first().copied() else {
-            continue;
-        };
-        if meta.kind == HllSketch::KIND {
-            let raw = reader.read_blob_decompressed(idx)?;
-            let hll = HllSketch::from_bytes(&raw)?;
-            let stats = ColumnStats::new().with_distinct_count(hll.estimate());
-            out.push((field_id as usize, stats));
-        }
-        // Other samkhya kinds (bloom, cms, equi-depth, correlated)
-        // do not directly project into a ColumnStats scalar field,
-        // so we leave them for the caller-side residual layer to
-        // pick up; the snapshot walker's job is only to surface
-        // what is portable into the engine's stats slot.
-    }
-    Ok(out)
-}
-
-/// Merge `src` into `dst`, preferring populated fields in `src`
-/// when they are present. Keeps the contract that earlier sidecars
-/// can be progressively refined by later ones inside the same
-/// snapshot.
-fn merge_into(dst: &mut ColumnStats, src: ColumnStats) {
-    if src.row_count.is_some() {
-        dst.row_count = src.row_count;
-    }
-    if src.null_count.is_some() {
-        dst.null_count = src.null_count;
-    }
-    if src.distinct_count.is_some() {
-        dst.distinct_count = src.distinct_count;
-    }
-    if src.min.is_some() {
-        dst.min = src.min;
-    }
-    if src.max.is_some() {
-        dst.max = src.max;
-    }
-    if src.upper_bound_rows.is_some() {
-        dst.upper_bound_rows = src.upper_bound_rows;
-    }
-}
-
-/// Same projection as [`column_stats_from_paths`](crate::column_stats_from_paths)
-/// but powered by the live Puffin reader rather than the no-feature
-/// placeholder. Useful when the caller already has a
-/// `SnapshotPuffinPaths` in hand (e.g. from a unit test) and does
-/// not want to round-trip through `iceberg::table::Table`.
+/// Compatibility projection for callers that already resolved local paths.
+///
+/// This preserves the v1 fail-open behavior. Deployment code should prefer
+/// [`crate::try_column_stats_from_paths`] or
+/// [`load_portable_stats_from_table`] for explicit errors.
 pub fn column_stats_from_paths_live(
     paths: &SnapshotPuffinPaths,
     schema: &Schema,
 ) -> HashMap<usize, ColumnStats> {
-    let mut out: HashMap<usize, ColumnStats> = schema
-        .fields()
-        .iter()
-        .map(|f| (f.field_id as usize, ColumnStats::default()))
-        .collect();
-    for sidecar in &paths.paths {
-        if let Ok(stats) = read_sidecar(sidecar) {
-            for (field_id, sketch_stats) in stats {
-                let entry = out.entry(field_id).or_default();
-                merge_into(entry, sketch_stats);
-            }
+    crate::column_stats_from_paths(paths, schema)
+}
+
+fn validate_snapshot_id(expected: Option<i64>, actual: i64, kind: &str) -> SamkhyaResult<()> {
+    if let Some(expected) = expected {
+        // -1 is the Puffin sentinel for an unavailable snapshot identity.
+        if actual != -1 && actual != expected {
+            return Err(Error::InvalidPuffin(format!(
+                "{kind} snapshot-id {actual} does not match current snapshot {expected}"
+            )));
         }
     }
-    out
+    Ok(())
+}
+
+fn validate_sequence_number(expected: Option<i64>, actual: i64, kind: &str) -> SamkhyaResult<()> {
+    if let Some(expected) = expected {
+        // -1 is samkhya's legacy sentinel for unavailable snapshot metadata.
+        if actual != -1 && actual != expected {
+            return Err(Error::InvalidPuffin(format!(
+                "{kind} sequence-number {actual} does not match current snapshot sequence {expected}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn iceberg_error(error: iceberg::Error) -> Error {
+    Error::InvalidPuffin(format!("Iceberg Puffin access failed: {error}"))
 }

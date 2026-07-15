@@ -76,6 +76,7 @@ by side.
 
 ```bash
 # Python (canonical)
+python -m pip install -r samkhya-gpudb/scripts/requirements-llm.txt
 bash samkhya-gpudb/scripts/run-llm-bench.sh --backend dummy
 
 # TypeScript (broader appeal)
