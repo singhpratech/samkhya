@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>samkhya — try to break the ceiling</title>
 <meta name="description" content="An interactive proof. Move the sliders, and watch a provable join-cardinality ceiling refuse to fall below the true answer — computed live in your browser by 84 KB of WebAssembly.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>&#8872;</text></svg>">
+<link rel="icon" href="samkhya-mark.svg" type="image/svg+xml">
 <meta property="og:title" content="samkhya — try to break the ceiling">
 <meta property="og:description" content="Move the sliders. The ceiling never falls below the truth, and you are proving it yourself, in your browser.">
 <meta property="og:url" content="https://singhpratech.github.io/samkhya/demo.html">
@@ -49,7 +49,7 @@ code{font-family:var(--mono);font-size:.82em}
 header{border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:9;
   background:color-mix(in srgb,var(--paper) 94%,transparent);backdrop-filter:blur(10px)}
 header .wrap{display:flex;align-items:baseline;gap:1.2rem;padding:.8rem 0;flex-wrap:wrap}
-.wordmark{font-weight:700;text-decoration:none;font-size:1.05rem}
+.wordmark{display:inline-flex;align-items:center;gap:.5rem;font-weight:700;text-decoration:none;font-size:1.05rem}
 .wordmark span{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;color:var(--proved);
   margin-left:.5rem;background:var(--proved-tint);padding:.16rem .42rem;border-radius:3px}
 header nav{margin-left:auto;display:flex;gap:1.1rem;flex-wrap:wrap;font-family:var(--mono);
@@ -124,13 +124,14 @@ pre{background:var(--panel);border:1px solid var(--rule);border-radius:7px;
 footer{padding:2.4rem 0 3.5rem;font-size:.85rem;color:var(--ink-soft);border-top:1px solid var(--rule);background:var(--paper-2)}
 .err{color:var(--withdrawn);font-family:var(--mono);font-size:.8rem;background:var(--withdrawn-tint);
   padding:.6rem .8rem;border-radius:6px;display:block}
+.mark-glyph{display:block;flex:0 0 auto}
 </style>
 </head>
 <body>
 
 <header>
   <div class="wrap">
-    <a class="wordmark" href="./">samkhya <span>live demo</span></a>
+    <a class="wordmark" href="./"><img src="samkhya-mark.svg" alt="" width="26" height="26" class="mark-glyph">samkhya <span>live demo</span></a>
     <nav>
       <a href="./">Overview</a>
       <a href="./#theorem">Theorem</a>

@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>samkhya — a join-cardinality ceiling you can prove</title>
 <meta name="description" content="A Rust SDK for portable cardinality correction. The ceiling is provable, the sketches travel between engines, and the numbers that did not survive audit are struck out on this page.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>&#8872;</text></svg>">
+<link rel="icon" href="samkhya-mark.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:title" content="samkhya — a join-cardinality ceiling you can prove">
 <meta property="og:description" content="2,179 soundness violations before. 0 after. Every number on this page names the receipt that produced it — including the two we withdrew.">
@@ -82,7 +82,7 @@ sub{font-size:.7em}
 header.masthead{border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:20;
   background:color-mix(in srgb,var(--paper) 94%,transparent);backdrop-filter:blur(10px)}
 .masthead .wrap{display:flex;align-items:baseline;gap:1.4rem;padding:.8rem 0;flex-wrap:wrap}
-.wordmark{font-size:1.05rem;font-weight:700;letter-spacing:.01em;text-decoration:none;white-space:nowrap}
+.wordmark{display:inline-flex;align-items:center;gap:.5rem;font-size:1.05rem;font-weight:700;letter-spacing:.01em;text-decoration:none;white-space:nowrap}
 .wordmark:hover{color:var(--ink)}
 .wordmark span{color:var(--proved);font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;
   margin-left:.55rem;background:var(--proved-tint);padding:.16rem .42rem;border-radius:3px}
@@ -182,13 +182,14 @@ footer .links{display:flex;gap:1.3rem;flex-wrap:wrap;margin-bottom:1.3rem;
   font-family:var(--mono);font-size:.71rem;letter-spacing:.05em;text-transform:uppercase}
 footer .links a{color:var(--proved);text-decoration:none}
 footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
+.mark-glyph{display:block;flex:0 0 auto}
 </style>
 </head>
 <body>
 
 <header class="masthead">
   <div class="wrap">
-    <a class="wordmark" href="#top">samkhya <span>v1.2 &middot; apache&#8209;2.0</span></a>
+    <a class="wordmark" href="#top"><img src="samkhya-mark.svg" alt="" width="26" height="26" class="mark-glyph">samkhya <span>v1.2 &middot; apache&#8209;2.0</span></a>
     <nav class="top">
       <a href="#problem">Problem</a>
       <a href="#theorem">Theorem</a>
