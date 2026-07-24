@@ -183,6 +183,37 @@ footer .links{display:flex;gap:1.3rem;flex-wrap:wrap;margin-bottom:1.3rem;
 footer .links a{color:var(--proved);text-decoration:none}
 footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
 .mark-glyph{display:block;flex:0 0 auto}
+
+/* hero eyebrow, positive variant */
+.eyebrow.ok{color:var(--proved-deep);background:var(--proved-tint)}
+
+/* the proof card: the page's opening claim, shown rather than asserted */
+.proofcard{background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--proved);
+  border-radius:0 10px 10px 0;padding:1.25rem 1.4rem;max-width:62ch;margin:0 0 1.6rem}
+.proofcard-head{font-family:var(--mono);font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-faint);margin-bottom:.95rem}
+.proofnums{display:flex;gap:2.4rem;flex-wrap:wrap;align-items:flex-start}
+.proofnums>div{display:flex;flex-direction:column;gap:.25rem}
+.proofnums .k{font-family:var(--mono);font-size:.63rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-faint)}
+.proofnums b{font-family:var(--mono);font-size:1.75rem;font-weight:700;line-height:1.05;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+.proofnums .hit b{color:var(--proved-deep)}
+.proofnums .hit em{font-style:normal;font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--measured);background:var(--measured-tint);
+  padding:.12rem .38rem;border-radius:3px;align-self:flex-start;margin-top:.25rem}
+.proofnums .dim b{color:var(--ink-faint)}
+.proofcard-note{font-size:.88rem;color:var(--ink-soft);margin:1.1rem 0 0;max-width:58ch}
+.proofcard-note a{color:var(--proved);font-weight:600;white-space:nowrap}
+
+/* three plain facts under the fold line */
+.statrow{display:flex;gap:2.4rem;flex-wrap:wrap;padding-top:1.3rem;border-top:1px solid var(--rule)}
+.statrow>div{display:flex;flex-direction:column;gap:.15rem;max-width:20ch}
+.statrow b{font-family:var(--mono);font-size:1.35rem;font-weight:700;color:var(--proved-deep);line-height:1}
+.statrow span{font-size:.8rem;color:var(--ink-soft);line-height:1.4}
+
+/* the correction now sits inside the audit section */
+.correction{margin:0 0 1.6rem}
 </style>
 </head>
 <body>
@@ -207,33 +238,38 @@ footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
 
 <div class="hero">
   <div class="wrap sheet">
-    <div class="mark"><b>Correction notice</b>2026-07-24<br><s>40.95&#215;</s></div>
+    <div class="mark"><b>samkhya 1.2.0</b>Rust · Python<br>JavaScript<br>Apache-2.0</div>
     <div class="body-col">
-      <p class="eyebrow">Correction &middot; samkhya 1.2.0</p>
+      <p class="eyebrow ok">Provable join bounds · portable statistics</p>
       <h1>A join ceiling you can actually prove.</h1>
       <p class="standfirst">
-        samkhya clamps a corrected cardinality estimate under a bound the join
-        provably cannot exceed. <strong>Until July 2026 that bound was not
-        provable</strong> — it fell below the truth in 58.8% of measured trials,
-        and the harness measuring it could not report the fact. Both are fixed.
-        This page leads with the retraction because that is the honest place to
-        start.
+        Query optimizers guess how many rows a join will produce, and the guesses
+        compound. samkhya clamps a corrected estimate under a bound the join
+        <strong>provably cannot exceed</strong> — derived by counting, with no
+        model involved. A miscalibrated model, or a hallucinating LLM, cannot push
+        the planner past a number that has been proved.
       </p>
-      <div class="correction">
-        <div class="struck">40.95&#215;</div>
-        <div class="correction-note">
-          The bound-tightness figure this project led with for two releases. It
-          was computed from instances where the bound had fallen <em>below</em>
-          the true cardinality, so it grew in proportion to how wrong its
-          denominator was. <b>Withdrawn.</b> On the repaired bounds the same
-          measurement is 1.070&#215;.
+
+      <div class="proofcard">
+        <div class="proofcard-head">A foreign-key join: 10 orders, 100 line items, 10 distinct keys</div>
+        <div class="proofnums">
+          <div><span class="k">true output</span><b>100</b></div>
+          <div class="hit"><span class="k">samkhya ceiling</span><b>100</b><em>exact</em></div>
+          <div class="dim"><span class="k">Cartesian product</span><b>1,000</b></div>
         </div>
+        <p class="proofcard-note">
+          The ceiling sees four numbers — two row counts, two distinct counts —
+          and never the data. On the shape that dominates analytical workloads it
+          is not merely sound but exactly tight.
+          <a href="demo.html">Try to break it &rarr;</a>
+        </p>
       </div>
-      <p class="small muted" style="margin-top:1.5rem;max-width:60ch">
-        What replaced it is smaller and real: <strong>0 soundness violations in
-        3,704 bound-evaluations</strong>, down from 2,179 — and on a foreign-key
-        join the ceiling is <em>exactly</em> the true output.
-      </p>
+
+      <div class="statrow">
+        <div><b>0</b><span>soundness violations in 3,704 bound-evaluations</span></div>
+        <div><b>84 KB</b><span>WebAssembly, with generated TypeScript types</span></div>
+        <div><b>415</b><span>tests passing across 15 crates</span></div>
+      </div>
     </div>
   </div>
 </div>
@@ -348,13 +384,25 @@ footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
 
 <section id="audit">
   <div class="wrap sheet">
-    <div class="mark"><b>What happened</b>Deep-dive audit<br>2026-07-24</div>
+    <div class="mark"><b>What happened</b>Deep-dive audit<br>2026-07-24<br><s>40.95&#215;</s></div>
     <div class="body-col">
       <h2>How a project that measures everything shipped an unsound bound twice.</h2>
       <p class="lede">
         Not through carelessness with tests. Through tests that checked the wrong
-        thing, and a metric that deleted its own failure signal.
+        thing, and a metric that deleted its own failure signal. Two published
+        headline numbers did not survive it.
       </p>
+
+      <div class="correction">
+        <div class="struck">40.95&#215;</div>
+        <div class="correction-note">
+          The bound-tightness figure this project led with for two releases. It
+          was computed from instances where the bound had fallen <em>below</em>
+          the true cardinality, so it grew in proportion to how wrong its
+          denominator was. <b>Withdrawn.</b> On the repaired bounds the same
+          measurement is 1.070&#215;.
+        </div>
+      </div>
 
       <h3>The tests checked bounds against each other</h3>
       <p>

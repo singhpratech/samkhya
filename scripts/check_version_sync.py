@@ -46,7 +46,17 @@ metadata = json.loads(
 workspace_packages = [
     package for package in metadata["packages"] if package["name"].startswith("samkhya-")
 ]
-require(len(workspace_packages) == 13, f"expected 13 workspace packages, found {len(workspace_packages)}")
+# Bump deliberately when a crate is added or removed. The point of pinning the
+# count is that growing the workspace should be a conscious act, not something
+# that slips in unnoticed and silently escapes the version-sync check below.
+# 15 as of 1.2.0: the original 13 plus samkhya-wasm and samkhya-qdrant.
+EXPECTED_WORKSPACE_PACKAGES = 15
+require(
+    len(workspace_packages) == EXPECTED_WORKSPACE_PACKAGES,
+    f"expected {EXPECTED_WORKSPACE_PACKAGES} workspace packages, "
+    f"found {len(workspace_packages)}: "
+    + ", ".join(sorted(p["name"] for p in workspace_packages)),
+)
 for package in workspace_packages:
     require(
         package["version"] == workspace_version,
