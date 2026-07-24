@@ -224,6 +224,7 @@ footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
     <nav class="top">
       <a href="#problem">Problem</a>
       <a href="#theorem">Theorem</a>
+      <a href="#llm">LLMs</a>
       <a href="#audit">Audit</a>
       <a href="#evidence">Evidence</a>
       <a href="demo.html">Live demo</a>
@@ -378,6 +379,65 @@ footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
         only under-count. Every constructor either derives the guarantee or states
         the obligation on the caller.
       </p>
+    </div>
+  </div>
+</section>
+
+<section id="llm">
+  <div class="wrap sheet">
+    <div class="mark"><b>Why now</b>llm_http feature<br>4 providers<br>2 transports</div>
+    <div class="body-col">
+      <h2>The point of a provable ceiling is that you can put an LLM under it.</h2>
+      <p class="lede">
+        Everybody wants a language model in the query planner. Almost nobody
+        ships one, and the blocker was never capability — it is blast radius.
+      </p>
+      <p>
+        A planner does not fail gracefully on a bad row count. Ask a model how
+        many rows a six-way join emits, get back a confidently wrong number, and
+        the optimizer builds a hash table on the wrong side and exhausts memory.
+        The expected case is fine. The tail eats you. That asymmetry is why
+        "let's try an LLM here" has stayed a demo for three years.
+      </p>
+      <p>
+        <strong>A ceiling changes the shape of that risk.</strong> The model's
+        answer is clamped under a number derived by counting, so the worst thing
+        a hallucination can do is be ignored. Transport failure, timeout, a
+        malformed reply, a provider outage — every one returns
+        <code>Ok(None)</code> and the engine falls back to its own estimate. The
+        model is allowed to be wrong; it is not allowed to be load-bearing.
+      </p>
+
+      <div class="grid">
+        <div class="cell"><span class="k">Bounded</span><h4>Clamped from above</h4><p>Whatever the model proposes is held under the provable ceiling. No configuration required — the DataFusion path derives one by default since 1.2.</p></div>
+        <div class="cell"><span class="k">Fail-open</span><h4>Errors are not failures</h4><p>Any transport error, timeout or parse failure returns "no opinion". A provider going down must never surface as a query failure.</p></div>
+        <div class="cell"><span class="k">Opt-in</span><h4>Off by default</h4><p>Behind the <code>llm_http</code> cargo feature, pointed at an endpoint you control. Anthropic, OpenAI, local Ollama, or a dummy echo.</p></div>
+        <div class="cell"><span class="k">Swappable</span><h4>One trait, many backends</h4><p>The same <code>Corrector</code> interface takes gradient-boosted trees, TabPFN-2.5, or an LLM. The safety contract does not change with the backend.</p></div>
+      </div>
+
+      <h3>What is measured, and what is not</h3>
+      <p>
+        The transport floor is measured. The <em>benefit</em> is not: every
+        live-LLM accuracy cell in the campaign is marked projected, pending API
+        keys, and this page will not pretend otherwise.
+      </p>
+      <p>
+        Worse, and more usefully — samkhya's own gradient-boosted corrector made
+        things <strong>worse</strong> on held-out queries in the one honest
+        measurement taken so far: q-error geomean 13.46 without it, 26.41 with
+        it, fitted on a single usable row.
+      </p>
+      <div class="theorem" style="border-left-color:var(--measured);background:var(--measured-tint);
+           border-color:color-mix(in srgb,var(--measured) 25%,transparent)">
+        <span class="label" style="color:var(--measured)">The argument that survives</span>
+        <p style="margin:0">
+          That result is not an embarrassment to route around — it is the case
+          for the ceiling, stated in numbers. A corrector that doubles your error
+          is exactly the situation the clamp exists for, and a planner running
+          under a proved bound survives it. <strong>samkhya's claim is not that a
+          model will help. It is that you can find out safely.</strong>
+        </p>
+      </div>
     </div>
   </div>
 </section>
