@@ -72,9 +72,7 @@ fn warn_if_remote_plaintext_http(url: &str, backend: &'static str) {
     }
     // Pull the host (between "http://" and the next "/" or ":" or end).
     let rest = &url[7..]; // safe: starts_with confirmed above
-    let host_end = rest
-        .find(|c: char| c == '/' || c == ':' || c == '?')
-        .unwrap_or(rest.len());
+    let host_end = rest.find(['/', ':', '?']).unwrap_or(rest.len());
     let host = &rest[..host_end];
     let is_loopback = matches!(host, "127.0.0.1" | "::1" | "localhost")
         || host.starts_with("[::1]")
@@ -1592,7 +1590,11 @@ mod llm_http_tests {
         let (url, counter) = spawn_mock(|_| br#"{"estimate": 4242}"#.to_vec(), 2);
         let corrector = LlmHttpCorrector::new(LlmHttpOptions {
             base_url: url,
-            timeout_ms: 2_000,
+            // Generous on purpose: these assert the *response* is handled
+            // correctly, not that it arrives quickly. A shared CI runner can
+            // take seconds to spawn the mock thread and complete the loopback
+            // round trip, and a tight bound here turns that into a flake.
+            timeout_ms: 15_000,
             ceiling: 1_000_000,
         });
         let features = CorrectionFeatures {
@@ -1609,7 +1611,11 @@ mod llm_http_tests {
         let (url, _counter) = spawn_mock(|_| br#"{"estimate": 99999999}"#.to_vec(), 2);
         let corrector = LlmHttpCorrector::new(LlmHttpOptions {
             base_url: url,
-            timeout_ms: 2_000,
+            // Generous on purpose: these assert the *response* is handled
+            // correctly, not that it arrives quickly. A shared CI runner can
+            // take seconds to spawn the mock thread and complete the loopback
+            // round trip, and a tight bound here turns that into a flake.
+            timeout_ms: 15_000,
             ceiling: 500,
         });
         let result = corrector

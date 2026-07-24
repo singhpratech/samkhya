@@ -218,23 +218,52 @@ footer .links a:hover{text-decoration:underline;text-underline-offset:4px}
 /* The band: the page's one inverted moment. Warm dark ground, cream type,
    saffron rule. Deliberately full-bleed so it reads as a change of register
    rather than another card. */
-section.band{
+.band{
   background:#17120F;color:#F0EAE0;border-bottom:0;position:relative;
   --ink:#F5EFE5;--ink-soft:#BDB2A6;--ink-faint:#8E8478;--rule:#3A302A;
   --panel:#211A16;--paper-2:#17120F;
   --proved:#B7ACFF;--proved-tint:#2C2455;--proved-deep:#CFC6FF;
   --measured:#8FCB9C;--measured-tint:#17301D;
 }
-section.band::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;
+.band::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;
   background:linear-gradient(90deg,#F5A623,#EF7A2A 40%,#DC4B22 70%,#5B48D8)}
-section.band h2{color:#FFF7EC;max-width:22ch}
-section.band h3{color:#D9CFFF}
-section.band .mark b{color:#F5A623}
-section.band .cell{background:#211A16;border-color:#33291F}
-section.band .cell h4{color:#FFF7EC}
-section.band code{color:#F5C98A}
-section.band a{color:#B7ACFF}
-section.band strong{color:#FFF7EC}
+.band h2{color:#FFF7EC;max-width:22ch}
+.band h3{color:#D9CFFF}
+.band .mark b{color:#F5A623}
+.band .cell{background:#211A16;border-color:#33291F}
+.band .cell h4{color:#FFF7EC}
+.band code{color:#F5C98A}
+.band a{color:#B7ACFF}
+.band strong{color:#FFF7EC}
+
+/* the landing is the band now */
+.hero.band{border-bottom:0;padding:4.6rem 0 3.6rem}
+.hero.band::before{content:"";position:absolute;inset:auto 0 0 0;height:0;background:none}
+.hero.band::after{content:"";position:absolute;inset:auto 0 0 0;height:3px;
+  background:linear-gradient(90deg,#F5A623,#EF7A2A 40%,#DC4B22 70%,#5B48D8)}
+.hero.band h1{color:#FFF7EC;max-width:22ch}
+.hero.band .standfirst{color:#C6BBAE}
+.hero.band .standfirst strong{color:#FFF7EC}
+.hero.band .proofcard{background:#211A16;border-color:#33291F;border-left-color:#F5A623}
+.hero.band .proofcard-head{color:#9A8F82}
+.hero.band .proofnums b{color:#F5EFE5}
+.hero.band .proofnums .hit b{color:#F5A623}
+.hero.band .proofnums .dim b{color:#7E7468}
+.hero.band .proofcard-note{color:#BDB2A6}
+.hero.band .proofcard-note a{color:#B7ACFF}
+.hero.band .statrow{border-top-color:#3A302A}
+.hero.band .statrow b{color:#F5A623}
+.hero.band .statrow span{color:#A79C90}
+.hero.band .mark b{color:#F5A623}
+.eyebrow.hot{color:#1A1310;background:linear-gradient(90deg,#F5A623,#EF7A2A);font-weight:700}
+
+/* the LLMs tab announces itself, once, then settles */
+nav.top a.hot-tab{color:var(--withdrawn-hot);font-weight:700;position:relative}
+nav.top a.hot-tab::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;
+  border-radius:1px;background:var(--withdrawn-hot);
+  animation:tabpulse 2.6s ease-in-out 3}
+@keyframes tabpulse{0%,100%{opacity:.25;transform:scaleX(.55)}50%{opacity:1;transform:scaleX(1)}}
+@media (prefers-reduced-motion:reduce){nav.top a.hot-tab::after{animation:none;opacity:.9}}
 </style>
 </head>
 <body>
@@ -243,7 +272,8 @@ section.band strong{color:#FFF7EC}
   <div class="wrap">
     <a class="wordmark" href="#top"><img src="samkhya-mark.svg" alt="" width="26" height="26" class="mark-glyph">samkhya <span>v1.2 &middot; apache&#8209;2.0</span></a>
     <nav class="top">
-      <a href="#llm">LLMs</a>
+      <a href="#llm" class="hot-tab">LLMs</a>
+      <a href="#safety">Safety</a>
       <a href="#problem">Problem</a>
       <a href="#story">Story</a>
       <a href="#theorem">Theorem</a>
@@ -259,22 +289,28 @@ section.band strong{color:#FFF7EC}
 
 <main id="top">
 
-<div class="hero">
+<div class="hero band" id="llm">
   <div class="wrap sheet">
-    <div class="mark"><b>samkhya 1.2.0</b>Rust · Python<br>JavaScript<br>Apache-2.0</div>
+    <div class="mark"><b>samkhya 1.2.0</b>llm_http feature<br>4 providers<br>Rust · Python · JS</div>
     <div class="body-col">
-      <p class="eyebrow ok">Provable join bounds · portable statistics</p>
-      <h1>A join ceiling you can actually prove.</h1>
+      <p class="eyebrow hot">Why now</p>
+      <h1>Put an LLM in your query planner without letting it wreck the plan.</h1>
       <p class="standfirst">
-        Query optimizers guess how many rows a join will produce, and the guesses
-        compound. samkhya clamps a corrected estimate under a bound the join
-        <strong>provably cannot exceed</strong> — derived by counting, with no
-        model involved. A miscalibrated model, or a hallucinating LLM, cannot push
-        the planner past a number that has been proved.
+        Everybody wants a language model in the optimizer. Almost nobody ships
+        one, and the blocker was never capability — <strong>it is blast
+        radius</strong>. A planner does not fail gracefully on a bad row count:
+        one confidently wrong number and it builds a hash table on the wrong side
+        and exhausts memory. The expected case is fine. The tail eats you.
+      </p>
+      <p class="standfirst">
+        samkhya clamps whatever the model says under a bound the join
+        <strong>provably cannot exceed</strong> — derived by counting, no model
+        involved. The model is allowed to be wrong. It is not allowed to be
+        load-bearing.
       </p>
 
       <div class="proofcard">
-        <div class="proofcard-head">A foreign-key join: 10 orders, 100 line items, 10 distinct keys</div>
+        <div class="proofcard-head">The bound, on a foreign-key join: 10 orders, 100 line items, 10 distinct keys</div>
         <div class="proofnums">
           <div><span class="k">true output</span><b>100</b></div>
           <div class="hit"><span class="k">samkhya ceiling</span><b>100</b><em>exact</em></div>
@@ -282,26 +318,25 @@ section.band strong{color:#FFF7EC}
         </div>
         <p class="proofcard-note">
           The ceiling sees four numbers — two row counts, two distinct counts —
-          and never the data. On the shape that dominates analytical workloads it
-          is not merely sound but exactly tight.
-          <a href="demo.html">Try to break it &rarr;</a>
+          and never the data. <a href="demo.html">Try to break it &rarr;</a>
         </p>
       </div>
 
       <div class="statrow">
+        <div><b>4</b><span>LLM backends, clamped — Anthropic, OpenAI, Ollama, dummy</span></div>
         <div><b>0</b><span>soundness violations in 3,704 bound-evaluations</span></div>
         <div><b>84 KB</b><span>WebAssembly, with generated TypeScript types</span></div>
-        <div><b>4</b><span>LLM providers, clamped — Anthropic, OpenAI, Ollama, dummy</span></div>
       </div>
     </div>
   </div>
 </div>
 
-<section id="llm" class="band">
+<section id="safety">
+
   <div class="wrap sheet">
-    <div class="mark"><b>Why now</b>llm_http feature<br>4 providers<br>2 transports</div>
+    <div class="mark"><b>How it holds</b>Clamp · fallback<br>opt-in · swappable</div>
     <div class="body-col">
-      <h2>The point of a provable ceiling is that you can put an LLM under it.</h2>
+      <h2>What the ceiling actually guarantees.</h2>
       <p class="lede">
         Everybody wants a language model in the query planner. Almost nobody
         ships one, and the blocker was never capability — it is blast radius.
