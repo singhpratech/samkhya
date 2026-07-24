@@ -134,8 +134,13 @@ impl CountMinSketch {
         self.total = self.total.saturating_add(u64::from(count));
     }
 
-    /// Estimate the frequency of `item`. Always an upper bound under
-    /// CMS semantics — never undercounts.
+    /// Estimate the frequency of `item`. An upper bound under CMS
+    /// semantics — never undercounts, **provided no counter has
+    /// saturated**. Counters are `u32` and increment with
+    /// `saturating_add`, so a key whose true frequency exceeds
+    /// `u32::MAX` pins its counters and the estimate stops tracking the
+    /// truth. Check [`is_saturated`](Self::is_saturated) before relying on
+    /// the one-sided guarantee for anything safety-critical.
     ///
     /// # Examples
     ///
@@ -146,6 +151,7 @@ impl CountMinSketch {
     /// for _ in 0..7 { cms.add(b"key", 1); }
     /// // CMS never undercounts: estimate is at least the true count.
     /// assert!(cms.estimate(b"key") >= 7);
+    /// assert!(!cms.is_saturated());
     /// // An item never inserted estimates to 0 (with high probability).
     /// assert_eq!(cms.estimate(b"never-seen"), 0);
     /// ```
@@ -158,6 +164,58 @@ impl CountMinSketch {
             })
             .min()
             .unwrap_or(0)
+    }
+
+    /// Whether any counter has reached `u32::MAX`.
+    ///
+    /// Saturation is the one condition under which the sketch's
+    /// never-undercount guarantee fails, so every caller that depends on
+    /// that guarantee — a provable ceiling, for instance — must check.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::sketches::CountMinSketch;
+    ///
+    /// let mut cms = CountMinSketch::with_defaults();
+    /// cms.add(b"ordinary", 1_000);
+    /// assert!(!cms.is_saturated());
+    ///
+    /// cms.add(b"pathological", u32::MAX);
+    /// assert!(cms.is_saturated());
+    /// ```
+    pub fn is_saturated(&self) -> bool {
+        self.counters.contains(&u32::MAX)
+    }
+
+    /// A sound upper bound on the frequency of the *most frequent* key in
+    /// the sketch, without needing to know what that key is.
+    ///
+    /// For any key `k`, `true_freq(k) <= estimate(k) <= max counter`, so
+    /// the largest counter bounds every key's degree at once. Returns
+    /// `None` when the sketch has saturated, because the chain above
+    /// depends on the never-undercount property.
+    ///
+    /// This is what lets a Count-Min sketch riding in a portable Puffin
+    /// sidecar feed a provable join ceiling — see
+    /// [`crate::degree::AttributeDegree::from_count_min`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::sketches::CountMinSketch;
+    ///
+    /// let mut cms = CountMinSketch::with_defaults();
+    /// for _ in 0..9 { cms.add(b"hot", 1); }
+    /// for _ in 0..2 { cms.add(b"cold", 1); }
+    /// // Bounds the true maximum degree of 9 from above.
+    /// assert!(cms.max_frequency_bound().unwrap() >= 9);
+    /// ```
+    pub fn max_frequency_bound(&self) -> Option<u32> {
+        if self.is_saturated() {
+            return None;
+        }
+        Some(self.counters.iter().copied().max().unwrap_or(0))
     }
 
     pub fn merge(&mut self, other: &Self) -> Result<()> {

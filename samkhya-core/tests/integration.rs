@@ -1,4 +1,5 @@
 //! Cross-module integration test for samkhya-core.
+#![allow(deprecated)] // exercises the legacy AgmBound surface on purpose
 //!
 //! Exercises a realistic pipeline that touches sketches, Puffin I/O,
 //! ColumnStats, the feedback recorder, and LpBound clamping — in one go.

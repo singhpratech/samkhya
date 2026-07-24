@@ -1,6 +1,7 @@
 //! samkhya-core — portable cardinality correction primitives.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod degree;
 pub mod error;
 pub mod feedback;
 pub mod lpbound;

@@ -10,6 +10,8 @@
 // graph shape, or distinct-count hints. Each `proptest!` block runs
 // at least 1024 cases.
 
+#![allow(deprecated)] // the legacy bound family is the subject under test
+
 use proptest::collection::vec as pvec;
 use proptest::prelude::*;
 

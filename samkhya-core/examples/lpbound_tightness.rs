@@ -1,4 +1,5 @@
 //! Empirical tightness comparison of the LpBound family.
+#![allow(deprecated)] // the legacy bound family is what this campaign measures
 //!
 //! Builds synthetic multi-way join graphs (path, star, cycle, clique) at
 //! several arities and per-edge ℓ_p degree-sequence regimes, then evaluates
@@ -277,6 +278,20 @@ struct Stats {
     ratios_agm: Vec<f64>,
     ordering_ok: u64, // ProductBound >= ChainBound >= AgmBound >= LpJoinBound
     lp_le_agm: u64,
+    /// Trials where a bound landed strictly below the materialised true
+    /// cardinality. A sound ceiling can never do this; the count exists so
+    /// that when one does, the campaign says so instead of averaging it
+    /// away. Through v1.1 the ratios were clamped with `.max(1.0)`, which
+    /// reported an unsound bound as a perfectly tight one.
+    violations_product: u64,
+    violations_chain: u64,
+    violations_agm: u64,
+    violations_lp: u64,
+    /// Trials where the true cardinality exceeds `u64::MAX`, so every
+    /// bound saturates and a bound-vs-truth comparison says nothing about
+    /// soundness. Excluded from the violation counts and reported
+    /// separately rather than silently folded in.
+    saturated: u64,
 }
 
 fn median(xs: &mut [f64]) -> f64 {
@@ -307,6 +322,8 @@ fn main() {
     let mut first_cell = true;
     let mut global_ordering_ok = 0u64;
     let mut global_total = 0u64;
+    let mut global_violations = 0u64;
+    let mut global_saturated = 0u64;
     let mut star5_lp_improvement_skew: Vec<f64> = Vec::new();
 
     let raw_path = env::var("SAMKHYA_RAW_OUT").ok();
@@ -347,11 +364,41 @@ fn main() {
                     #[cfg(not(feature = "lp_solver"))]
                     let lp_b = agm_b; // sentinel — not part of the comparison
 
-                    // Ratios bound / truth (>= 1 for sound bounds; lower = tighter).
-                    let r_prod = (prod_b / truth).max(1.0);
-                    let r_chain = (chain_b / truth).max(1.0);
-                    let r_agm = (agm_b / truth).max(1.0);
-                    let r_lp = (lp_b / truth).max(1.0);
+                    // Soundness first: a ceiling below the materialised
+                    // truth is a defect, not a tightness result. Count it
+                    // before any ratio is taken.
+                    //
+                    // Bounds are `u64` and saturate; the materialised truth
+                    // is computed in `u128`. When the truth exceeds
+                    // `u64::MAX` every bound is pinned at the saturation
+                    // value and lands "below" it for arithmetic reasons that
+                    // have nothing to do with soundness. Those trials are
+                    // counted separately, never as violations.
+                    let saturated = truth > u64::MAX as f64;
+                    if saturated {
+                        stats.saturated += 1;
+                    } else {
+                        if prod_b < truth - 0.5 {
+                            stats.violations_product += 1;
+                        }
+                        if chain_b < truth - 0.5 {
+                            stats.violations_chain += 1;
+                        }
+                        if agm_b < truth - 0.5 {
+                            stats.violations_agm += 1;
+                        }
+                        if lp_b < truth - 0.5 {
+                            stats.violations_lp += 1;
+                        }
+                    }
+
+                    // Ratios bound / truth. Reported unclamped: a value
+                    // below 1.0 means the ceiling was breached, and that
+                    // has to remain visible in the receipts.
+                    let r_prod = prod_b / truth;
+                    let r_chain = chain_b / truth;
+                    let r_agm = agm_b / truth;
+                    let r_lp = lp_b / truth;
 
                     stats.samples += 1;
                     stats.sum_ratio_product += r_prod;
@@ -378,10 +425,17 @@ fn main() {
                         stats.lp_le_agm += 1;
                     }
 
+                    // Only count a tightness improvement when the tighter
+                    // bound is actually sound on this instance. Crediting a
+                    // breached ceiling as an improvement is how the v1.1
+                    // campaign produced its headline ratio.
                     if topo == "star"
                         && n == 5
                         && matches!(p, PNorm::P2 | PNorm::PInf)
                         && lp_b > 0.0
+                        && !saturated
+                        && lp_b >= truth - 0.5
+                        && agm_b >= truth - 0.5
                     {
                         let improvement = (agm_b / lp_b).max(1.0);
                         star5_lp_improvement_skew.push(improvement);
@@ -390,12 +444,18 @@ fn main() {
 
                 global_total += stats.samples;
                 global_ordering_ok += stats.ordering_ok;
+                global_saturated += stats.saturated;
+                global_violations += stats.violations_product
+                    + stats.violations_chain
+                    + stats.violations_agm
+                    + stats.violations_lp;
 
                 let median_lp_over_agm = {
                     let mut xs: Vec<f64> = stats
                         .ratios_agm
                         .iter()
                         .zip(stats.ratios_lp.iter())
+                        .filter(|(a, l)| **a >= 1.0 && **l >= 1.0)
                         .map(|(a, l)| (a / l).max(1.0))
                         .collect();
                     median(&mut xs)
@@ -414,7 +474,12 @@ fn main() {
                      \"mean_ratio_lp\": {ml:.3}, \
                      \"median_lp_vs_agm_speedup\": {mlsp:.3}, \
                      \"ordering_holds_pct\": {opct:.1}, \
-                     \"lp_le_agm_pct\": {lpct:.1}}}",
+                     \"lp_le_agm_pct\": {lpct:.1}, \
+                     \"violations_product\": {vp}, \
+                     \"violations_chain\": {vc}, \
+                     \"violations_agm\": {va}, \
+                     \"violations_lp\": {vl}, \
+                     \"saturated_trials\": {sat}}}",
                     topo = topo,
                     n = n,
                     p_label = p.label(),
@@ -426,6 +491,11 @@ fn main() {
                     mlsp = median_lp_over_agm,
                     opct = 100.0 * stats.ordering_ok as f64 / stats.samples as f64,
                     lpct = 100.0 * stats.lp_le_agm as f64 / stats.samples as f64,
+                    vp = stats.violations_product,
+                    vc = stats.violations_chain,
+                    va = stats.violations_agm,
+                    vl = stats.violations_lp,
+                    sat = stats.saturated,
                 );
 
                 if raw_path.is_some() {
@@ -460,6 +530,8 @@ fn main() {
         median(&mut xs)
     };
     println!("  \"hypothesis_star5_skew_median_lp_vs_agm\": {median_star5_skew:.3},");
+    println!("  \"soundness_violations_total\": {global_violations},");
+    println!("  \"saturated_trials_total\": {global_saturated},");
     println!("  \"feature_lp_solver\": {}", cfg!(feature = "lp_solver"));
     println!("}}");
 

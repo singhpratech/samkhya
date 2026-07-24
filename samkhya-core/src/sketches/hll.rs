@@ -202,6 +202,35 @@ impl HllSketch {
         Ok(())
     }
 
+    /// A sound **lower** bound on the number of distinct values added.
+    ///
+    /// [`estimate`](Self::estimate) is approximately unbiased and two-sided:
+    /// it lands above the truth about half the time. Some callers need a
+    /// value that is never above the truth — deriving a join degree bound
+    /// from `rows - distinct + 1`, for instance, where an over-stated
+    /// distinct count silently produces an *unsound* ceiling.
+    ///
+    /// Every inserted value hashes to exactly one register, so a register
+    /// is non-zero only if at least one distinct value mapped to it. The
+    /// count of non-zero registers is therefore never above the true
+    /// cardinality — collisions can only push it further down. It is a
+    /// weak floor, saturating at `2^p`, but it is a floor.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::sketches::HllSketch;
+    ///
+    /// let mut hll = HllSketch::new(12).unwrap();
+    /// for i in 0..500u32 { hll.add(&i.to_le_bytes()); }
+    ///
+    /// // Never above the truth, unlike the point estimate.
+    /// assert!(hll.nonzero_registers() <= 500);
+    /// ```
+    pub fn nonzero_registers(&self) -> u64 {
+        self.registers.iter().filter(|&&r| r != 0).count() as u64
+    }
+
     pub fn precision(&self) -> u8 {
         self.precision
     }

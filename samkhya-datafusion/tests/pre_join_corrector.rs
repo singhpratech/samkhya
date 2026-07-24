@@ -5,11 +5,13 @@ use datafusion::common::config::ConfigOptions;
 use datafusion::common::stats::Precision;
 use datafusion::common::{ColumnStatistics, JoinType, Statistics};
 use datafusion::execution::session_state::SessionStateBuilder;
-use datafusion::physical_expr::expressions::Column;
+use datafusion::logical_expr::Operator;
+use datafusion::physical_expr::expressions::{Column, binary, lit};
 use datafusion::physical_optimizer::PhysicalOptimizerRule;
 use datafusion::physical_optimizer::join_selection::JoinSelection;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::empty::EmptyExec;
+use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::{HashJoinExec, PartitionMode};
 use datafusion::physical_planner::DefaultPhysicalPlanner;
 use samkhya_core::residual::{CorrectionFeatures, Corrector};
@@ -348,4 +350,80 @@ fn installer_rejects_sessions_without_join_selection() {
     ));
     let error = install_pre_join_corrector(state, rule).expect_err("missing join selection");
     assert!(error.to_string().contains("no join_selection"));
+}
+
+fn filtered(name: &str, rows: usize, bytes: usize) -> Arc<dyn ExecutionPlan> {
+    let base = input(name, rows, bytes);
+    let schema = base.schema();
+    let predicate = binary(
+        Arc::new(Column::new(name, 0)),
+        Operator::Eq,
+        lit(1_i64),
+        &schema,
+    )
+    .expect("valid predicate");
+    Arc::new(FilterExec::try_new(predicate, base).expect("valid filter"))
+}
+
+fn join_with_left(left: Arc<dyn ExecutionPlan>, left_key: &str) -> Arc<dyn ExecutionPlan> {
+    let right = input("right_k", 100, 1_000);
+    let on = vec![(
+        Arc::new(Column::new(left_key, 0)) as _,
+        Arc::new(Column::new("right_k", 0)) as _,
+    )];
+    Arc::new(
+        HashJoinExec::try_new(
+            left,
+            right,
+            on,
+            None,
+            &JoinType::Inner,
+            None,
+            PartitionMode::Auto,
+            false,
+        )
+        .expect("valid hash join"),
+    )
+}
+
+/// A filtered join input gets a finite ceiling with no operator
+/// configuration at all: a filter cannot emit more rows than its child, so
+/// an unbounded corrector is clamped there.
+///
+/// Before 1.2.0 the shipped default had no finite clamp at any layer, which
+/// meant the bound guarantee was absent from the default DataFusion path.
+#[test]
+fn derived_ceiling_bounds_a_filtered_input_by_default() {
+    let plan = join_with_left(filtered("left_k", 100, 1_000), "left_k");
+    let rule = SamkhyaPreJoinRule::new(Arc::new(MaxCorrector), PreJoinCorrectionOptions::default());
+    let corrected = rule
+        .optimize(plan, &ConfigOptions::new())
+        .expect("pre-join correction");
+    let join = find_hash_join(corrected.as_ref()).expect("hash join");
+
+    assert_eq!(
+        rows(join.left()),
+        100,
+        "a filter cannot exceed its child, so the ceiling is the child row count"
+    );
+    assert!(rule.metrics().clamped >= 1);
+}
+
+/// Turning the derivation off restores the pre-1.2 unbounded behaviour, for
+/// operators who maintain their own envelope and want exactly one clamp.
+#[test]
+fn derived_ceiling_can_be_disabled() {
+    let plan = join_with_left(filtered("left_k", 100, 1_000), "left_k");
+    let rule = SamkhyaPreJoinRule::new(
+        Arc::new(MaxCorrector),
+        PreJoinCorrectionOptions::default().with_derive_ceiling(false),
+    );
+    let corrected = rule
+        .optimize(plan, &ConfigOptions::new())
+        .expect("pre-join correction");
+    let join = find_hash_join(corrected.as_ref()).expect("hash join");
+    // Still capped by SAFE_MAX_ROWS: disabling the derived ceiling removes the
+    // plan-shape bound, not the sanity guard that keeps DataFusion's unchecked
+    // cardinality multiply away from u64::MAX.
+    assert_eq!(rows(join.left()), 1usize << 40);
 }
