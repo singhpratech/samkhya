@@ -76,6 +76,41 @@ minutes on a laptop with no network access.
 
 ---
 
+## Why now: you can put an LLM under a provable ceiling
+
+Everybody wants a language model in the query planner. Almost nobody ships one,
+and the blocker was never capability — it is blast radius.
+
+A planner does not fail gracefully on a bad row count. Ask a model how many rows
+a six-way join emits, get back a confidently wrong number, and the optimizer
+builds a hash table on the wrong side and exhausts memory. The expected case is
+fine. The tail eats you.
+
+A ceiling changes the shape of that risk:
+
+- **Clamped from above.** Whatever the backend proposes is held under a bound
+  derived by counting. Since 1.2 the DataFusion path derives one by default —
+  before that, the guarantee was absent unless an operator wired it up by hand.
+- **Fail-open.** Any transport error, timeout, malformed reply or provider
+  outage returns `Ok(None)` and the engine falls back to its own estimate. A
+  provider going down must never surface as a query failure.
+- **Opt-in.** Behind the `llm_http` cargo feature, against an endpoint you
+  control — Anthropic, OpenAI, local Ollama, or a dummy echo. Off in the
+  default build.
+- **Swappable.** The same `Corrector` trait takes gradient-boosted trees,
+  TabPFN-2.5, or an LLM. The safety contract does not change with the backend.
+
+**What is measured, and what is not.** The transport floor is measured; every
+live-LLM accuracy cell is marked *projected*, pending API keys. And samkhya's own
+GBT corrector made held-out q-error **worse** in the one honest measurement so
+far — 13.46 → 26.41, fitted on a single usable row.
+
+That result is the case *for* the ceiling, not against it. A corrector that
+doubles your error is exactly what the clamp exists for. **The claim is not that
+a model will help. It is that you can find out safely.**
+
+---
+
 ## Quick start
 
 Add the core crate to a Rust project:
@@ -83,6 +118,22 @@ Add the core crate to a Rust project:
 ```bash
 cargo add samkhya-core
 ```
+
+Or compute a provable ceiling from JavaScript — 84 KB of WebAssembly, generated
+TypeScript types, no server and no native module:
+
+```js
+import init, { HllSketch, joinCeiling } from 'samkhya';
+await init();
+
+// 10 orders joined to 100 line items over 10 distinct keys.
+joinCeiling([10, 100], [0, 1], [10, 10]);   // 100 — exactly the true output
+joinCeiling([10, 100], [0, 1], []);         // 1000 — the Cartesian product
+```
+
+`joinCeiling` subtracts the distinct count, so it needs one that is never *above*
+the truth. Pass `hll.distinctFloor()`, not `hll.estimate()` — the point estimate
+is two-sided and would produce a ceiling below the truth.
 
 Build a Puffin sidecar from a column:
 
@@ -281,7 +332,7 @@ Workspace clippy `-D warnings`, default tests, optional-engine tests, and the
 cross-engine Puffin release fixture run in CI. Historical fuzz and benchmark
 receipts remain under `bench-results/`.
 
-**Test surface.** 345 workspace tests plus 272 under `samkhya-core --all-features`,
+**Test surface.** 415 tests on CI's `cargo test --locked --workspace --exclude samkhya-py`, plus 272 under `samkhya-core --all-features`,
 all green, clippy and rustfmt clean, MSRV 1.85 compiling. The suites that carry
 the load for 1.2 are worth naming, because the defects they cover were all
 silent:
