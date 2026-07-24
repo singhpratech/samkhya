@@ -8,9 +8,31 @@
 
 ---
 
+> ### ⚠ Correction — 2026-07-24 (samkhya 1.2.0)
+>
+> **The 40.95× bound-tightness claim is withdrawn**, and it was never a
+> wallclock speedup. A 2026-07-24 audit found that `LpJoinBound`, `AgmBound`,
+> and `ChainBound` returned ceilings *below* the true cardinality in 58.8% of
+> comparable trials, and that the harness measuring them clamped every
+> violation to "perfectly tight" with a `.max(1.0)`. The 40.95× ratio was large
+> in proportion to how far below the truth its denominator had fallen.
+>
+> The bounds are repaired in 1.2.0 and now record **0 violations in 3,704
+> bound-evaluations**. Claims below that rest on the pre-1.2 bound family —
+> notably **HN-3** and every row citing `07_lpbound_tightness.md` — are
+> superseded by [`20_bound_soundness.md`](./20_bound_soundness.md).
+>
+> Findings unrelated to the bound family (sketch accuracy, Puffin portability,
+> corrector latency, the JOB-Slow wallclock campaign) are untouched by this
+> correction. Separately, several open measurement questions raised by the same
+> audit are tracked in [`OPEN_AUDIT_ITEMS.md`](./OPEN_AUDIT_ITEMS.md) and should
+> be read alongside the JOB-Slow and ablation sections.
+
+---
+
 ## Framework framing (B2 launch narrative)
 
-samkhya is the engine-agnostic Rust SDK for feedback-driven cardinality correction in embedded analytical engines. Plug GBT, TabPFN-2.5, or any LLM as your corrector backend. Measured 40.95× wallclock speedup on star-5 join topologies (BCa 95% CI [30.93, 47.45], Wilcoxon p=1.73×10⁻⁶) over native DataFusion 46 LP-bound tightness; provably-tighter LpJoinBound theorem (strict over AGM, p<10⁻⁵ every cell). 13-crate SDK across DataFusion, DuckDB, Polars, Postgres, Iceberg, Arrow, GPU, Python. The empirical claims in this dossier are composable because the framework — `Corrector` trait + LpJoinBound envelope + Puffin sidecar wire format — is what makes the per-engine integrations interchangeable.
+samkhya is the engine-agnostic Rust SDK for feedback-driven cardinality correction in embedded analytical engines. Plug GBT, TabPFN-2.5, or any LLM as your corrector backend. The join ceiling every correction is clamped under is provable from statistics samkhya already carries in a portable Puffin sidecar, and is exactly tight on foreign-key joins. 13-crate SDK across DataFusion, DuckDB, Polars, Postgres, Iceberg, Arrow, GPU, Python. The empirical claims in this dossier are composable because the framework — `Corrector` trait + LpJoinBound envelope + Puffin sidecar wire format — is what makes the per-engine integrations interchangeable.
 
 ---
 
@@ -38,7 +60,7 @@ These are the load-bearing numbers a paper, blog post, or release announcement m
 
 **ANSWER:** samkhya `CountMinSketch` violates `Pr[est > true + ε·N] ≤ δ` **zero times in 2.7 million queries** across the 9-cell (ε × δ × N) grid (Cormode-Muthukrishnan 2005); empirical mean overestimate matches `N/width` within 3.4% on the largest cell. **[MEASURED]** Receipt: [`05_cms_bound_verification.md`](./05_cms_bound_verification.md). Verdict: **PASS** with `2,000-resample percentile bootstrap CI = [0.000, 0.000]` (Wilson-Clopper one-sided upper bound on per-query rate: `~1e-5 ≪ δ·1.2`).
 
-### HN-3 — LpBound tightness: principled bound dominates AGM on tree joins (40.95× on star-5)
+### HN-3 — LpBound tightness ⚠ RETRACTED (see 20_bound_soundness.md)
 
 **ANSWER:** `LpJoinBound` median ratio `AgmBound / LpJoinBound = 370.13× on 3-way paths, **40.95× on 5-way stars (BCa 95% CI [30.93, 47.45], Wilcoxon W=0 paired vs AGM, p=1.73×10⁻⁶, n=30)**, 8.35× on 5-way paths` under skewed-uniform `p=1` regime; **LpJoin ≤ AGM strict in every cell of the headline grid** (paired comparison across 30 random graph instances per cell; W=0, p=1.73×10⁻⁶ confirms strict tightness — no tie). On heavy-hitter (`p=∞`) cells both bounds saturate to truth (ratio 1.000× — no headroom by construction). **[MEASURED, WAVE5-G BCa]** Receipt: [`07_lpbound_tightness.md`](./07_lpbound_tightness.md). Verdict: **PASS** — pre-registered ≥ 1.3× threshold met on `p=1` cells with two-orders-of-magnitude headroom; cyclic/clique `n=7 p=1` cells regress (LP-conditioning corner — flagged for v1.1). Cites Atserias-Grohe-Marx PODS 2008 (AGM bound), Zhang SIGMOD 2025 (LpBound polynomial families).
 

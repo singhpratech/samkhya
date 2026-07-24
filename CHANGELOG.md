@@ -6,6 +6,111 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-07-24
+
+**The ceiling is now actually provable.**
+
+An audit of the upper-bound envelope found that three of the four bounds
+shipped through v1.1 were not sound: they returned ceilings *below* the true
+join cardinality on the shapes that dominate analytical workloads. A correction
+clamped to such a ceiling underestimates, which is the regression the envelope
+exists to prevent. This release repairs the family, adds a bound that is both
+provable and tighter than the Cartesian product, and adds the test that would
+have caught the defect.
+
+Bound values only ever move **up** relative to v1.1 — never down — so no
+correction that was safe before becomes unsafe now. Behaviour changes are
+described per item below.
+
+### Fixed
+
+- `LpJoinBound` no longer returns ceilings below the truth. Its LP added one
+  cover constraint per *predicate*; the AGM bound requires one per *attribute*,
+  plus a full unit of cover weight for every relation carrying a column nothing
+  else covers. Those constraints were missing, so
+  `LpJoinBound::ceiling(&[10, 100], &[(0, 1)])` returned 10 for a foreign-key
+  join that emits 100 rows. The defect is invisible on a triangle — where the
+  two constraint sets coincide, and where the tests happened to look.
+- `ChainBound` no longer divides the Cartesian product by `max(D_i, D_j)`. That
+  is a uniform-distribution estimate, not an upper bound: two 20-row relations
+  with 5 distinct keys and 16 rows on one key join to 260 rows, and the formula
+  returned 80. It now derives a sound degree bound from the same distinct counts
+  and is exactly tight on foreign-key joins.
+- `AgmBound`'s `min × max` shortcut is not an AGM bound and was unsound for
+  three or more relations. It now returns `ProductBound` and is deprecated:
+  given only row counts and which pairs are joined, the Cartesian product is the
+  only sound answer, because every row of every relation may share one key value.
+- `examples/lpbound_tightness.rs` computed `(bound / truth).max(1.0)`. The clamp
+  turned every soundness violation into a perfect-tightness reading, so the
+  campaign could not detect the defect it was averaging over. It now reports
+  per-bound violation counts and unclamped ratios, and excludes trials where the
+  `u128` ground truth exceeds `u64::MAX` and every bound saturates.
+- `samkhya-py`'s `agm_bound` multiplied a ceiling by caller-supplied
+  selectivities. Selectivities are in `[0, 1]`, so this could only shrink the
+  result — passing `0.01` returned a "bound" a hundredth of the real ceiling. The
+  selectivity argument is now ignored; `selectivity_estimate` preserves the old
+  value under a name that says what it is.
+- `CountMinSketch::estimate`'s never-undercount guarantee is documented as
+  conditional on no counter having saturated, which `u32` saturation breaks.
+- `AttributeDegree::from_distinct` states its soundness obligation explicitly.
+  `maxdeg ≤ rows − distinct + 1` subtracts the distinct count, so it is sound
+  only if that count is a *lower* bound on the truth — and the obvious feeder is
+  the wrong one, since an HLL point estimate is two-sided and exceeds the truth
+  about half the time. `HllSketch::nonzero_registers` and
+  `AttributeDegree::from_hll_floor` provide a value that never does: every value
+  hashes to one register, so non-zero registers can only under-count.
+- `SamkhyaPreJoinRule` now recognises `SortMergeJoinExec`. Without it the entire
+  rule was a silent no-op under `prefer_hash_join = false`.
+
+### Added
+
+- `samkhya-core::degree` — a provable join ceiling from degree statistics.
+  `JoinGraph::ceiling` implements a spanning-tree degree bound that is sound for
+  bag semantics and exactly tight on foreign-key, star, and chain shapes.
+  Degrees come from a row count (`maxdeg ≤ rows`), a distinct count
+  (`maxdeg ≤ rows − distinct + 1`, exact for key columns), or a Count-Min sketch.
+- `AttributeDegree::from_count_min` and `CountMinSketch::max_frequency_bound`.
+  For any key `k`, `true_freq(k) ≤ estimate(k) ≤ max counter`, so a sketch's
+  largest counter bounds every key's degree at once without knowing which key is
+  hot. Since that sketch already rides in the Puffin sidecar, a ceiling proved
+  from statistics written by one engine holds in another — no shared catalog, no
+  re-scan. `CountMinSketch::is_saturated` reports the one condition under which
+  the chain fails.
+- `LpJoinBound::ceiling_hypergraph` and `HyperRelation` — the genuine
+  fractional-edge-cover LP over an explicit attribute hypergraph, which still
+  returns the AGM `n^1.5` bound for a triangle. `HyperRelation::new` assumes
+  private columns (the sound default); `HyperRelation::projected` opts out.
+- `tests/soundness_degree.rs` — six properties at 2,048 cases each that build
+  relation instances, brute-force the true join, and assert
+  `ceiling ≥ truth`. The pre-existing property suite checked only *relative*
+  invariants between bounds, which hold fine for a family that is wrong together.
+- `PreJoinCorrectionOptions::derive_ceiling` (default `true`) derives a finite
+  per-input ceiling in the DataFusion adapter: a join emits at most the product
+  of its children's rows, a filter at most its child's. Before this the shipped
+  default had no finite clamp at any layer, so the bound guarantee was absent
+  from the default DataFusion path unless an operator wired one up by hand.
+- `samkhya-py` gains `join_ceiling`, which exposes the provable bound to Python.
+- `SAFE_MAX_ROWS` (2^40) caps every row count the DataFusion rule publishes.
+  DataFusion's join-cardinality estimator multiplies published row counts
+  without an overflow check, so a corrector proposing `u64::MAX` wrapped into a
+  meaningless number inside the planner. This is a sanity cap on absurd inputs,
+  not a proof that the engine's arithmetic is total.
+
+### Changed
+
+- `bench-results/07_lpbound_tightness.md` is **retracted**, including its 40.95×
+  star-5 headline. That ratio was `AgmBound / LpJoinBound` on instances where
+  `LpJoinBound` had collapsed a star to its hub row count, so it was large in
+  proportion to how far below the truth the denominator had fallen. Corrected,
+  the v1.1 figure is undefined; on the repaired bounds it is 1.070×. It was also
+  never a wallclock speedup, and is no longer described as one.
+- `bench-results/20_bound_soundness.md` records the audit and the repair:
+  **2,179 violations in 3,704 bound-evaluations before, 0 after.**
+- `bench-results/OPEN_AUDIT_ITEMS.md` registers what the same audit raised that
+  this release does *not* answer — including a possible run-order confound in the
+  JOB-Slow campaign — with each item marked confirmed, credible-but-unverified,
+  or open.
+
 ## [1.1.0] — 2026-07-14
 
 This minor release adds public adapter APIs — a safe DataFusion pre-join
@@ -1175,7 +1280,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/singhpratech/samkhya/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/singhpratech/samkhya/compare/v1.0.0...v1.1.0
 [v1.0.0-rc.2]: https://github.com/singhpratech/samkhya/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/singhpratech/samkhya/releases/tag/v1.0.0

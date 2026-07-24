@@ -2,7 +2,7 @@
 
 > **samkhya is the engine-agnostic Rust SDK for portable, feedback-driven cardinality correction in embedded analytical engines.** Its load-bearing guarantee is *never-regress at the bound level*: every corrected estimate is clamped under a provable `LpJoinBound` ceiling, so a miscalibrated model or hallucinating LLM can never push the optimizer past a bound it can prove; with no feedback yet, cold start falls back to the engine's own estimate. One Puffin stats sidecar, written with `samkhya-core`, is loaded unchanged through Iceberg and exposed to DataFusion and the client-side DuckDB adapter. One `Corrector` trait, many swappable backends (GBT default · TabPFN-2.5 · LLM-pluggable). **13-crate workspace** (11 publishable crates), Apache-2.0, sole author.
 >
-> Every number here is pre-registered and measured, including the ones that missed. On the real Join-Order Benchmark (JOB-Slow — n=55 paired warm-cache queries from the 113-query IMDb suite, vs unmodified DataFusion 46), the geomean is **1.038×** (17 wins / 38 ties / 0 losses, BCa 95% CI [1.026, 1.056], Wilcoxon p=3×10⁻⁶) — statistically real, but **below the ≥1.35× I pre-registered, which is therefore falsified and reported as such.** The `LpJoinBound` is up to 40.95× *tighter than the AGM bound* on a synthetic star-5 microbenchmark (bound-tightness, not wallclock); see the [scoped headlines](#measured-headlines) for where that does and does not carry.
+> Every number here is pre-registered and measured, including the ones that missed. On the real Join-Order Benchmark (JOB-Slow — n=55 paired warm-cache queries from the 113-query IMDb suite, vs unmodified DataFusion 46), the geomean is **1.038×** (17 wins / 38 ties / 0 losses, BCa 95% CI [1.026, 1.056], Wilcoxon p=3×10⁻⁶) — statistically real, but **below the ≥1.35× I pre-registered, which is therefore falsified and reported as such.** (That campaign has an open question of its own — a possible run-order confound, tracked in [`bench-results/OPEN_AUDIT_ITEMS.md`](bench-results/OPEN_AUDIT_ITEMS.md).) A 2026-07-24 audit found that the ceiling shipped through v1.1 was **not actually provable** — it returned values below the true cardinality in 58.8% of trials — and **v1.2.0 fixes that**: 0 violations in 3,704 bound-evaluations, with the bound now exactly tight on foreign-key joins. The 40.95× bound-tightness figure previously quoted here is withdrawn; the full audit is in [`bench-results/20_bound_soundness.md`](bench-results/20_bound_soundness.md).
 
 [![Live site](https://img.shields.io/badge/site-live-a86a12?logo=github&logoColor=white)](https://singhpratech.github.io/samkhya/)
 [![CI](https://github.com/singhpratech/samkhya/workflows/CI/badge.svg)](https://github.com/singhpratech/samkhya/actions)
@@ -120,9 +120,9 @@ cargo run -p samkhya-core --example honest_demo --features lp_solver
 
 ```text
   TRUE output cardinality (counted from data) = 5
-  ProductBound = 96   AgmBound = 24   ChainBound = 6   LpJoinBound = 6
+  ProductBound = 96   ChainBound = 6   degree ceiling = 6
   [ok] every bound >= true cardinality (sound inclusive ceiling)
-  [ok] LpJoinBound <= AgmBound on this path join
+  [ok] ProductBound >= degree ceiling (a real refinement, still provable)
   corrector proposed 1000000 → saturating_clamp = 6 (<= ceiling, never regresses)
   built HllSketch(p=12), 1000 distinct keys → estimate = 997
   wrote Puffin sidecar → reopened → reconstructed estimate = 997
@@ -203,7 +203,8 @@ the row says so.
 |---|---|---|---|
 | **JOB-Slow end-to-end vs DataFusion 46 (real IMDb, n=55 paired warm-cache, SF=1)** — *the honest real-workload number; pre-registered ≥1.35× FALSIFIED* | geomean **1.038×** wallclock; **17 wins / 38 ties / 0 losses**; BH-FDR rejects 24/55 | BCa 95% CI [1.026, 1.056]; Wilcoxon W=212 p=3.00×10⁻⁶ | `bench-results/18_vs_native_datafusion_wallclock.md` (WAVE4-F) |
 | **Mixed/adversarial workload (7 pre-registered patterns A–G)** — *where samkhya LOSES, reported on purpose; H-G FALSIFIED* | cross-pattern geomean **0.949× (~5% slower)**; worst cell cold-start +12.4% | per-pattern CIs in receipt; burst P99 ≤ 212 µs @ 1000 QPS | `bench-results/17_failure_modes.md` |
-| **LpJoinBound vs AGM bound *tightness* — star-5, p=1 (uniform skew)** *(synthetic microbenchmark; bound/truth ratio, NOT wallclock; collapses to 1.00× under p=2/p=∞ heavy-hitter cells)* | **40.95×** tighter than AGM | BCa 95% CI [30.93, 47.45]; Wilcoxon W=0 paired vs AGM p=1.73×10⁻⁶, n=30 | `bench-results/07_lpbound_tightness.md` |
+| **Bound soundness — does the ceiling ever fall below the truth?** *(1,080 materialised instances × 4 bounds; 154 saturated trials excluded)* | **0 violations in 3,704** bound-evaluations *(v1.1: 2,179 — 58.8%)* | brute-forced true cardinality per instance; 6 properties × 2,048 proptest cases | `bench-results/20_bound_soundness.md` |
+| **Bound tightness on a foreign-key join** *(10 orders ⋈ 100 line items, 10 distinct keys)* | ceiling **100** — exactly the true output, vs 1,000 for the Cartesian product | derived from a distinct count samkhya already carries in its sidecar | `bench-results/20_bound_soundness.md` |
 | **TabPFN-2.5 inference latency** (RTX 4090 Laptop, B=8 L=128) | P95 **31.15 ms** (H1-A PASS) | BCa 95% CI [29.39, 35.32], strictly below 50 ms bar | `bench-results/14_tabpfn_4090_latency.md` (WAVE5-L2) |
 | **HLL precision** (p=14, n=10⁶) | RSE **0.676%** | BCa 95% CI [0.535%, 0.848%] vs Flajolet 2007 0.8125% envelope | `bench-results/03_hll_precision_sweep.md` |
 | **L4 v3 ablation** (A2→A3) | **−1.7%** median q-error reduction (BH-sig improvement) | BCa 95% CI [−2.8%, −0.7%], Wilcoxon p=0.0209 | WAVE5-E |
@@ -270,6 +271,11 @@ including data-flow diagrams and the `samkhya-core` module map.
 
 Reading and reference:
 
+- **[Bound-soundness audit and repair](bench-results/20_bound_soundness.md)** — how the v1.1
+  ceiling turned out not to be provable, why the tightness harness could not see it,
+  and the theorem the 1.2.0 bound rests on. Paired with
+  [`OPEN_AUDIT_ITEMS.md`](bench-results/OPEN_AUDIT_ITEMS.md), the register of what the
+  same audit raised that 1.2.0 does *not* answer.
 - **[samkhya v1.1: Never Regress](https://theaivibe.org/blog/samkhya-never-regress-cardinality-correction-deep-dive)**
   — the long-form deep dive: *putting a model in your query optimizer without
   letting it wreck the plan.* The narrative-first account of what samkhya is, the
@@ -279,7 +285,7 @@ Reading and reference:
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
   the GitHub Security Advisories channel.
-- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.1.0).
+- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.2.0).
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — how to file bugs, PRs, and run the
   test suite.
 - [REPRODUCIBILITY.md](./REPRODUCIBILITY.md) — ACM AE v1.1 reviewer entry,
