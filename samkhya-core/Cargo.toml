@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya: sketches, LpBound envelopes, Puffin sidecars, and residual correctors for cardinality estimation"
+description = "A provable join-cardinality ceiling, plus the portable sketches that feed it: HLL, Bloom, Count-Min, histograms, and Puffin sidecars"
 
 [dependencies]
 serde.workspace = true

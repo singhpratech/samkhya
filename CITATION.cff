@@ -13,7 +13,7 @@ abstract: >
 authors:
   - family-names: Singh
     given-names: Prateek
-version: "1.2.0"
+version: "1.2.1"
 date-released: "2026-07-24"
 license: Apache-2.0
 repository-code: "https://github.com/singhpratech/samkhya"
@@ -38,7 +38,7 @@ preferred-citation:
   authors:
     - family-names: Singh
       given-names: Prateek
-  version: "1.2.0"
+  version: "1.2.1"
   date-released: "2026-07-24"
   url: "https://github.com/singhpratech/samkhya"
   license: Apache-2.0

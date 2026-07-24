@@ -1,6 +1,6 @@
 {
   "name": "samkhya-llm-server",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "TypeScript port of the samkhya LLM-pluggable corrector inference server. Mirrors the wire contract of llm_infer_server.py.",
   "license": "Apache-2.0",

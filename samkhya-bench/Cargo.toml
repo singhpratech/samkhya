@@ -7,14 +7,14 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "Benchmark harness for samkhya: JOB-Slow, TPC-H, STATS-CEB"
+description = "Benchmark harness for samkhya: JOB-Slow, TPC-H, STATS-CEB, and corrector train/evaluate flows"
 keywords = ["benchmark", "cardinality", "query-optimizer"]
 categories = ["database"]
 publish = false
 
 [dependencies]
 samkhya-core = { workspace = true, features = ["gbt", "additive_gbt"] }
-samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.2.0" }
+samkhya-datafusion = { path = "../samkhya-datafusion", version = "1.2.1" }
 clap.workspace = true
 tokio.workspace = true
 datafusion = "46"

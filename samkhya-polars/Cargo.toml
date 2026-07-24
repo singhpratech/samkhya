@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya Polars 0.44 adapter: Series → Sketch helpers"
+description = "Polars integration for samkhya: build portable statistics sketches from Series"
 
 [dependencies]
 samkhya-core.workspace = true

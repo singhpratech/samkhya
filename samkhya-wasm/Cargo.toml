@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya for JavaScript and TypeScript: portable sketches and a provable join-cardinality ceiling, compiled to WebAssembly"
+description = "A provable join-cardinality ceiling, and the portable sketches behind it, compiled to WebAssembly. 84 KB, TypeScript types included"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 # The feedback store is the one part of samkhya-core that cannot target
 # wasm32 (it needs libsqlite3), so the default feature set is off. The LP
 # solver is pure Rust and does compile, so the hypergraph bound comes along.
-samkhya-core = { path = "../samkhya-core", version = "1.2.0", default-features = false, features = ["lp_solver"] }
+samkhya-core = { path = "../samkhya-core", version = "1.2.1", default-features = false, features = ["lp_solver"] }
 wasm-bindgen = "0.2"
 
 [dev-dependencies]

@@ -6,6 +6,22 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-07-24
+
+**Package metadata only. No code, no API, no behaviour change.**
+
+Registry descriptions are baked in at publish time, so correcting them needs a
+release. `samkhya-core` was still advertising itself on crates.io as "sketches,
+**LpBound envelopes**, Puffin sidecars, and residual correctors" — naming the
+exact bound family 1.2.0 found unsound and deprecated. Several others described
+themselves by listing their own type names, which tells a reader nothing.
+
+Every crate now says what it does, leading with the provable ceiling rather than
+the machinery. The PyPI summary and the workspace description follow. `1.2.0` is
+unaffected and remains installable; nothing about it is wrong except how it
+introduced itself.
+
+
 ### Added — the corrector can finally be measured
 
 The 2026-07-24 audit found the flagship JOB-Slow campaign had no corrector in
@@ -1372,7 +1388,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/singhpratech/samkhya/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/singhpratech/samkhya/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/singhpratech/samkhya/compare/v1.0.0...v1.1.0
 [v1.0.0-rc.2]: https://github.com/singhpratech/samkhya/compare/v1.0.0...HEAD

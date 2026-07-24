@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya Iceberg snapshot walker for Puffin sidecar discovery"
+description = "Read samkhya's portable statistics from Apache Iceberg Puffin sidecars, snapshot-aware"
 
 [dependencies]
 samkhya-core.workspace = true

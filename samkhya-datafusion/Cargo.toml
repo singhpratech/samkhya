@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya DataFusion 46 adapter: SamkhyaTableProvider + SamkhyaStatsExec + SamkhyaOptimizerRule"
+description = "DataFusion adapter for samkhya: corrects join-input statistics before join selection, under a ceiling derived from the plan"
 
 [dependencies]
 samkhya-core.workspace = true
