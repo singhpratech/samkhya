@@ -42,7 +42,7 @@ byteorder = "1.5"
 # Hashing for sketches
 twox-hash = "1.6"
 # Persistence (feedback recorder)
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 # Logging / errors
 log = "0.4"
 # CLI (bench)
