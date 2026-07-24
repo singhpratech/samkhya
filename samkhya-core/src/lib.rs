@@ -3,6 +3,7 @@
 
 pub mod degree;
 pub mod error;
+#[cfg(feature = "feedback")]
 pub mod feedback;
 pub mod lpbound;
 pub mod portable;

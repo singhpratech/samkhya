@@ -43,3 +43,8 @@ ureq = { version = "2", default-features = false, features = ["json", "tls"] }
 # Used by the cold_cache unit test to create a 100 MiB synthetic
 # parquet-shaped file in a self-cleaning temp directory.
 tempfile = "3"
+
+[features]
+# Enables the end-to-end train -> freeze -> reload test, which fits a real
+# model and is therefore slower than the rest of the suite.
+gbt-flow = []

@@ -135,18 +135,84 @@ read back byte-faithfully — the portability primitive. Every number is compute
 by the run, not hardcoded. Source:
 [`samkhya-core/examples/honest_demo.rs`](./samkhya-core/examples/honest_demo.rs).
 
+### A provable ceiling from statistics you already have
+
+The ceiling is not an estimate. Given row counts and a distinct count per join
+key — what an HLL sidecar already carries — it returns a number the join cannot
+exceed, and on foreign-key joins it is *exactly* the true output:
+
+```rust
+use samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
+
+const ORDER_KEY: u32 = 0;
+
+// 10 orders, 100 line items, 10 distinct order keys on both sides.
+let orders = JoinRelation::new(10)
+    .with_degree(ORDER_KEY, AttributeDegree::from_distinct(10, 10));
+let lineitem = JoinRelation::new(100)
+    .with_degree(ORDER_KEY, AttributeDegree::from_distinct(100, 10));
+
+let graph = JoinGraph::new(vec![orders, lineitem]).with_edge(0, 1, ORDER_KEY);
+
+assert_eq!(graph.ceiling(), 100);   // the Cartesian product would say 1000
+```
+
+Degrees can come from a row count (`maxdeg ≤ rows`, always true, degrades to the
+product), a distinct-count *floor* (`AttributeDegree::from_hll_floor`), or a
+Count-Min sketch (`from_count_min`, tightest under skew). The Count-Min route is
+what makes the ceiling portable: `true_freq(k) ≤ estimate(k) ≤ max counter`, so
+one sketch riding in a Puffin sidecar bounds every key's degree at once in
+whichever engine reads it.
+
+The theorem, the proof, and the brute-force verification are in
+[`bench-results/20_bound_soundness.md`](bench-results/20_bound_soundness.md).
+
+### Train a corrector and measure it honestly
+
+A corrector is only worth anything if you can show it helps on queries it has
+not seen. The bench harness does the three steps separately so that is
+enforceable rather than aspirational:
+
+```bash
+# 1. Run a training subset, recording the plan features the corrector will see.
+samkhya-bench run --suite synthetic --feedback train.db --only S1,S2,S3,S4,S5
+
+# 2. Fit a model and freeze it to disk.
+samkhya-bench train --feedback train.db --template samkhya-bench-synthetic \
+    --out model.json
+
+# 3. Evaluate on the complement — queries the model has never seen.
+samkhya-bench run --suite synthetic --exclude S1,S2,S3,S4,S5 \
+    --corrector gbt --model model.json
+```
+
+Freezing the model between steps 2 and 3 is the point: a model written before
+the evaluation queries ran cannot have seen them. Skip the split and you measure
+memorisation — on this suite, evaluating on the training queries shows q-error
+improving 4.58 → 1.86, while the honest held-out run shows it *worsening*
+13.46 → 26.41. Same model, same code, opposite conclusion.
+
 ---
 
-## What's in 1.0
+## What's in 1.2
 
 **Thirteen crates** in one Cargo workspace. Licensed under Apache-2.0
 (explicit patent grant per §3). Edition 2024. MSRV Rust 1.85; CI tests
 on 1.94 (the pinned project toolchain).
 
 Layer 1 — portable stats foundation:
-- `samkhya-core` — portable stats layer, feedback recorder, LpBound envelope,
-  `Corrector` trait. No engine dependencies. 5 sketches all shipping: HLL,
-  Bloom, Count-Min, equi-depth histogram, 2D correlated histogram.
+- `samkhya-core` — portable stats layer, feedback recorder, join-ceiling
+  envelope, `Corrector` trait. No engine dependencies. 5 sketches all shipping:
+  HLL, Bloom, Count-Min, equi-depth histogram, 2D correlated histogram.
+  - `degree` (new in 1.2) — the provable spanning-tree degree ceiling, with
+    degrees derived from a row count, a distinct-count floor, or a Count-Min
+    sketch. This is the bound samkhya actually ships.
+  - `lpbound` — `ProductBound`, the repaired `ChainBound`, and
+    `LpJoinBound::ceiling_hypergraph` (the genuine fractional-edge-cover LP,
+    which needs an explicit attribute hypergraph). `AgmBound` is deprecated:
+    its `min × max` shortcut was never an AGM bound.
+  - `feedback` — `PlanObservation` records the plan features the corrector sees
+    at inference time, so training and serving share a feature space.
 
 Layer 2 — engine adapters (3 production — DataFusion · Iceberg · Arrow;
 DuckDB + Polars beta; Postgres scaffold):
@@ -179,25 +245,44 @@ Layer 4 — tools:
 - `samkhya-cli` — single-binary evaluator: `build`, `decode`, `stats`,
   `info`, `compare`.
 - `samkhya-bench` — clap CLI: `list-queries`, `run`, `compare`, `report`,
-  `train`, `calibrate`, `build-puffin`.
+  `train`, `calibrate`, `build-puffin`. `train` fits and freezes a real GBT
+  corrector; `run --corrector gbt --model <path>` evaluates with it, and
+  `--only` / `--exclude` keep the training and evaluation sets disjoint.
 - `samkhya-it` — cross-crate integration test harness (`publish = false`).
 
 Workspace clippy `-D warnings`, default tests, optional-engine tests, and the
 cross-engine Puffin release fixture run in CI. Historical fuzz and benchmark
 receipts remain under `bench-results/`.
 
+**Test surface.** 301 workspace tests plus 269 under `samkhya-core --all-features`,
+all green, clippy and rustfmt clean, MSRV 1.85 compiling. The suites that carry
+the load for 1.2 are worth naming, because the defects they cover were all
+silent:
+
+| Suite | What it establishes |
+| ----- | ------------------- |
+| `samkhya-core/tests/soundness_degree.rs` | 6 properties × 2,048 cases: builds relation instances, brute-forces the true join, asserts `ceiling ≥ truth`. The absolute property, not an ordering between bounds. |
+| `samkhya-core/tests/corrector_features.rs` | The corrector learns from a non-baseline feature, the legacy path provably does not, and a frozen model predicts identically after reload. |
+| `samkhya-core/tests/feedback_migration.rs` | A pre-1.2 store upgrades in place, keeps its rows, and the migration is idempotent. |
+| `samkhya-bench/tests/corrector_flow.rs` | `--only` / `--exclude` genuinely partition a suite, and training refuses featureless rows instead of padding them with zeros. |
+| `samkhya-core/tests/v1_compat.rs` | Frozen v1 sketch payloads still decode byte-for-byte. |
+
 ---
 
 <a name="measured-headlines"></a>
-## Measured headlines (WAVE4-F + WAVE5-L2)
+## Measured headlines
 
-samkhya reports the *honest* head-to-head measurement, not a projection. The
-numbers below are from the v1.0 empirical campaign (WAVE-4 / WAVE-5); v1.1 is
-semver-compatible and carries them forward unchanged — a full re-run of the
-JOB-Slow / TPC-H campaign is deferred past v1.1. The end-to-end real-workload
-number leads; the synthetic microbenchmarks are scoped to exactly what they
-measure. Where a pre-registered target was missed,
-the row says so.
+samkhya reports the *honest* head-to-head measurement, not a projection — and
+when a measurement turns out not to support the claim made from it, the row is
+withdrawn rather than defended. A 2026-07-24 audit withdrew two: the JOB-Slow
+end-to-end result and the 40.95× bound-tightness figure. Both retractions are
+reproduced against committed raw data in
+[`bench-results/OPEN_AUDIT_ITEMS.md`](bench-results/OPEN_AUDIT_ITEMS.md) and
+[`bench-results/20_bound_soundness.md`](bench-results/20_bound_soundness.md).
+
+What survives is below. Rows still resting on the v1.0 campaign (WAVE-4 /
+WAVE-5) are marked; the audit register lists which of them have open questions
+against them.
 
 | Headline | Measured | CI / significance | Receipt |
 |---|---|---|---|
@@ -207,7 +292,8 @@ the row says so.
 | **Bound tightness on a foreign-key join** *(10 orders ⋈ 100 line items, 10 distinct keys)* | ceiling **100** — exactly the true output, vs 1,000 for the Cartesian product | derived from a distinct count samkhya already carries in its sidecar | `bench-results/20_bound_soundness.md` |
 | **TabPFN-2.5 inference latency** (RTX 4090 Laptop, B=8 L=128) | P95 **31.15 ms** (H1-A PASS) | BCa 95% CI [29.39, 35.32], strictly below 50 ms bar | `bench-results/14_tabpfn_4090_latency.md` (WAVE5-L2) |
 | **HLL precision** (p=14, n=10⁶) | RSE **0.676%** | BCa 95% CI [0.535%, 0.848%] vs Flajolet 2007 0.8125% envelope | `bench-results/03_hll_precision_sweep.md` |
-| **L4 v3 ablation** (A2→A3) | **−1.7%** median q-error reduction (BH-sig improvement) | BCa 95% CI [−2.8%, −0.7%], Wilcoxon p=0.0209 | WAVE5-E |
+| **L4 v3 ablation** (A2→A3) — *provenance under review, see audit §5* | **−1.7%** median q-error reduction (BH-sig improvement) | BCa 95% CI [−2.8%, −0.7%], Wilcoxon p=0.0209 | WAVE5-E |
+| **Corrector on held-out queries** *(synthetic suite: fit on S1–S5, evaluate on S6–S10)* | q-error geomean **13.46 → 26.41** — the corrector makes it **worse** | fitted on 1 usable row; the same model on its own training queries shows 4.58 → 1.86, which is the train-on-eval artefact | `samkhya-bench/tests/corrector_flow.rs` |
 
 **Honest disclosures.** Pre-registered JOB-Slow upper bounds (≥1.6× join-heavy, ≥1.35× aggregate, ≥1.50× headline) were all **FALSIFIED** by WAVE4-F — and as of 2026-07-24 that campaign is withdrawn outright, not merely falsified: it measured portable sidecar statistics rather than correction, on an OOM-truncated corpus, with per-query statistics that cannot support the claims made from them. See `bench-results/OPEN_AUDIT_ITEMS.md` §2. TabPFN-2.5 q-error reduction over GBT is 7.84% (BCa [2.21, 14.62], p=1.04×10⁻⁵) — effect-direction confirmed, magnitude half the 15% pre-reg target (H1-B FALSIFIED on magnitude).
 

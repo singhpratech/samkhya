@@ -39,6 +39,18 @@ of which fails loudly.
   `ALTER TABLE` migration. Stores written by an older binary upgrade in place
   and remain readable by one.
 
+### Added — a wasm-capable core
+
+- `samkhya-core`'s SQLite feedback store moves behind a default-on `feedback`
+  feature. `rusqlite` was the crate's one non-optional native dependency and the
+  only thing preventing a wasm32 build. With `--no-default-features` the crate
+  now compiles for `wasm32-unknown-unknown`, exposing the sketches, the provable
+  degree ceiling, Puffin I/O, and (with `lp_solver`) the hypergraph LP. Existing
+  consumers are unaffected: the feature is on by default, and `gbt` /
+  `additive_gbt` select it automatically.
+- `getrandom` gains its `js` feature on wasm targets, which is the remaining
+  requirement for that build.
+
 ### Fixed
 
 - The runner's `avg q-error` summed only finite samples but divided by the

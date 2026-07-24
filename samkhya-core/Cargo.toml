@@ -20,7 +20,7 @@ thiserror.workspace = true
 byteorder.workspace = true
 twox-hash.workspace = true
 log.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, optional = true }
 zstd = { version = "0.13", optional = true }
 gbdt = { version = "0.1", optional = true }
 # Pure-Rust LP modelling crate. Disable defaults to drop the Coin-CBC
@@ -34,15 +34,20 @@ good_lp = { version = "1.8", default-features = false, features = ["microlp"], o
 ureq = { version = "2", default-features = false, features = ["json", "tls"], optional = true }
 
 [features]
+default = ["feedback"]
+# SQLite-backed feedback store. Requires libsqlite3, so it is the one part
+# of the crate that cannot target wasm32 — hence the gate. Default-on, so
+# an existing consumer is unaffected.
+feedback = ["dep:rusqlite"]
 zstd = ["dep:zstd"]
 # Gradient-boosted-tree residual corrector backend (see src/residual.rs::gbt).
 # Pulls in the `gbdt` crate; off by default to keep the core build slim.
-gbt = ["dep:gbdt"]
+gbt = ["dep:gbdt", "feedback"]
 # Additive gradient-boosted-tree residual corrector backend
 # (see src/residual.rs::additive). Predicts the absolute row count from
 # plan-shape features instead of a multiplicative log-ratio, which keeps
 # the corrector useful even when the baseline estimate collapses to zero.
-additive_gbt = ["dep:gbdt"]
+additive_gbt = ["dep:gbdt", "feedback"]
 # Real fractional-edge-cover LpBound (see src/lpbound.rs::LpJoinBound).
 # Pulls in `good_lp` with the pure-Rust `microlp` backend. Off by default
 # so the core crate stays slim; turn this on to replace the coarse
@@ -87,3 +92,9 @@ harness = false
 [[bench]]
 name = "stress"
 harness = false
+
+# wasm32 support for the no-default-features surface (sketches, the degree
+# ceiling, Puffin I/O). `getrandom` reaches wasm only with its `js` feature;
+# it is a transitive dependency, so the feature has to be selected here.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

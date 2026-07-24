@@ -5252,6 +5252,7 @@ dependencies = [
  "byteorder",
  "criterion",
  "gbdt",
+ "getrandom 0.2.17",
  "good_lp",
  "log",
  "proptest",

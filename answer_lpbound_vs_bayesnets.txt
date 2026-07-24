@@ -1,0 +1,69 @@
+Reply draft — "LpJoinBound ceiling vs Bayesian nets, and how it handles
+subqueries/CTEs"
+
+For a reader/commenter asking how samkhya's never-regress ceiling compares to
+Bayesian-network / graphical-model cardinality estimators, and how it holds up
+on subqueries and CTEs. Two lengths below — pick whichever fits the venue.
+
+
+================================================================
+SHORT (2 paragraphs — best for an HN / Reddit / blog comment)
+================================================================
+
+Thanks! The thing that clears it up: the ceiling isn't really estimating
+anything — it never guesses the true row count, it just computes a number the
+join provably can't exceed, from plain counting, no model or training. So it
+isn't competing with a Bayesian network; it's more like a seatbelt around one.
+A learned model is built to be accurate and usually is, on the queries it's
+seen — but it can also be confidently wrong and talk the planner into a
+terrible plan. The ceiling is the opposite: never especially accurate, but
+never wrong in the dangerous direction. So the move isn't "pick one" — put your
+smart estimate underneath the dumb-but-safe ceiling and keep both.
+
+On subqueries and CTEs, it mostly depends on whether the planner turns them into
+joins first — a lot of IN / EXISTS / derived-table stuff gets flattened into
+joins anyway, and those are in scope. GROUP BY is a nice case: the result can't
+have more rows than there are distinct groups, which is exactly what the HLL
+sketch already knows, so you get a clean ceiling for free. Recursive CTEs it
+won't touch, and for plain intermediate results the bound gets looser because I
+only keep those stats on base tables. But it's still never below the truth, and
+whenever it can't bound something cleanly it just steps back and lets the
+engine's own estimate stand — so the worst these cases do is give you less help,
+never a worse plan.
+
+
+================================================================
+MEDIUM (4 paragraphs — a touch more room, still plain-spoken)
+================================================================
+
+Thanks — and I think the framing that helps most is: the ceiling isn't really
+trying to estimate anything. It never guesses the true row count. It just
+computes a number the join provably can't exceed, from plain counting — no
+model, no training. So it's not competing with a Bayesian network; it's more
+like a seatbelt you'd put around one.
+
+That's the honest comparison, really. A Bayesian net or graphical model is built
+to be accurate — it learns the correlations in your data and usually predicts
+well on the queries it's seen. The ceiling is the opposite personality: it's
+never especially accurate, but it's never wrong in the dangerous direction
+either. It can be loose, but it can't talk the planner into a catastrophic plan.
+Where a learned model shines on familiar queries, the bound covers the
+unfamiliar ones. So the natural move isn't "pick one" — it's put your smart
+estimate underneath the dumb-but-safe ceiling and keep both.
+
+On subqueries and CTEs: it mostly comes down to whether the planner turns them
+into joins before samkhya looks. Modern optimizers flatten a lot of IN / EXISTS
+/ derived-table stuff into joins already, and those land squarely in scope.
+Anything with a GROUP BY is actually a nice case — the answer can't have more
+rows than there are distinct groups, and that's exactly what the HLL sketch
+already knows, so you get a clean ceiling for free. Recursive CTEs it won't
+touch — the size depends on how the recursion unrolls, which no amount of static
+counting can bound.
+
+And the part I'd want to be upfront about: for a plain (non-recursive) CTE that
+produces some intermediate result, the bound gets looser, because I only keep
+those degree stats on your base tables, not on every intermediate. But it's
+still never below the truth — and whenever it can't bound something cleanly, it
+just backs off and lets the engine's own estimate stand. So the worst these
+tricky cases do is give you less help, never a worse plan. That's really the
+whole promise.

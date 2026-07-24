@@ -327,6 +327,14 @@ impl Runner {
         self
     }
 
+    /// Names of the queries this run will execute, after the filters.
+    /// Exposed so a caller can confirm the split it asked for is the split
+    /// it got, rather than discovering mid-campaign that a typo selected
+    /// the whole suite.
+    pub fn selected_query_names(&self) -> Vec<&'static str> {
+        self.selected_queries().iter().map(|q| q.name).collect()
+    }
+
     /// The queries this run will execute, after `--only` and `--exclude`.
     fn selected_queries(&self) -> Vec<&'static Query> {
         self.suite
