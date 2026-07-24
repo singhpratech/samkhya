@@ -6,6 +6,59 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — the corrector can finally be measured
+
+The 2026-07-24 audit found the flagship JOB-Slow campaign had no corrector in
+its "corrected" arm, and that this was not an oversight in the run script: the
+bench CLI had no option that could attach one. `--corrector` offered `none` and
+`identity`, where `identity` returns the baseline unchanged. Underneath that,
+training was blind and models could not be persisted. Four connected gaps, none
+of which fails loudly.
+
+- `PlanObservation` and `FeedbackStore::record_plan` / `plan_history` record an
+  observation together with the plan features the corrector sees at inference
+  time. `Observation` carried only `est_rows` and `actual_rows`, so
+  `GbtCorrector::train` had to synthesise a vector with six of seven features
+  zeroed — constant across every training row, so no tree ever split on them.
+  The model was one-dimensional while the adapter fed it seven live features.
+  A silent train/serve skew, now covered by `tests/corrector_features.rs`, which
+  asserts the new path learns from `join_depth` and pins the legacy path's
+  blindness so it cannot be mistaken for working.
+- `GbtCorrector::train_on_plans` trains on the real feature vector.
+- `GbtCorrector::save` / `load` persist a fitted model, so training and
+  evaluation can run in separate processes. That separation is what makes a
+  held-out measurement honest: a model frozen before the evaluation queries ran
+  cannot have seen them.
+- `samkhya-bench train --feedback <db> --template <t> --out <model>` replaces a
+  stub that printed "would train a residual corrector" and trained nothing.
+  It refuses to train on featureless rows rather than padding them with zeros.
+- `samkhya-bench run --corrector gbt --model <path>` evaluates with a fitted
+  model, and `--only` / `--exclude` select query subsets so the training and
+  evaluation sets can be kept disjoint.
+- The feedback store gains nullable plan-feature columns via an idempotent
+  `ALTER TABLE` migration. Stores written by an older binary upgrade in place
+  and remain readable by one.
+
+### Fixed
+
+- The runner's `avg q-error` summed only finite samples but divided by the
+  unfiltered count, so every unbounded sample silently pulled the average down
+  — which is how a "q-error" of 0.39 could be printed, when q-error is at least
+  1 by definition. It now reports the geometric mean over finite samples and
+  states how many were unbounded instead of dissolving them into the
+  denominator.
+
+### Note on what this measures
+
+The first honest held-out run on the synthetic suite — fit on S1–S5, evaluate on
+S6–S10 — gives q-error geomean **13.46 without the corrector and 26.41 with it**.
+The corrector roughly doubles the error. It was fitted on one usable row, so
+that is the expected outcome and not a surprise; it is recorded because the same
+setup evaluated on its own training queries shows an apparent improvement
+(4.58 → 1.86), and that gap is exactly the train-on-eval artefact this tooling
+exists to make impossible to publish by accident.
+
+
 ## [1.2.0] — 2026-07-24
 
 **The ceiling is now actually provable.**

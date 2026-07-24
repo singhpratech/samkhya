@@ -104,6 +104,18 @@ enum Command {
         /// in `--baseline` mode (baseline never invokes a corrector).
         #[arg(long, value_enum, default_value_t = CorrectorArg::None)]
         corrector: CorrectorArg,
+        /// Path to a model written by `samkhya-bench train`. Required by
+        /// `--corrector gbt`.
+        #[arg(long)]
+        model: Option<PathBuf>,
+        /// Run only these queries (comma-separated names). Combined with
+        /// `--exclude`, this is how a training set and an evaluation set are
+        /// kept disjoint, which is the whole point of freezing a model.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// Skip these queries (comma-separated names). Applied after `--only`.
+        #[arg(long, value_delimiter = ',')]
+        exclude: Vec<String>,
     },
 
     /// Run a suite twice (baseline + samkhya) and print a side-by-side comparison.
@@ -187,7 +199,12 @@ enum Command {
         feedback: PathBuf,
     },
 
-    /// Train a GBT residual corrector from a feedback store (requires `gbt` feature on samkhya-core).
+    /// Train a GBT residual corrector from a feedback store and write the model.
+    ///
+    /// Trains only on observations that carry plan features. Feed the model
+    /// back with `run --corrector gbt --model <path>`, and keep the training
+    /// and evaluation query sets disjoint (see `--exclude` / `--only`) so the
+    /// measurement is genuinely held out.
     Train {
         /// Path to the feedback store to train from.
         #[arg(long)]
@@ -195,6 +212,21 @@ enum Command {
         /// Template hash to filter observations by (matches the suite name used during run).
         #[arg(long)]
         template: String,
+        /// Where to write the fitted model.
+        #[arg(long)]
+        out: PathBuf,
+        /// Boosting iterations (one tree each).
+        #[arg(long, default_value_t = 50)]
+        num_trees: u32,
+        /// Maximum tree depth; root is depth 0.
+        #[arg(long, default_value_t = 4)]
+        max_depth: u32,
+        /// Shrinkage applied to each tree's contribution.
+        #[arg(long, default_value_t = 0.1)]
+        learning_rate: f64,
+        /// Minimum samples per leaf.
+        #[arg(long, default_value_t = 1)]
+        min_leaf_size: usize,
     },
 }
 
@@ -215,8 +247,14 @@ enum SuiteArg {
 /// CLI-startup time; deferred to a follow-up rc.2 commit.
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum CorrectorArg {
+    /// No corrector. The run measures the engine plus whatever statistics
+    /// samkhya injected, and nothing else.
     None,
+    /// Pass-through. Useful only to prove the corrector path is wired; it
+    /// returns the baseline unchanged, so it cannot move any measurement.
     Identity,
+    /// A trained gradient-boosted-tree corrector, loaded from `--model`.
+    Gbt,
 }
 
 /// WAVE-5F: CLI-facing IMDb source format. Maps 1:1 to
@@ -265,6 +303,9 @@ fn main() -> Result<()> {
             query_timeout_s,
             cold_cache,
             corrector,
+            model,
+            only,
+            exclude,
         } => {
             let mut runner = Runner::new(suite.into(), baseline);
             if let Some(path) = feedback {
@@ -294,6 +335,25 @@ fn main() -> Result<()> {
                         std::sync::Arc::new(samkhya_core::residual::IdentityCorrector);
                     runner = runner.with_corrector(c);
                 }
+                CorrectorArg::Gbt => {
+                    let Some(path) = model.as_ref() else {
+                        eprintln!(
+                            "error: --corrector gbt requires --model <path>; train one with \
+                             `samkhya-bench train --feedback <db> --template <t> --out <path>`"
+                        );
+                        std::process::exit(2);
+                    };
+                    let trained = samkhya_core::residual::gbt::GbtCorrector::load(path, u64::MAX)?;
+                    let c: std::sync::Arc<dyn samkhya_core::residual::Corrector> =
+                        std::sync::Arc::new(trained);
+                    runner = runner.with_corrector(c);
+                }
+            }
+            if !only.is_empty() {
+                runner = runner.with_only(only);
+            }
+            if !exclude.is_empty() {
+                runner = runner.with_exclude(exclude);
             }
             runner.run()
         }
@@ -333,8 +393,23 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Report { feedback } => samkhya_bench::report::summarize(&feedback),
-        Command::Train { feedback, template } => {
-            samkhya_bench::report::train_stub(&feedback, &template)
+        Command::Train {
+            feedback,
+            template,
+            out,
+            num_trees,
+            max_depth,
+            learning_rate,
+            min_leaf_size,
+        } => {
+            let options = samkhya_core::residual::gbt::GbtOptions {
+                learning_rate,
+                max_depth,
+                num_trees,
+                ceiling: u64::MAX,
+                min_leaf_size,
+            };
+            samkhya_bench::report::train(&feedback, &template, &out, options)
         }
         Command::Calibrate {
             suite,

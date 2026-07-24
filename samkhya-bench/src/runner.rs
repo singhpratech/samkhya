@@ -23,7 +23,7 @@ use datafusion::physical_plan::{ExecutionPlanVisitor, accept};
 use datafusion::prelude::SessionContext;
 use samkhya_core::Result;
 use samkhya_core::error::Error;
-use samkhya_core::feedback::{FeedbackStore, Observation};
+use samkhya_core::feedback::{FeedbackStore, Observation, PlanObservation};
 use samkhya_core::residual::{CorrectionFeatures, Corrector};
 use samkhya_core::stats::ColumnStats;
 use samkhya_datafusion::SamkhyaTableProvider;
@@ -41,6 +41,10 @@ pub struct Runner {
     suite: Suite,
     baseline: bool,
     feedback_path: Option<std::path::PathBuf>,
+    /// Query-name allowlist; empty means "every query in the suite".
+    only: std::collections::HashSet<String>,
+    /// Query-name denylist, applied after `only`.
+    exclude: std::collections::HashSet<String>,
     puffin_dir: Option<std::path::PathBuf>,
     imdb_dir: Option<std::path::PathBuf>,
     tpch_dir: Option<std::path::PathBuf>,
@@ -134,6 +138,16 @@ pub struct QueryOutcome {
     /// no join nodes. See [`JoinQError`].
     #[serde(default)]
     pub per_join_q_errors: Vec<JoinQError>,
+    /// Plan-shape features extracted from the physical plan, so a
+    /// feedback store can record what the corrector would actually be
+    /// handed at inference time. `None` for outcomes that never reached a
+    /// physical plan (errors, timeouts).
+    ///
+    /// Without this the recorded observation carries only the baseline
+    /// estimate, and a model trained from it is blind to six of its seven
+    /// features — see `samkhya_core::feedback::PlanObservation`.
+    #[serde(default)]
+    pub features: Option<CorrectionFeatures>,
     /// WAVE-5J: 1-based trial id; 1 in legacy single-trial mode.
     #[serde(default = "default_trial_id")]
     pub trial_id: u32,
@@ -170,6 +184,9 @@ pub struct CorrectedOutcome {
     /// path. See [`JoinQError`] for the formula and source.
     #[serde(default)]
     pub per_join_q_errors: Vec<JoinQError>,
+    /// The feature vector handed to the corrector for this query.
+    #[serde(default)]
+    pub features: CorrectionFeatures,
 }
 
 impl Runner {
@@ -178,6 +195,8 @@ impl Runner {
             suite,
             baseline,
             feedback_path: None,
+            only: std::collections::HashSet::new(),
+            exclude: std::collections::HashSet::new(),
             puffin_dir: None,
             imdb_dir: None,
             tpch_dir: None,
@@ -291,6 +310,33 @@ impl Runner {
         self
     }
 
+    /// Restrict the run to these query names.
+    ///
+    /// Together with [`with_exclude`](Self::with_exclude) this is how a
+    /// training set and an evaluation set are kept disjoint. A corrector
+    /// evaluated on the queries it was fitted on measures memorisation, not
+    /// correction.
+    pub fn with_only(mut self, names: Vec<String>) -> Self {
+        self.only = names.into_iter().collect();
+        self
+    }
+
+    /// Skip these query names. Applied after [`with_only`](Self::with_only).
+    pub fn with_exclude(mut self, names: Vec<String>) -> Self {
+        self.exclude = names.into_iter().collect();
+        self
+    }
+
+    /// The queries this run will execute, after `--only` and `--exclude`.
+    fn selected_queries(&self) -> Vec<&'static Query> {
+        self.suite
+            .queries()
+            .iter()
+            .filter(|q| self.only.is_empty() || self.only.contains(q.name))
+            .filter(|q| !self.exclude.contains(q.name))
+            .collect()
+    }
+
     pub fn suite(&self) -> Suite {
         self.suite
     }
@@ -355,9 +401,18 @@ impl Runner {
             None => FeedbackStore::open_in_memory()?,
         };
 
+        let selected = self.selected_queries();
+        if selected.len() != self.suite.queries().len() {
+            println!(
+                "runner: query filter active — {} of {} {} queries selected",
+                selected.len(),
+                self.suite.queries().len(),
+                self.suite.label(),
+            );
+        }
         println!(
             "runner: executing {} {} queries in {} mode",
-            self.suite.queries().len(),
+            selected.len(),
             self.suite.label(),
             mode,
         );
@@ -382,7 +437,7 @@ impl Runner {
             if self.cold_cache {
                 self.evict_for_cold_cache(trial_idx);
             }
-            for q in self.suite.queries() {
+            for q in selected.iter().copied() {
                 if is_placeholder_query(q) {
                     if trial_idx == 1 {
                         println!("{:<6} (placeholder; SQL not yet imported)", q.name);
@@ -425,6 +480,7 @@ impl Runner {
                                     q_error: f64::INFINITY,
                                     latency_ms: timeout_ms,
                                     per_join_q_errors: Vec::new(),
+                                    features: None,
                                     trial_id: trial_idx as u32,
                                     status: "timeout",
                                 };
@@ -451,14 +507,31 @@ impl Runner {
                             outcome.q_error,
                             outcome.latency_ms,
                         );
-                        let obs = Observation {
-                            template_hash: template_hash.clone(),
-                            plan_fingerprint: q.sql.to_string(),
-                            est_rows: outcome.estimated_rows,
-                            actual_rows: outcome.actual_rows,
-                            latency_ms: Some(outcome.latency_ms),
-                        };
-                        store.record(&obs)?;
+                        // Record the plan features alongside the estimate
+                        // whenever we have them. A model trained from an
+                        // observation without them is blind to six of its
+                        // seven inputs — see
+                        // `samkhya_core::feedback::PlanObservation`.
+                        match outcome.features.clone() {
+                            Some(features) => {
+                                store.record_plan(&PlanObservation {
+                                    template_hash: template_hash.clone(),
+                                    plan_fingerprint: q.sql.to_string(),
+                                    features,
+                                    actual_rows: outcome.actual_rows,
+                                    latency_ms: Some(outcome.latency_ms),
+                                })?;
+                            }
+                            None => {
+                                store.record(&Observation {
+                                    template_hash: template_hash.clone(),
+                                    plan_fingerprint: q.sql.to_string(),
+                                    est_rows: outcome.estimated_rows,
+                                    actual_rows: outcome.actual_rows,
+                                    latency_ms: Some(outcome.latency_ms),
+                                })?;
+                            }
+                        }
                         outcomes.push(outcome);
                     }
                     Err(e) => {
@@ -470,6 +543,7 @@ impl Runner {
                             q_error: f64::INFINITY,
                             latency_ms: 0.0,
                             per_join_q_errors: Vec::new(),
+                            features: None,
                             trial_id: trial_idx as u32,
                             status: "error",
                         });
@@ -486,18 +560,41 @@ impl Runner {
         println!();
         println!("recorded {} observations to feedback store", store.count()?);
         if !outcomes.is_empty() {
-            let avg_q: f64 = outcomes
+            // q-error is >= 1 by definition (Moerkotte VLDB 2009 §3) and is
+            // multiplicative, so the geometric mean over *finite* samples is
+            // the right summary. Through 1.1 this summed only the finite
+            // values but divided by the unfiltered count, so every infinity
+            // silently pulled the average down — which is how a "q-error" of
+            // 0.39 could ever be printed. Non-finite samples are now counted
+            // and reported rather than dissolved into the denominator.
+            let finite: Vec<f64> = outcomes
                 .iter()
                 .map(|o| o.q_error)
                 .filter(|q| q.is_finite())
-                .sum::<f64>()
-                / outcomes.len() as f64;
-            let max_q = outcomes
-                .iter()
-                .map(|o| o.q_error)
-                .filter(|q| q.is_finite())
-                .fold(0f64, f64::max);
-            println!("avg q-error: {avg_q:.2}, max q-error: {max_q:.2}");
+                .collect();
+            let non_finite = outcomes.len() - finite.len();
+            if finite.is_empty() {
+                println!(
+                    "q-error: no finite samples ({} of {} queries had a zero estimate or actual)",
+                    non_finite,
+                    outcomes.len()
+                );
+            } else {
+                let geomean =
+                    (finite.iter().map(|q| q.ln()).sum::<f64>() / finite.len() as f64).exp();
+                let max_q = finite.iter().copied().fold(0f64, f64::max);
+                println!(
+                    "q-error: geomean {geomean:.2}, max {max_q:.2} over {} finite sample(s){}",
+                    finite.len(),
+                    if non_finite > 0 {
+                        format!(
+                            "; {non_finite} sample(s) unbounded (zero estimate or actual) and excluded"
+                        )
+                    } else {
+                        String::new()
+                    }
+                );
+            }
 
             // Aggregate per-join q-error samples across the workload —
             // Moerkotte VLDB 2009 §3 metrics on the meaningful intermediate
@@ -566,7 +663,7 @@ impl Runner {
     ) -> Result<Vec<CorrectedOutcome>> {
         let ctx = self.build_context().await?;
         let mut outcomes = Vec::new();
-        for q in self.suite.queries() {
+        for q in self.selected_queries() {
             if is_placeholder_query(q) {
                 continue;
             }
@@ -889,6 +986,7 @@ async fn execute_query(ctx: &SessionContext, q: &Query) -> Result<QueryOutcome> 
     let q_error = compute_q_error(estimated_rows, actual_rows);
 
     let per_join_q_errors = pair_join_metrics(physical.as_ref(), join_estimates);
+    let features = extract_features(physical.as_ref(), estimated_rows);
 
     Ok(QueryOutcome {
         name: q.name,
@@ -897,6 +995,7 @@ async fn execute_query(ctx: &SessionContext, q: &Query) -> Result<QueryOutcome> 
         q_error,
         latency_ms,
         per_join_q_errors,
+        features: Some(features),
         trial_id: 1,
         status: "ok",
     })
@@ -930,6 +1029,7 @@ async fn execute_query_dispatch(
                 q_error: corrected.q_error_corrected,
                 latency_ms: corrected.latency_ms,
                 per_join_q_errors: corrected.per_join_q_errors,
+                features: Some(corrected.features),
                 trial_id: 1, // overwritten by the trial loop
                 status: "ok",
             })
@@ -985,6 +1085,7 @@ async fn execute_query_with_corrector<C: Corrector + ?Sized>(
         q_error_corrected,
         latency_ms,
         per_join_q_errors,
+        features,
     })
 }
 
