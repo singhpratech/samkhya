@@ -4,712 +4,671 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="samkhya — engine-agnostic, feedback-driven cardinality correction for DataFusion, DuckDB, Polars and Iceberg. Every corrected estimate is clamped under a provable never-regress ceiling. Rust SDK, Apache-2.0.">
+<title>samkhya — a join-cardinality ceiling you can prove</title>
+<meta name="description" content="A Rust SDK for portable cardinality correction. The ceiling is provable, the sketches travel between engines, and the numbers that did not survive audit are struck out on this page.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>&#8872;</text></svg>">
 <meta property="og:type" content="website">
-<meta property="og:title" content="samkhya — never-regress cardinality correction">
-<meta property="og:description" content="Put a model in your query optimizer without letting it wreck the plan. Every corrected estimate clamped under a provable ceiling.">
+<meta property="og:title" content="samkhya — a join-cardinality ceiling you can prove">
+<meta property="og:description" content="2,179 soundness violations before. 0 after. Every number on this page names the receipt that produced it — including the two we withdrew.">
 <meta property="og:url" content="https://singhpratech.github.io/samkhya/">
 <meta name="twitter:card" content="summary">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128737;</text></svg>">
-<title>samkhya — never-regress cardinality correction</title>
 <style>
-  :root {
-    /* cool slate ground, single brass accent = the provable ceiling */
-    --paper:   #eef1f6;
-    --paper-2: #e4e9f0;
-    --band:    #e8ecf2;
-    --ink:     #12171f;
-    --ink-2:   #3a4350;
-    --muted:   #5b6675;
-    --line:    #cdd5df;
-    --line-2:  #d8dee7;
-    --brass:   #a86a12;
-    --brass-2: #c98a2a;
-    --brass-wash: rgba(168,106,18,.10);
-    --pass:    #2f7d55;
-    --fail:    #a9482f;
-    --card:    #f7f9fc;
-    --code-bg: #eceff4;
-
-    --serif: ui-serif, "Charter", "Iowan Old Style", Georgia, "Times New Roman", serif;
-    --sans:  system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --mono:  ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-
-    --measure: 66ch;
-    --pad: clamp(1.25rem, 5vw, 2.75rem);
-    --maxw: 1120px;
-    --r: 14px;
+:root{
+  --paper:#FBFBF9;
+  --paper-sunk:#F1F1ED;
+  --ink:#1A1D23;
+  --ink-soft:#4A4F5A;
+  --ink-faint:#787E8A;
+  --rule:#D6D4CB;
+  --proved:#2F3B8C;
+  --withdrawn:#9B3B2E;
+  --measured-text:#356443;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif;
+  --mono:'SF Mono','JetBrains Mono','IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --wrap:min(1140px,100% - 3rem);
+  --cols:1fr;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#12161C;
+    --paper-sunk:#191E26;
+    --ink:#E9E7E0;
+    --ink-soft:#A8ADB8;
+    --ink-faint:#767D8B;
+    --rule:#2C333E;
+    --proved:#93A0EC;
+    --withdrawn:#DC7361;
+    --measured-text:#74B489;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper:   #0a0e15;
-      --paper-2: #0e131c;
-      --band:    #0d121b;
-      --ink:     #eef2f8;
-      --ink-2:   #b7c0cd;
-      --muted:   #8a96a6;
-      --line:    #232c39;
-      --line-2:  #1c2431;
-      --brass:   #e2a94b;
-      --brass-2: #f0bd66;
-      --brass-wash: rgba(226,169,75,.12);
-      --pass:    #5cc08a;
-      --fail:    #dc8a72;
-      --card:    #10151f;
-      --code-bg: #10151f;
-    }
-  }
-  /* explicit toggle wins in both directions */
-  :root[data-theme="light"] {
-    --paper:#eef1f6; --paper-2:#e4e9f0; --band:#e8ecf2; --ink:#12171f; --ink-2:#3a4350;
-    --muted:#5b6675; --line:#cdd5df; --line-2:#d8dee7; --brass:#a86a12; --brass-2:#c98a2a;
-    --brass-wash:rgba(168,106,18,.10); --pass:#2f7d55; --fail:#a9482f; --card:#f7f9fc; --code-bg:#eceff4;
-  }
-  :root[data-theme="dark"] {
-    --paper:#0a0e15; --paper-2:#0e131c; --band:#0d121b; --ink:#eef2f8; --ink-2:#b7c0cd;
-    --muted:#8a96a6; --line:#232c39; --line-2:#1c2431; --brass:#e2a94b; --brass-2:#f0bd66;
-    --brass-wash:rgba(226,169,75,.12); --pass:#5cc08a; --fail:#dc8a72; --card:#10151f; --code-bg:#10151f;
-  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--serif);font-size:19px;line-height:1.62;
+  font-kerning:normal;text-rendering:optimizeLegibility;
+}
+a{color:inherit;text-decoration-color:var(--rule);text-underline-offset:3px}
+a:hover{text-decoration-color:currentColor}
+:focus-visible{outline:2px solid var(--proved);outline-offset:3px;border-radius:2px}
+code,kbd{font-family:var(--mono);font-size:.82em}
+sub{font-size:.7em}
 
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--sans); line-height: 1.62;
-    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-  }
-  .wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--pad); }
-  .prose { max-width: var(--measure); }
+.wrap{width:var(--wrap);margin-inline:auto}
+.sheet{display:grid;grid-template-columns:var(--cols);gap:.6rem 2.5rem;align-items:start}
+@media (min-width:1000px){.sheet{--cols:12.5rem 1fr}}
+.mark{
+  font-family:var(--mono);font-size:.66rem;line-height:1.6;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);
+  padding-top:.6rem;
+}
+@media (min-width:1000px){.mark{text-align:right;position:sticky;top:4.2rem}}
+.mark b{display:block;font-weight:600;color:var(--ink-soft);letter-spacing:.08em;margin-bottom:.2rem}
+.mark s{color:var(--withdrawn);text-decoration-thickness:1px}
+.body-col{min-width:0}
 
-  h1, h2, h3 { font-family: var(--serif); font-weight: 600; text-wrap: balance; letter-spacing: -0.012em; margin: 0; }
-  h2 { font-size: clamp(1.6rem, 3.4vw, 2.35rem); line-height: 1.12; }
-  h3 { font-size: 1.2rem; line-height: 1.25; letter-spacing: -0.006em; }
-  p { margin: 0 0 1rem; color: var(--ink-2); }
-  a { color: var(--brass); text-underline-offset: 3px; text-decoration-thickness: 1px; }
-  a:hover { color: var(--brass-2); }
-  :focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; border-radius: 4px; }
+header.masthead{border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:20;background:var(--paper)}
+.masthead .wrap{display:flex;align-items:baseline;gap:1.4rem;padding:.8rem 0;flex-wrap:wrap}
+.wordmark{font-size:1.05rem;font-weight:600;letter-spacing:.01em;text-decoration:none;white-space:nowrap}
+.wordmark span{color:var(--ink-faint);font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;margin-left:.55rem}
+nav.top{margin-left:auto;display:flex;gap:1.1rem;flex-wrap:wrap}
+nav.top a{font-family:var(--mono);font-size:.71rem;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--ink-soft);text-decoration:none}
+nav.top a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:4px}
 
-  .eyebrow {
-    font-family: var(--mono); font-size: .72rem; letter-spacing: .18em; text-transform: uppercase;
-    color: var(--brass); margin: 0 0 .9rem; display: inline-flex; align-items: center; gap: .55rem;
-  }
-  .eyebrow::before { content:""; width: 1.6rem; height: 1px; background: var(--brass); opacity:.6; }
-  .mono { font-family: var(--mono); }
-  .kicker { color: var(--muted); font-size: .95rem; }
+.hero{padding:5rem 0 3.6rem;border-bottom:1px solid var(--rule)}
+.eyebrow{font-family:var(--mono);font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--withdrawn);margin:0 0 1.4rem}
+h1{font-size:clamp(2.05rem,5.2vw,3.45rem);line-height:1.1;font-weight:600;margin:0 0 1.5rem;
+  letter-spacing:-.015em;max-width:20ch}
+.standfirst{font-size:clamp(1.04rem,2.1vw,1.22rem);color:var(--ink-soft);max-width:57ch;margin:0 0 2.4rem}
+.standfirst strong{color:var(--ink);font-weight:600}
 
-  /* ---- sections & bands ---- */
-  section { padding-block: clamp(3.2rem, 8vw, 5.4rem); border-top: 1px solid var(--line-2); }
-  .band { background: var(--band); }
+.correction{display:grid;gap:1rem 2rem;padding:1.5rem 0;border-block:1px solid var(--rule);max-width:62ch}
+@media (min-width:640px){.correction{grid-template-columns:auto 1fr;align-items:center}}
+.struck{position:relative;display:inline-block;font-size:clamp(2.3rem,7vw,3.5rem);
+  font-weight:600;color:var(--ink-faint);letter-spacing:-.02em;line-height:1;white-space:nowrap}
+/* The strike is the base state, not the end state of an animation. If the
+   animation never runs — reduced motion, a screenshot tool, an older engine —
+   the number must still read as withdrawn, which is the whole point. */
+.struck::after{
+  content:"";position:absolute;left:-.07em;right:-.07em;top:52%;height:3px;
+  background:var(--withdrawn);transform:scaleX(1);transform-origin:left center;
+  animation:strike .55s cubic-bezier(.62,0,.2,1) .18s backwards;
+}
+@keyframes strike{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@media (prefers-reduced-motion:reduce){.struck::after{animation:none}}
+.correction-note{font-size:.94rem;color:var(--ink-soft)}
+.correction-note b{color:var(--withdrawn);font-weight:600}
 
-  /* ---- top bar ---- */
-  header.bar {
-    position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px);
-    background: color-mix(in srgb, var(--paper) 86%, transparent);
-    border-bottom: 1px solid var(--line-2);
-  }
-  .bar-in { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding-block: .75rem; }
-  .brandmark { display:flex; align-items:baseline; gap:.6rem; }
-  .brandmark .dev { font-family: var(--serif); font-size: 1.3rem; color: var(--ink); }
-  .brandmark .rom { font-family: var(--mono); font-size: .82rem; letter-spacing:.06em; color: var(--muted); }
-  .bar nav { display:flex; gap:1.4rem; font-family: var(--mono); font-size:.76rem; letter-spacing:.04em; text-transform:uppercase; }
-  .bar nav a { color: var(--muted); text-decoration: none; }
-  .bar nav a:hover { color: var(--ink); }
-  @media (max-width: 720px){ .bar nav { display:none; } }
+section{padding:4.2rem 0;border-bottom:1px solid var(--rule)}
+h2{font-size:clamp(1.48rem,3.2vw,2rem);line-height:1.18;font-weight:600;margin:0 0 1rem;
+  letter-spacing:-.01em;max-width:26ch}
+h3{font-size:1.1rem;font-weight:600;margin:2.3rem 0 .65rem;max-width:44ch}
+p{margin:0 0 1.1rem;max-width:64ch}
+.lede{font-size:1.07rem;color:var(--ink-soft);max-width:60ch}
+ul{max-width:63ch;padding-left:1.1rem;margin:0 0 1.1rem}
+li{margin-bottom:.55rem}
+.muted{color:var(--ink-soft)}
+.small{font-size:.88rem}
 
-  /* ---- hero ---- */
-  .hero { padding-top: clamp(2.6rem, 6vw, 4rem); border-top: none; }
-  .hero h1 { font-size: clamp(2.2rem, 5.6vw, 3.7rem); line-height: 1.04; margin-bottom: 1.1rem; }
-  .hero h1 .cap { color: var(--brass); font-style: italic; }
-  .lead { font-size: clamp(1.06rem, 2vw, 1.24rem); color: var(--ink-2); max-width: 60ch; }
-  .lead strong { color: var(--ink); font-weight: 600; }
+.theorem{background:var(--paper-sunk);border-left:3px solid var(--proved);
+  padding:1.4rem 1.5rem;margin:0 0 1.3rem;border-radius:0 4px 4px 0}
+.theorem .label{font-family:var(--mono);font-size:.67rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--proved);display:block;margin-bottom:.75rem}
+.theorem p{max-width:58ch}
+.formula{font-family:var(--mono);font-size:clamp(.8rem,1.9vw,.98rem);line-height:1.9;
+  overflow-x:auto;margin:0;padding:.4rem 0 .5rem;color:var(--ink)}
+.qed{float:right;color:var(--proved);font-family:var(--mono)}
 
-  .figure {
-    margin-top: 2.2rem; border: 1px solid var(--line); border-radius: var(--r);
-    background: var(--card); overflow: hidden;
-  }
-  .figure figcaption {
-    display:flex; flex-wrap:wrap; gap:.5rem 1.2rem; align-items:center;
-    padding: .7rem 1rem; border-top: 1px solid var(--line-2);
-    font-family: var(--mono); font-size: .74rem; color: var(--muted);
-  }
-  .legend { display:inline-flex; align-items:center; gap:.4rem; }
-  .swatch { width:1.4rem; height:0; border-top-width:2px; border-top-style:solid; display:inline-block; }
-  #clampCanvas { display:block; width:100%; height: clamp(240px, 40vw, 360px); }
+pre{background:var(--paper-sunk);border:1px solid var(--rule);border-radius:5px;
+  padding:1rem 1.15rem;overflow-x:auto;margin:0 0 1.2rem;font-size:.83rem;line-height:1.7}
+.c-com{color:var(--ink-faint);font-style:italic}
+.c-key{color:var(--proved)}
+.c-num{color:var(--measured-text)}
 
-  /* fact strip */
-  .facts { display:grid; grid-template-columns: repeat(4, 1fr); gap:1px; background: var(--line-2);
-           border:1px solid var(--line-2); border-radius: var(--r); overflow:hidden; margin-top: 2.2rem; }
-  .facts div { background: var(--paper); padding: 1rem 1.1rem; }
-  .facts .n { font-family: var(--mono); font-size: 1.5rem; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing:-.01em; }
-  .facts .n .u { font-size: .82rem; color: var(--brass); }
-  .facts .l { font-size: .78rem; color: var(--muted); margin-top: .25rem; line-height:1.4; }
-  @media (max-width: 680px){ .facts { grid-template-columns: repeat(2,1fr); } }
+.tbl-scroll{overflow-x:auto;margin:0 0 1.2rem}
+table{border-collapse:collapse;width:100%;font-size:.85rem;min-width:34rem}
+th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.65rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-faint);font-weight:600;border-bottom-width:1.5px}
+td.num{font-family:var(--mono);font-size:.95em}
+.tag{font-family:var(--mono);font-size:.61rem;letter-spacing:.07em;text-transform:uppercase;
+  padding:.13rem .45rem;border-radius:3px;white-space:nowrap;border:1px solid currentColor}
+.tag.ok{color:var(--measured-text)}
+.tag.no{color:var(--withdrawn)}
+.tag.open{color:var(--ink-faint)}
 
-  /* generic grid of cards */
-  .grid { display:grid; gap: 1.1rem; }
-  .cols-2 { grid-template-columns: repeat(2, 1fr); }
-  .cols-3 { grid-template-columns: repeat(3, 1fr); }
-  @media (max-width: 860px){ .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+.grid{display:grid;gap:1.5rem 2.2rem;grid-template-columns:repeat(auto-fit,minmax(14.5rem,1fr));margin:2rem 0 0}
+.cell h4{margin:0 0 .3rem;font-size:1rem;font-weight:600}
+.cell p{font-size:.89rem;color:var(--ink-soft);margin:0;max-width:40ch}
+.cell .k,.installs .k{font-family:var(--mono);font-size:.63rem;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-faint);display:block;margin-bottom:.45rem}
 
-  .card { background: var(--card); border:1px solid var(--line); border-radius: var(--r); padding: 1.4rem 1.4rem 1.5rem; }
-  .card .tag { font-family:var(--mono); font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--brass); }
-  .card h3 { margin:.55rem 0 .5rem; }
-  .card p { margin:0; font-size:.95rem; color: var(--ink-2); }
-  .card p + p { margin-top:.7rem; }
+.diagram{font-family:var(--mono);font-size:.75rem;line-height:1.95;background:var(--paper-sunk);
+  border:1px solid var(--rule);border-radius:5px;padding:1.25rem;overflow-x:auto;
+  margin:1.4rem 0 0;color:var(--ink-soft);white-space:pre}
+.diagram b{color:var(--ink);font-weight:600}
 
-  .lede-block { margin-bottom: 2.4rem; }
-  .section-head { margin-bottom: 2rem; }
+.installs{display:grid;gap:1.1rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));margin:1.5rem 0 0}
+.installs pre{margin:0}
 
-  /* mechanism split rows */
-  .mech { display:grid; grid-template-columns: 1.1fr 1fr; gap: clamp(1.4rem,4vw,3rem); align-items:center; }
-  .mech + .mech { margin-top: clamp(2.4rem, 5vw, 3.6rem); padding-top: clamp(2.4rem,5vw,3.6rem); border-top:1px dashed var(--line); }
-  .mech.flip .mech-art { order: -1; }
-  @media (max-width: 820px){ .mech { grid-template-columns: 1fr; } .mech.flip .mech-art{ order:0; } }
-  .mech h3 { font-size: 1.45rem; margin-bottom: .7rem; }
-  .mech .num { font-family:var(--mono); color: var(--brass); font-size:.8rem; letter-spacing:.14em; }
-
-  .mech-art { border:1px solid var(--line); border-radius: var(--r); background: var(--card); padding: 1.25rem; min-height: 220px; }
-
-  /* clamp mini diagram */
-  .clampbox { position:relative; height: 190px; border-radius: 8px;
-              background:
-                repeating-linear-gradient(0deg, transparent, transparent 26px, var(--line-2) 26px, var(--line-2) 27px);
-              overflow:hidden; }
-  .ceiling { position:absolute; left:0; right:0; top:38px; border-top:2px solid var(--brass); }
-  .ceiling span { position:absolute; right:6px; top:-1.35rem; font-family:var(--mono); font-size:.68rem; color:var(--brass); }
-  .spike { position:absolute; bottom:0; width:2px; background: var(--ink-2); opacity:.55; }
-  .capdot { position:absolute; width:8px; height:8px; border-radius:50%; background:var(--brass); transform:translate(-3px,-4px); }
-
-  /* portability diagram */
-  .puffin { display:flex; flex-direction:column; align-items:center; gap:.7rem; font-family:var(--mono); font-size:.76rem; }
-  .puffin .sidecar { border:1.5px solid var(--brass); color:var(--ink); background: var(--brass-wash);
-                     padding:.55rem .9rem; border-radius:8px; text-align:center; }
-  .puffin .engines { display:flex; gap:.5rem; flex-wrap:wrap; justify-content:center; }
-  .puffin .engines span { border:1px solid var(--line); background:var(--paper); padding:.4rem .7rem; border-radius:7px; color:var(--ink-2); }
-  .puffin .rail { width:1px; height:18px; background: var(--line); position:relative; }
-  .fan { display:flex; gap:2.2rem; }
-  .fan .rail { transform: rotate(0deg); }
-
-  /* corrector list */
-  .backends { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.6rem; font-size:.9rem; }
-  .backends li { display:flex; gap:.7rem; align-items:flex-start; }
-  .backends .dot { flex:none; margin-top:.45rem; width:8px; height:8px; border-radius:2px; background:var(--brass); }
-  .backends b { color:var(--ink); font-family:var(--mono); font-size:.82rem; }
-
-  /* results table */
-  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius: var(--r); background: var(--card); }
-  table { border-collapse: collapse; width:100%; min-width: 640px; font-size:.9rem; }
-  th, td { text-align:left; padding:.85rem 1rem; border-bottom:1px solid var(--line-2); vertical-align:top; }
-  thead th { font-family:var(--mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); background: var(--paper-2); }
-  tbody tr:last-child td { border-bottom:none; }
-  td .metric { font-family:var(--mono); color:var(--ink); font-variant-numeric: tabular-nums; }
-  td .ci { font-family:var(--mono); font-size:.78rem; color:var(--muted); }
-  .badge { font-family:var(--mono); font-size:.66rem; letter-spacing:.06em; text-transform:uppercase; padding:.15rem .45rem; border-radius:5px; white-space:nowrap; }
-  .badge.pass { color:var(--pass); border:1px solid color-mix(in srgb, var(--pass) 45%, transparent); }
-  .badge.fail { color:var(--fail); border:1px solid color-mix(in srgb, var(--fail) 45%, transparent); }
-  .badge.neutral { color:var(--muted); border:1px solid var(--line); }
-
-  /* architecture stack */
-  .stack { display:flex; flex-direction:column; gap:.55rem; }
-  .layer { display:grid; grid-template-columns: auto 1fr; gap:1rem; align-items:center;
-           border:1px solid var(--line); border-radius:10px; background:var(--card); padding:.9rem 1.1rem; }
-  .layer .ln { font-family:var(--mono); font-size:.72rem; color:var(--muted); }
-  .layer .lt b { font-family: var(--serif); font-weight:600; font-size:1.02rem; color:var(--ink); }
-  .layer .lt span { display:block; font-size:.84rem; color:var(--muted); margin-top:.15rem; }
-  .layer.keystone { border-color: var(--brass); background: var(--brass-wash); }
-  .layer.keystone .lt b { color: var(--brass); }
-
-  /* engine matrix */
-  .status { font-family:var(--mono); font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; padding:.14rem .5rem; border-radius:5px; border:1px solid var(--line); color:var(--ink-2); }
-  .status.prod { color:var(--pass); border-color: color-mix(in srgb, var(--pass) 45%, transparent); }
-
-  /* code */
-  code { font-family: var(--mono); font-size:.85em; background: var(--code-bg); padding:.12em .4em; border-radius:5px; }
-  pre { margin:0; background: var(--code-bg); border:1px solid var(--line); border-radius: 10px; padding: 1rem 1.15rem; overflow-x:auto; }
-  pre code { background:none; padding:0; font-size:.84rem; line-height:1.65; color: var(--ink); }
-  .tok-c { color: var(--muted); }
-  .tok-k { color: var(--brass); }
-
-  /* callout */
-  .callout { border-left:3px solid var(--brass); background: var(--brass-wash); padding: 1.1rem 1.3rem; border-radius: 0 10px 10px 0; }
-  .callout p { margin:0; color:var(--ink-2); }
-  .callout strong { color: var(--ink); }
-
-  /* footer */
-  footer { border-top:1px solid var(--line-2); padding-block: 3rem 3.5rem; }
-  .foot-grid { display:flex; flex-wrap:wrap; gap: 1.5rem 3rem; align-items:flex-start; justify-content:space-between; }
-  .foot-links { display:flex; flex-wrap:wrap; gap:.6rem 1.4rem; font-family:var(--mono); font-size:.82rem; }
-  .install pre { margin-top:.8rem; }
-  .fineprint { font-family:var(--mono); font-size:.72rem; color:var(--muted); margin-top:1.6rem; line-height:1.7; }
-
-  @media (prefers-reduced-motion: reduce){ * { animation: none !important; transition: none !important; } }
+footer{padding:3rem 0 4rem;font-size:.85rem;color:var(--ink-soft)}
+footer .links{display:flex;gap:1.3rem;flex-wrap:wrap;margin-bottom:1.3rem;
+  font-family:var(--mono);font-size:.71rem;letter-spacing:.05em;text-transform:uppercase}
 </style>
-
 </head>
 <body>
-<header class="bar">
-  <div class="wrap bar-in">
-    <div class="brandmark">
-      <span class="dev">सांख्य</span>
-      <span class="rom">samkhya · v1.1.0</span>
-    </div>
-    <nav>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="wordmark" href="#top">samkhya <span>v1.2 &middot; apache&#8209;2.0</span></a>
+    <nav class="top">
       <a href="#problem">Problem</a>
-      <a href="#how">How</a>
-      <a href="#where">Where</a>
-      <a href="#numbers">Numbers</a>
-      <a href="#arch">Architecture</a>
+      <a href="#theorem">Theorem</a>
+      <a href="#audit">Audit</a>
+      <a href="#evidence">Evidence</a>
+      <a href="demo.html">Live demo</a>
+      <a href="#use">Use</a>
+      <a href="#open">Open</a>
+      <a href="https://github.com/singhpratech/samkhya">GitHub</a>
     </nav>
   </div>
 </header>
 
-<main>
-  <!-- HERO -->
-  <section class="hero">
-    <div class="wrap">
-      <p class="eyebrow">Portable cardinality correction · Rust SDK</p>
-      <h1>Put a model in your query optimizer &mdash;<br><span class="cap">without letting it wreck the plan.</span></h1>
-      <p class="lead">samkhya lets any engine correct its own row-count estimates with feedback &mdash; a gradient-boosted tree, TabPFN, even an LLM. Its load-bearing guarantee is <strong>never-regress at the bound level</strong>: every corrected estimate is clamped under a <strong>provable ceiling</strong>. A miscalibrated model or a hallucinating LLM can never push the optimizer past a bound it can prove.</p>
+<main id="top">
 
-      <figure class="figure">
-        <canvas id="clampCanvas" aria-label="A wild model-estimate signal repeatedly clamped flat under a provable ceiling line."></canvas>
-        <figcaption>
-          <span class="legend"><span class="swatch" style="border-top-color:var(--brass)"></span> LpJoinBound ceiling (provable)</span>
-          <span class="legend"><span class="swatch" style="border-top-color:var(--ink-2); border-top-style:dashed"></span> uncapped model estimate</span>
-          <span class="legend"><span class="swatch" style="border-top-color:var(--ink)"></span> what samkhya applies</span>
-          <span style="margin-left:auto">correction ∈ [ native estimate, provable ceiling ]</span>
-        </figcaption>
-      </figure>
-
-      <div class="facts">
-        <div><div class="n">0<span class="u"> losses</span></div><div class="l">17 wins / 38 ties / 0 losses on JOB-Slow vs DataFusion 46</div></div>
-        <div><div class="n">1<span class="u"> sidecar</span></div><div class="l">written once, read unchanged by Iceberg, DataFusion &amp; DuckDB</div></div>
-        <div><div class="n">3<span class="u"> backends</span></div><div class="l">GBT · TabPFN-2.5 · LLM — one <span class="mono">Corrector</span> trait</div></div>
-        <div><div class="n">337<span class="u"> tests</span></div><div class="l">0 failures on Rust 1.94; property + fuzz + sanitizer receipts</div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- PROBLEM -->
-  <section id="problem" class="band">
-    <div class="wrap">
-      <div class="section-head prose">
-        <p class="eyebrow">Why this is hard</p>
-        <h2>Optimizers live or die on the row counts they guess.</h2>
-      </div>
-      <div class="grid cols-3">
-        <div class="card">
-          <span class="tag">The lever</span>
-          <h3>A wrong estimate picks a wrong plan</h3>
-          <p>Every join order, build side, and hash-vs-merge choice rides on <em>cardinality</em> — how many rows a subquery will emit. Guess a join is small when it's huge and the planner picks a strategy that falls over at runtime.</p>
-        </div>
-        <div class="card">
-          <span class="tag">The temptation</span>
-          <h3>Models estimate better — sometimes</h3>
-          <p>Learned and feedback-driven estimators beat textbook formulas on the queries they've seen. The literature is a decade deep. But their failure mode is the problem.</p>
-        </div>
-        <div class="card">
-          <span class="tag">The catch</span>
-          <h3>A confident wrong model is worse than none</h3>
-          <p>An estimator that hallucinates a huge cardinality can talk the optimizer into a catastrophic plan. That single-tail risk is why production optimizers keep models at arm's length.</p>
+<div class="hero">
+  <div class="wrap sheet">
+    <div class="mark"><b>Correction notice</b>2026-07-24<br><s>40.95&#215;</s></div>
+    <div class="body-col">
+      <p class="eyebrow">Correction &middot; samkhya 1.2.0</p>
+      <h1>A join ceiling you can actually prove.</h1>
+      <p class="standfirst">
+        samkhya clamps a corrected cardinality estimate under a bound the join
+        provably cannot exceed. <strong>Until July 2026 that bound was not
+        provable</strong> — it fell below the truth in 58.8% of measured trials,
+        and the harness measuring it could not report the fact. Both are fixed.
+        This page leads with the retraction because that is the honest place to
+        start.
+      </p>
+      <div class="correction">
+        <div class="struck">40.95&#215;</div>
+        <div class="correction-note">
+          The bound-tightness figure this project led with for two releases. It
+          was computed from instances where the bound had fallen <em>below</em>
+          the true cardinality, so it grew in proportion to how wrong its
+          denominator was. <b>Withdrawn.</b> On the repaired bounds the same
+          measurement is 1.070&#215;.
         </div>
       </div>
-      <div class="callout prose" style="margin-top:2rem; max-width:none">
-        <p><strong>samkhya's answer isn't a better model — it's a floor under the worst case.</strong> Bolt any estimator on, and cap its output with a ceiling you can <em>prove</em> from the data's own degree sequences. The model can help; it cannot hurt past the bound.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- HOW -->
-  <section id="how">
-    <div class="wrap">
-      <div class="section-head prose">
-        <p class="eyebrow">How it works</p>
-        <h2>Three mechanisms, each failing safe toward the engine's native plan.</h2>
-      </div>
-
-      <!-- mech 1 -->
-      <div class="mech">
-        <div>
-          <p class="num">01 — THE GUARANTEE</p>
-          <h3>Never-regress, at the bound level</h3>
-          <p>Before a corrected estimate reaches the planner, samkhya clamps it under <code>LpJoinBound</code> — a provable pessimistic ceiling, an LP relaxation over ℓp-norms of degree sequences (the <em>idea</em> from Zhang et al., LpBound, SIGMOD 2025 Best Paper — not a reimplementation). No machine learning in the bound itself.</p>
-          <p>The ceiling is the minimum of a family of provable bounds: <code>ProductBound ≥ {ChainBound, AgmBound} ≥ LpJoinBound</code>. With no feedback yet, cold start falls back to the engine's own estimate. A correction can only ever move the estimate <em>within</em> a range the math already trusts.</p>
-        </div>
-        <div class="mech-art">
-          <div class="clampbox" id="miniClamp">
-            <div class="ceiling"><span>ceiling</span></div>
-          </div>
-          <p class="kicker" style="font-size:.8rem; margin:.8rem 0 0; font-family:var(--mono)">corrector proposes 1,000,000 → clamped to 6</p>
-        </div>
-      </div>
-
-      <!-- mech 2 -->
-      <div class="mech flip">
-        <div>
-          <p class="num">02 — PORTABILITY</p>
-          <h3>One stats sidecar, every engine</h3>
-          <p>Classical sketches — HLL, Bloom, Count-Min, equi-depth and 2-D correlated histograms — are serialized into versioned, <code>KIND</code>-tagged blobs inside an <a href="https://iceberg.apache.org/puffin-spec/" target="_blank" rel="noopener">Iceberg Puffin</a> sidecar. The same file an ELT job writes at midnight is loaded — unchanged — through Iceberg and handed to DataFusion at noon and DuckDB at three.</p>
-          <p>No engine owns the statistics; the sidecar does. Strict validation rejects corrupt, duplicate, stale, or schema-mismatched payloads before they reach a planner.</p>
-        </div>
-        <div class="mech-art">
-          <div class="puffin">
-            <div class="sidecar">orders.puffin<br><span style="color:var(--muted)">HLL · histogram · CMS</span></div>
-            <div class="rail"></div>
-            <div class="engines">
-              <span>Iceberg</span><span>DataFusion</span><span>DuckDB</span>
-            </div>
-            <p class="kicker" style="font-size:.75rem;margin:.4rem 0 0;text-align:center">written once · read unchanged</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- mech 3 -->
-      <div class="mech">
-        <div>
-          <p class="num">03 — THE CONTRIBUTION</p>
-          <h3>One <span class="mono" style="font-size:.9em">Corrector</span> trait, swappable backends</h3>
-          <p>The estimator is a plug. <code>fn correct(&amp;features) -&gt; Option&lt;u64&gt;</code> — return a corrected row count, or abstain. Every backend is gated behind a Cargo feature flag and capped from above by the same safety envelope, so swapping the model never changes the guarantee.</p>
-          <ul class="backends">
-            <li><span class="dot"></span><span><b>GBT</b> — sub-megabyte gradient-boosted tree (gbdt-rs). The production default; ships on by default.</span></li>
-            <li><span class="dot"></span><span><b>TabPFN-2.5</b> — opt-in transformer evaluator behind <code>tabpfn_http</code>; P95 31 ms on an RTX 4090 Laptop.</span></li>
-            <li><span class="dot"></span><span><b>LLM-pluggable</b> — HTTP corrector, Python (FastAPI) and Node (TypeScript) transports, same wire contract. Anthropic / OpenAI / Ollama / dummy references.</span></li>
-          </ul>
-        </div>
-        <div class="mech-art">
-          <div class="fan puffin" style="align-items:center">
-            <div style="display:flex;flex-direction:column;gap:.5rem;width:100%">
-              <div class="sidecar" style="border-color:var(--line);background:var(--paper);color:var(--ink-2)">GBT (default)</div>
-              <div class="sidecar" style="border-color:var(--line);background:var(--paper);color:var(--ink-2)">TabPFN-2.5</div>
-              <div class="sidecar" style="border-color:var(--line);background:var(--paper);color:var(--ink-2)">LLM · HTTP</div>
-              <div class="rail" style="align-self:center;height:14px"></div>
-              <div class="sidecar">LpBound clamp — one envelope</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- WHERE -->
-  <section id="where" class="band">
-    <div class="wrap">
-      <div class="section-head prose">
-        <p class="eyebrow">Where it makes a difference</p>
-        <h2>The value isn't a speedup number. It's what the guarantee unlocks.</h2>
-        <p>samkhya's honest end-to-end speedup on real join workloads is modest (see the numbers below). The difference it makes is <em>structural</em> — four places where a provable floor and a portable stat layer change what's possible.</p>
-      </div>
-      <div class="grid cols-2">
-        <div class="card">
-          <span class="tag">Multi-engine lakehouses</span>
-          <h3>Stop recomputing stats per engine</h3>
-          <p>A Parquet/Iceberg lake queried by DataFusion, DuckDB, and batch jobs normally rebuilds statistics in each engine's private format. samkhya makes one Puffin sidecar the shared source of truth — compute the sketch once, consume it everywhere, with identical validation.</p>
-        </div>
-        <div class="card">
-          <span class="tag">Embedded engines you can't fork</span>
-          <h3>Correct estimates without patching the optimizer</h3>
-          <p>You rarely get to rewrite DataFusion's or DuckDB's planner. samkhya integrates at the table-provider and pre-join-rule boundary: corrected, clamped statistics reach the physical plan through public extension points — no fork, no vendored optimizer.</p>
-        </div>
-        <div class="card">
-          <span class="tag">Safe model experimentation</span>
-          <h3>Try an LLM in the optimizer, sleep at night</h3>
-          <p>Because the clamp bounds the blast radius, you can evaluate an aggressive estimator — TabPFN, an LLM — on production-shaped workloads without betting plan stability on it. The worst a bad prediction does is get clamped to a bound the engine already trusts.</p>
-        </div>
-        <div class="card">
-          <span class="tag">Rigor as the artifact</span>
-          <h3>Every number pre-registered — including the misses</h3>
-          <p>In the lineage of the "How Good Are Query Optimizers, Really?" line of work, samkhya reports BCa confidence intervals, Wilcoxon tests, and BH-FDR corrections — and publishes the hypotheses it <em>falsified</em>. For teams that need trustworthy measurement, the methodology is the deliverable.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- NUMBERS -->
-  <section id="numbers">
-    <div class="wrap">
-      <div class="section-head prose">
-        <p class="eyebrow">The honest numbers</p>
-        <h2>Measured, not projected — the falsified rows stay in.</h2>
-        <p>Every figure is pre-registered and reported with its confidence interval and receipt. Where a target was missed, the row says so. That's the point.</p>
-      </div>
-      <div class="tablewrap">
-        <table>
-          <thead>
-            <tr><th>What</th><th>Measured</th><th>CI / significance</th><th>Verdict</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>JOB-Slow end-to-end vs DataFusion 46<br><span class="kicker">real IMDb · n=55 paired · warm cache</span></td>
-              <td><span class="metric">1.038×</span> geomean<br><span class="kicker">17W / 38T / 0L</span></td>
-              <td><span class="ci">BCa [1.026, 1.056]</span><br><span class="ci">Wilcoxon p=3.0×10⁻⁶</span></td>
-              <td><span class="badge fail">≥1.35× falsified</span><br><span class="kicker" style="font-size:.75rem">real, but small</span></td>
-            </tr>
-            <tr>
-              <td>Never-regress guarantee<br><span class="kicker">corrected estimate vs provable ceiling</span></td>
-              <td><span class="metric">0</span> bound violations</td>
-              <td><span class="ci">proptest + fuzz enforced</span></td>
-              <td><span class="badge pass">holds</span></td>
-            </tr>
-            <tr>
-              <td>Mixed / adversarial workload<br><span class="kicker">7 pre-registered patterns A–G</span></td>
-              <td><span class="metric">0.949×</span> geomean<br><span class="kicker">~5% slower; cold-start +12.4%</span></td>
-              <td><span class="ci">per-pattern CIs in receipt</span></td>
-              <td><span class="badge fail">H-G falsified</span><br><span class="kicker" style="font-size:.75rem">reported on purpose</span></td>
-            </tr>
-            <tr>
-              <td>LpJoinBound vs AGM <em>tightness</em><br><span class="kicker">synthetic star-5, p=1 · bound/truth ratio, not wallclock</span></td>
-              <td><span class="metric">40.95×</span> tighter</td>
-              <td><span class="ci">BCa [30.93, 47.45]</span><br><span class="ci">p=1.73×10⁻⁶, n=30</span></td>
-              <td><span class="badge neutral">scoped</span><br><span class="kicker" style="font-size:.75rem">→ 1.00× under p=2/∞</span></td>
-            </tr>
-            <tr>
-              <td>TabPFN-2.5 inference latency<br><span class="kicker">RTX 4090 Laptop · B=8 L=128</span></td>
-              <td><span class="metric">31.15 ms</span> P95</td>
-              <td><span class="ci">BCa [29.39, 35.32]</span></td>
-              <td><span class="badge pass">H1-A pass</span></td>
-            </tr>
-            <tr>
-              <td>HLL precision<br><span class="kicker">p=14, n=10⁶</span></td>
-              <td><span class="metric">0.676%</span> RSE</td>
-              <td><span class="ci">BCa [0.535%, 0.848%]</span><br><span class="ci">vs Flajolet 0.8125% envelope</span></td>
-              <td><span class="badge pass">within envelope</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="kicker" style="margin-top:1rem; font-family:var(--mono); font-size:.78rem">
-        Pre-registered JOB-Slow upper bounds (≥1.35× / ≥1.50× / ≥1.6×) were all falsified by the WAVE4-F campaign. The corrector effect is statistically real; the effect size is small. Attributions — warm-cache only, CSV-not-Parquet, n=2 budget cap — are named in the evidence log.
+      <p class="small muted" style="margin-top:1.5rem;max-width:60ch">
+        What replaced it is smaller and real: <strong>0 soundness violations in
+        3,704 bound-evaluations</strong>, down from 2,179 — and on a foreign-key
+        join the ceiling is <em>exactly</em> the true output.
       </p>
     </div>
-  </section>
+  </div>
+</div>
 
-  <!-- ARCHITECTURE -->
-  <section id="arch" class="band">
-    <div class="wrap">
-      <div class="section-head prose">
-        <p class="eyebrow">Architecture</p>
-        <h2>Five layers. Each replaceable. Each fails toward the native plan.</h2>
-      </div>
-      <div class="grid cols-2" style="align-items:start">
-        <div class="stack">
-          <div class="layer">
-            <span class="ln">L5</span>
-            <span class="lt"><b>Pluggable corrector backend</b><span>GBT default · TabPFN-2.5 opt-in · LLM dual transport (FastAPI + TypeScript)</span></span>
-          </div>
-          <div class="layer">
-            <span class="ln">L4</span>
-            <span class="lt"><b>GPU batch inference</b><span>optional — one CUDA / Metal launch scores thousands of subplans</span></span>
-          </div>
-          <div class="layer keystone">
-            <span class="ln">L3</span>
-            <span class="lt"><b>LpBound envelope — never regress</b><span>provable upper bound; every correction clamped from above</span></span>
-          </div>
-          <div class="layer">
-            <span class="ln">L2</span>
-            <span class="lt"><b>Feedback recorder</b><span>LEO / Bao / AutoSteer pattern — SQLite (plan, estimate, actual); residual GBT trained</span></span>
-          </div>
-          <div class="layer">
-            <span class="ln">L1</span>
-            <span class="lt"><b>Portable stats foundation</b><span>Iceberg Puffin + classical sketches: HLL / Bloom / CMS / equi-depth / correlated-2D</span></span>
-          </div>
-        </div>
-        <div>
-          <h3 style="margin-bottom:.8rem">The cross-engine matrix</h3>
-          <div class="tablewrap" style="background:var(--card)">
-            <table style="min-width:0">
-              <tbody>
-                <tr><td><b class="mono" style="font-size:.85rem">DataFusion</b></td><td><span class="status prod">Production</span></td><td class="kicker">three-layer integration, DataFusion 46</td></tr>
-                <tr><td><b class="mono" style="font-size:.85rem">Iceberg / Arrow</b></td><td><span class="status prod">Production</span></td><td class="kicker">Puffin read/write, field-ID binding</td></tr>
-                <tr><td><b class="mono" style="font-size:.85rem">DuckDB</b></td><td><span class="status">Beta</span></td><td class="kicker">Rust-client path; native ext scaffold</td></tr>
-                <tr><td><b class="mono" style="font-size:.85rem">Polars</b></td><td><span class="status">Beta</span></td><td class="kicker">series→sketch; optimizer hook pending</td></tr>
-                <tr><td><b class="mono" style="font-size:.85rem">Postgres</b></td><td><span class="status">Scaffold</span></td><td class="kicker">pgrx-shaped, feature-gated</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="install" style="margin-top:1.4rem">
-            <p class="kicker mono" style="font-size:.78rem;margin:0">See the guarantee run, no dataset, no setup:</p>
-            <pre><code><span class="tok-c"># prints: corrector 1,000,000 → clamped to 6</span>
-cargo run <span class="tok-k">-p</span> samkhya-core \
-  <span class="tok-k">--example</span> honest_demo <span class="tok-k">--features</span> lp_solver</code></pre>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer>
-    <div class="wrap">
-      <div class="foot-grid">
-        <div style="max-width:34ch">
-          <div class="brandmark" style="margin-bottom:.6rem">
-            <span class="dev">सांख्य</span><span class="rom">samkhya</span>
-          </div>
-          <p class="kicker" style="font-size:.9rem">Engine-agnostic, feedback-driven cardinality correction — with a provable floor under the worst case. 13-crate Rust workspace, Apache-2.0.</p>
-        </div>
-        <div class="install">
-          <p class="eyebrow" style="margin-bottom:.4rem">Install</p>
-          <pre><code>cargo add samkhya-core
-pip install samkhya</code></pre>
-        </div>
-      </div>
-      <div class="foot-links" style="margin-top:2rem">
-        <a href="https://github.com/singhpratech/samkhya" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://crates.io/crates/samkhya-core" target="_blank" rel="noopener">crates.io</a>
-        <a href="https://pypi.org/project/samkhya/" target="_blank" rel="noopener">PyPI</a>
-        <a href="https://theaivibe.org/blog/samkhya-never-regress-cardinality-correction-deep-dive" target="_blank" rel="noopener">Deep-dive writeup</a>
-      </div>
-      <p class="fineprint">
-        Apache-2.0 · sole author Prateek Singh · v1.1.0 · Never-regress is a <em>bound-level</em> guarantee: a corrected estimate is never allowed above a provable ceiling. Wallclock is a separate axis — on some workloads samkhya is slower, and the failure-mode row above says exactly where. Numbers are from the v1.0 empirical campaign, carried forward unchanged by the semver-compatible v1.1.
+<section id="problem">
+  <div class="wrap sheet">
+    <div class="mark"><b>Context</b>Why any of this matters</div>
+    <div class="body-col">
+      <h2>Every query engine guesses, and the guesses compound.</h2>
+      <p class="lede">
+        Before running a query, a database estimates how many rows each step will
+        produce. Those estimates decide the plan: which side to build the hash
+        table on, what join order to take, how much memory to reserve.
+      </p>
+      <p>
+        The estimates are often wrong, and wrong multiplicatively — a modest error
+        at the bottom of a six-table join becomes a thousandfold error at the top.
+        It is the most common reason a query that should take two seconds takes
+        four minutes.
+      </p>
+      <p>
+        Everyone knows a model could learn to correct this from past queries.
+        Almost nobody ships one, for a single reason: <strong>a model that is
+        usually right and occasionally catastrophically wrong is worse than a
+        dumb estimator that is consistently mediocre.</strong> One hallucinated
+        row count and the planner picks something that exhausts memory.
+      </p>
+      <p>
+        samkhya's answer is not a better model. It is a ceiling to put underneath
+        one — a number derived by counting, with no model involved, that the join
+        cannot exceed. Clamp the model to it and it can be as wrong as it likes
+        without moving the planner past a bound that has been proved. A seatbelt,
+        not a faster car.
       </p>
     </div>
-  </footer>
+  </div>
+</section>
+
+<section id="theorem">
+  <div class="wrap sheet">
+    <div class="mark"><b>The bound</b>Bag semantics<br>Brute-forced<br>6 &#215; 2,048 cases</div>
+    <div class="body-col">
+      <h2>The ceiling, and why it holds.</h2>
+      <p class="lede">
+        Given only row counts and which pairs of relations are joined, nothing
+        below the Cartesian product is sound — put every row of every relation on
+        one key value and the equi-join degenerates to a cross product. To beat
+        it you need one more statistic: a bound on the <em>degree</em>, how many
+        rows can share a single value of a join attribute.
+      </p>
+
+      <div class="theorem">
+        <span class="label">Theorem — spanning-tree degree ceiling</span>
+        <p style="margin:0 0 .5rem">
+          Let <code>Q</code> be an equi-join over <code>R&#8321; … R&#8345;</code>
+          with join graph <code>G</code>, and let <code>T</code> be any spanning
+          tree of a connected component of <code>G</code>, rooted at
+          <code>r</code>. Then
+        </p>
+        <div class="formula">|Q|  &#8804;  |R_r| &#183; &#928;<sub>(u&#8594;v) &#8712; T, v &#8800; r</sub> maxdeg(R_v, a_uv)</div>
+        <p style="margin:.7rem 0 0;font-size:.93rem" class="muted">
+          <em>Proof.</em> Materialise in BFS order from <code>r</code>. The
+          partial result starts at <code>|R_r|</code> tuples. Joining child
+          <code>v</code> to its parent on attribute <code>a</code>: every partial
+          tuple already fixes a value of <code>a</code>, and at most
+          <code>maxdeg(R_v, a)</code> rows of <code>R_v</code> carry any single
+          value, so the count multiplies by at most that factor. Join edges
+          outside <code>T</code> only filter, never add. <span class="qed">&#8718;</span>
+        </p>
+      </div>
+
+      <p>
+        It holds for <strong>bag</strong> semantics — duplicates included — which
+        is what engines actually execute, and it is exactly tight on the
+        foreign-key joins that dominate analytical workloads.
+      </p>
+
+      <h3>Where the degrees come from</h3>
+      <p>Any <em>over</em>-estimate of the true maximum degree keeps the ceiling sound. Three sources, cheapest first:</p>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Source</th><th>Bound on maxdeg</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Row count</td><td class="num">rows</td><td>Always true. The ceiling degrades to the product — sound, useless, never wrong.</td></tr>
+          <tr><td>Distinct count (HLL)</td><td class="num">rows &#8722; distinct + 1</td><td>Spend one row per distinct value, pile the rest onto one. Exact for a key column, which is why FK joins bound tightly.</td></tr>
+          <tr><td>Count-Min sketch</td><td class="num">largest counter</td><td>Tightest under skew, and derivable without knowing which key is hot.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p>
+        The Count-Min route is what makes the ceiling <em>portable</em>. For any
+        key <code>k</code>, <code>true_freq(k) &#8804; estimate(k) &#8804; max counter</code>,
+        because Count-Min never undercounts. That sketch already rides in
+        samkhya's Puffin sidecar — so a bound proved from statistics written by
+        one engine holds in another, with no shared catalog and no re-scan.
+      </p>
+
+      <h3>The trap worth naming</h3>
+      <p>
+        The distinct-count derivation <em>subtracts</em>, so it needs a count that
+        is never <em>above</em> the truth. An HLL point estimate is two-sided — it
+        exceeds the truth about half the time — and feeding it in produces a
+        ceiling below the truth. The API therefore ships
+        <code>from_hll_floor</code>, which counts non-zero registers and so can
+        only under-count. Every constructor either derives the guarantee or states
+        the obligation on the caller.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="audit">
+  <div class="wrap sheet">
+    <div class="mark"><b>What happened</b>Deep-dive audit<br>2026-07-24</div>
+    <div class="body-col">
+      <h2>How a project that measures everything shipped an unsound bound twice.</h2>
+      <p class="lede">
+        Not through carelessness with tests. Through tests that checked the wrong
+        thing, and a metric that deleted its own failure signal.
+      </p>
+
+      <h3>The tests checked bounds against each other</h3>
+      <p>
+        The property suite ran 1,024 cases per property and asserted
+        <code>LpJoinBound &#8804; AgmBound &#8804; ProductBound</code>, plus
+        finiteness and monotonicity. All green. Every one of those invariants
+        holds perfectly well for a family of bounds that are <em>all wrong
+        together</em>. Nothing ever compared a bound to a true cardinality.
+      </p>
+      <p>
+        The fix is one test: generate small relation instances, brute-force the
+        real join, assert <code>ceiling &#8805; truth</code>. Six properties,
+        2,048 cases each. It fails immediately on the old code.
+      </p>
+
+      <h3>The harness clamped away the evidence</h3>
+      <p>
+        The tightness campaign <em>did</em> materialise instances and compute
+        ground truth. Then it reported:
+      </p>
+      <pre><code><span class="c-key">let</span> r_lp = (lp_b / truth).max(<span class="c-num">1.0</span>);</code></pre>
+      <p>
+        A ratio below 1.0 is precisely the signal that a bound has fallen below
+        the truth. <code>.max(1.0)</code> turned every such case into exactly
+        1.0 — indistinguishable from a perfectly tight sound bound. The campaign
+        averaged 2,179 violations into its headline and was structurally
+        incapable of reporting one.
+      </p>
+
+      <h3>What was actually wrong</h3>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Bound</th><th>Defect</th><th>Witness</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>LpJoinBound</code></td>
+            <td>The LP added one cover constraint per <em>predicate</em>; AGM needs one per <em>attribute</em>, plus full weight for any relation carrying a private column. Invisible on a triangle — the only shape the tests used.</td>
+            <td class="num">10 &#215; 100 FK join<br>gave 10, truth 100</td>
+          </tr>
+          <tr>
+            <td><code>AgmBound</code></td>
+            <td><code>min &#215; max</code> drops every relation but two. Not an AGM bound at all.</td>
+            <td class="num">3 &#215; 3 &#215; 3 chain<br>gave 9, truth 27</td>
+          </tr>
+          <tr>
+            <td><code>ChainBound</code></td>
+            <td>Dividing by <code>max(D_i, D_j)</code> is a uniform-distribution <em>estimate</em>, not an upper bound.</td>
+            <td class="num">skewed 20 &#215; 20<br>gave 80, truth 260</td>
+          </tr>
+          <tr>
+            <td><code>ProductBound</code></td>
+            <td>&mdash;</td>
+            <td class="num">sound throughout</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="small muted">
+        Every witness is a concrete instance whose true cardinality was counted by
+        brute force, not argued.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="wrap sheet">
+    <div class="mark"><b>Evidence</b>Each row names its receipt<br><s>2 withdrawn</s></div>
+    <div class="body-col">
+      <h2>Every claim, and what it rests on.</h2>
+      <p class="lede">
+        Including the ones that did not survive. A project whose selling point is
+        honest measurement does not get to quietly drop the rows that failed.
+      </p>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Claim</th><th>Measured</th><th>Status</th><th>Receipt</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Bound soundness — does the ceiling ever fall below the truth?</td>
+            <td class="num">0 / 3,704<br><span class="muted">was 2,179 (58.8%)</span></td>
+            <td><span class="tag ok">Reproduced</span></td>
+            <td class="num">20_bound_soundness</td>
+          </tr>
+          <tr>
+            <td>Ceiling on a foreign-key join, 10 orders &#8904; 100 line items</td>
+            <td class="num">100 — exact<br><span class="muted">product: 1,000</span></td>
+            <td><span class="tag ok">Reproduced</span></td>
+            <td class="num">20_bound_soundness</td>
+          </tr>
+          <tr>
+            <td>LpJoinBound vs AGM tightness, star-5</td>
+            <td class="num"><s>40.95&#215;</s> &#8594; 1.070&#215;</td>
+            <td><span class="tag no">Withdrawn</span></td>
+            <td class="num">07 (retracted)</td>
+          </tr>
+          <tr>
+            <td>JOB-Slow end-to-end speedup</td>
+            <td class="num"><s>1.038&#215;</s></td>
+            <td><span class="tag no">Withdrawn</span></td>
+            <td class="num">OPEN_AUDIT &#167;2</td>
+          </tr>
+          <tr>
+            <td>Corrector on <em>held-out</em> queries, fit S1–S5 evaluate S6–S10</td>
+            <td class="num">q-error 13.46 &#8594; 26.41<br><span class="muted">i.e. worse</span></td>
+            <td><span class="tag ok">Reproduced</span></td>
+            <td class="num">corrector_flow</td>
+          </tr>
+          <tr>
+            <td>HLL precision, p=14 n=10&#8310;</td>
+            <td class="num">RSE 0.676%</td>
+            <td><span class="tag ok">Measured</span></td>
+            <td class="num">03_hll_precision</td>
+          </tr>
+          <tr>
+            <td>Test surface</td>
+            <td class="num">345 passing, 0 failing</td>
+            <td><span class="tag ok">Reproduced</span></td>
+            <td class="num">cargo test --workspace</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Why the JOB-Slow number went</h3>
+      <p>
+        It was published as a cardinality-<em>correction</em> result. Reading the
+        committed run scripts: no <code>--corrector</code> flag is passed, so the
+        runner attaches nothing — and the flag's only non-<code>none</code> value
+        was <code>identity</code>, which returns the baseline unchanged.
+        <strong>The bench CLI had no option that could attach a trained corrector
+        at all.</strong> The two arms differed by exactly one thing: whether
+        portable sidecar statistics were injected.
+      </p>
+      <p>
+        Alongside that: all four trials exited 137 (OOM-killed) at query 15d
+        against a header announcing 113; arm order was fixed so the coldest run
+        sat in the baseline, and removing it takes 1.038&#215; to 1.013&#215;;
+        every query had two trials per arm, where the smallest attainable exact
+        <em>p</em> is 0.167, so the "24 of 55 significant" count is an artefact of
+        a degenerate bootstrap; and the published q-error is 1.0 everywhere
+        because every JOB query is <code>SELECT MIN(...)</code>.
+      </p>
+      <p class="small muted">
+        The finding underneath is real, and better than the headline it replaced:
+        portable sidecar statistics, with no model anywhere, moved a real workload
+        at all. That deserves publishing as what it is, after an honest re-run.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="use">
+  <div class="wrap sheet">
+    <div class="mark"><b>Surfaces</b>Rust &middot; Python &middot; JavaScript</div>
+    <div class="body-col">
+      <h2>Three ways in, one byte format.</h2>
+      <p class="lede">
+        A sketch written in a browser deserialises unchanged in a Rust query
+        engine. That is the portability claim, and it is the same code path in
+        every binding.
+      </p>
+
+      <h3>The ceiling, in JavaScript</h3>
+      <pre><code><span class="c-key">import</span> init, { HllSketch, joinCeiling } <span class="c-key">from</span> <span class="c-num">'samkhya'</span>;
+<span class="c-key">await</span> init();
+
+<span class="c-key">const</span> hll = <span class="c-key">new</span> HllSketch(<span class="c-num">12</span>);
+<span class="c-key">for</span> (<span class="c-key">const</span> row <span class="c-key">of</span> rows) hll.add(row.orderKey);
+
+<span class="c-com">// 10 orders joined to 100 line items over 10 distinct keys.</span>
+joinCeiling([<span class="c-num">10</span>, <span class="c-num">100</span>], [<span class="c-num">0</span>, <span class="c-num">1</span>], [<span class="c-num">10</span>, <span class="c-num">10</span>]);  <span class="c-com">// 100 — exactly the truth</span>
+joinCeiling([<span class="c-num">10</span>, <span class="c-num">100</span>], [<span class="c-num">0</span>, <span class="c-num">1</span>], []);          <span class="c-com">// 1000 — the product</span></code></pre>
+      <p class="small muted">84&nbsp;KB WebAssembly, generated TypeScript definitions, no server and no native module.</p>
+
+      <h3>The ceiling, in Rust</h3>
+      <pre><code><span class="c-key">use</span> samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
+
+<span class="c-key">let</span> orders = JoinRelation::new(<span class="c-num">10</span>)
+    .with_degree(ORDER_KEY, AttributeDegree::from_distinct(<span class="c-num">10</span>, <span class="c-num">10</span>));
+<span class="c-key">let</span> lineitem = JoinRelation::new(<span class="c-num">100</span>)
+    .with_degree(ORDER_KEY, AttributeDegree::from_distinct(<span class="c-num">100</span>, <span class="c-num">10</span>));
+
+<span class="c-key">let</span> graph = JoinGraph::new(<span class="c-key">vec!</span>[orders, lineitem]).with_edge(<span class="c-num">0</span>, <span class="c-num">1</span>, ORDER_KEY);
+<span class="c-key">assert_eq!</span>(graph.ceiling(), <span class="c-num">100</span>);</code></pre>
+
+      <h3>Training a corrector without fooling yourself</h3>
+      <p>
+        The harness separates the three steps so a held-out measurement is
+        enforceable rather than aspirational. Freezing the model between steps 2
+        and 3 is the point: a model written before the evaluation queries ran
+        cannot have seen them.
+      </p>
+      <pre><code><span class="c-com"># 1. Record plan features on a training subset.</span>
+samkhya-bench run --suite synthetic --feedback train.db --only S1,S2,S3,S4,S5
+
+<span class="c-com"># 2. Fit and freeze.</span>
+samkhya-bench train --feedback train.db \
+    --template samkhya-bench-synthetic --out model.json
+
+<span class="c-com"># 3. Evaluate on the complement — queries the model has never seen.</span>
+samkhya-bench run --suite synthetic --exclude S1,S2,S3,S4,S5 \
+    --corrector gbt --model model.json</code></pre>
+      <p class="small muted">
+        Skip the split and you measure memorisation. On this suite that reads as
+        q-error improving 4.58&nbsp;&#8594;&nbsp;1.86; the honest held-out run
+        shows it <em>worsening</em> 13.46&nbsp;&#8594;&nbsp;26.41. Same model,
+        same code, opposite conclusion.
+      </p>
+
+      <div class="grid">
+        <div class="cell"><span class="k">Layer 1</span><h4>Portable statistics</h4><p>Five sketches into one Iceberg Puffin sidecar, read back unchanged by Iceberg, DataFusion and DuckDB.</p></div>
+        <div class="cell"><span class="k">Layer 2</span><h4>The ceiling</h4><p>A provable bound from those same statistics. No model, no training, no network.</p></div>
+        <div class="cell"><span class="k">Layer 3</span><h4>The corrector slot</h4><p>One trait, swappable backends — gradient-boosted trees, TabPFN, or an LLM behind HTTP.</p></div>
+        <div class="cell"><span class="k">Layer 4</span><h4>The clamp</h4><p>Whatever the backend proposes is held under the ceiling. Cold start falls back to the engine's own estimate.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="where">
+  <div class="wrap sheet">
+    <div class="mark"><b>Reach</b>Honest status per target</div>
+    <div class="body-col">
+      <h2>Where it runs, and where it cannot.</h2>
+      <p class="lede">
+        Optimizer integration needs a process you control. The portable sidecar
+        does not — it is a file, and anything that reads Iceberg can consume it.
+        That asymmetry is the real shape of this project.
+      </p>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Target</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>DataFusion 46</td><td><span class="tag ok">Production</span></td><td>Pre-join physical rule inserted before <code>join_selection</code>; ceiling derived by default since 1.2.</td></tr>
+          <tr><td>Apache Iceberg</td><td><span class="tag ok">Production</span></td><td>Puffin sidecar reader and writer, snapshot-aware, strict validation.</td></tr>
+          <tr><td>Arrow</td><td><span class="tag ok">Production</span></td><td>IPC round-trip for all five sketches.</td></tr>
+          <tr><td>JavaScript / TypeScript</td><td><span class="tag ok">New in 1.2</span></td><td>84&nbsp;KB wasm, generated types, sketches plus the ceiling.</td></tr>
+          <tr><td>DuckDB</td><td><span class="tag open">Beta</span></td><td>Rust client works; the loadable extension waits on upstream.</td></tr>
+          <tr><td>Polars</td><td><span class="tag open">Beta</span></td><td>Series-to-sketch helpers behind a feature flag.</td></tr>
+          <tr><td>Vector search, Qdrant-shaped</td><td><span class="tag open">Bounds only</span></td><td>Provable match-count ceilings for the pre-filter / post-filter decision. Computes bounds; does not link an engine.</td></tr>
+          <tr><td>PostgreSQL</td><td><span class="tag open">Scaffold</span></td><td>Reachable via <code>get_relation_info_hook</code>. Not built — the crate's own docs say so.</td></tr>
+          <tr><td>SQL Server &middot; Snowflake &middot; BigQuery &middot; Pinecone</td><td><span class="tag no">Not possible</span></td><td>No injection point for a cardinality estimator. No amount of work changes this.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="diagram"><b>one sidecar, many readers</b>
+
+  samkhya-core ──writes──▶ <b>orders.puffin</b> ◀──reads── Iceberg
+                                 │                       DataFusion
+                                 │                       DuckDB
+                                 ▼                       JavaScript
+                    HLL · Bloom · Count-Min
+                    histograms · 2-D correlated
+                                 │
+                                 ▼
+                    <b>a ceiling that is provable in
+                    whichever engine reads it</b></div>
+    </div>
+  </div>
+</section>
+
+<section id="open">
+  <div class="wrap sheet">
+    <div class="mark"><b>Open</b>Not answered by 1.2</div>
+    <div class="body-col">
+      <h2>What is still wrong.</h2>
+      <p class="lede">
+        The same audit raised questions this release does not close. They are
+        listed because leaving them unlisted would be the more comfortable choice.
+      </p>
+      <ul>
+        <li><strong>The JOB-Slow campaign needs a real re-run</strong> — with a corrector actually attached, randomised arm order, enough memory to finish all 113 queries, and more than two trials per arm.</li>
+        <li><strong>The ceiling has no end-to-end measurement.</strong> It is unit-tested and property-tested; its effect on real plan quality is unmeasured. That is the largest hole in the empirical story, and it concerns the project's central contribution.</li>
+        <li><strong>Per-join-node q-error is not aggregated.</strong> The collection machinery exists; the whole-query metric currently reported is structurally pinned at 1.0 and carries no signal.</li>
+        <li><strong>Bloom sizing receipts predate their own fix</strong> and need re-running.</li>
+        <li><strong>Cyclic queries bound loosely.</strong> The hypergraph LP returns the true AGM bound but needs an attribute schema plus a declaration that relations carry no private columns; deriving that automatically is not implemented.</li>
+      </ul>
+      <p class="small muted">
+        Full register, with each item marked reproduced, credible-but-unverified,
+        or open, in
+        <a href="https://github.com/singhpratech/samkhya/blob/main/bench-results/OPEN_AUDIT_ITEMS.md">OPEN_AUDIT_ITEMS.md</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap sheet">
+    <div class="mark"><b>Install</b>Three registries</div>
+    <div class="body-col">
+      <h2>Start with the demo — it computes every number it prints.</h2>
+      <p>
+        Or try the <a href="demo.html"><strong>live one</strong></a>: a two-table
+        join you control, with the true output counted from the data and the
+        ceiling computed beside it by the same WebAssembly binary the npm package
+        ships. A scripted sweep of 73,205 configurations through it found zero
+        violations — the page invites you to look for the first.
+      </p>
+      <pre><code>cargo run -p samkhya-core --example honest_demo --features lp_solver</code></pre>
+      <div class="installs">
+        <div><span class="k">Rust</span><pre><code>cargo add samkhya-core</code></pre></div>
+        <div><span class="k">Python</span><pre><code>pip install samkhya</code></pre></div>
+        <div><span class="k">JavaScript</span><pre><code>npm install samkhya</code></pre></div>
+      </div>
+      <p class="small muted" style="margin-top:1.3rem">
+        Eleven crates on crates.io. The JavaScript package is built and verified
+        but not yet published.
+      </p>
+    </div>
+  </div>
+</section>
+
 </main>
 
-<script>
-(function () {
-  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+<footer>
+  <div class="wrap sheet">
+    <div class="mark">&#8872;</div>
+    <div class="body-col">
+      <div class="links">
+        <a href="https://github.com/singhpratech/samkhya">GitHub</a>
+        <a href="https://crates.io/crates/samkhya-core">crates.io</a>
+        <a href="https://pypi.org/project/samkhya/">PyPI</a>
+        <a href="https://docs.rs/samkhya-core">docs.rs</a>
+        <a href="https://github.com/singhpratech/samkhya/blob/main/bench-results/20_bound_soundness.md">Soundness audit</a>
+      </div>
+      <p class="small">
+        samkhya — portable, feedback-driven cardinality correction for embedded
+        analytical engines. Apache-2.0. Sole author: Prateek Singh.
+      </p>
+      <p class="small muted">
+        The bound is inspired by the LpBound line of work (Zhang et al., SIGMOD
+        2025) and the AGM bound (Atserias, Grohe, Marx, FOCS 2008). What ships
+        here is the max-degree spanning-tree bound, folklore in that lineage —
+        named as such rather than as something newer than it is.
+      </p>
+    </div>
+  </div>
+</footer>
 
-  // ---- hero clamp canvas ----
-  var cv = document.getElementById('clampCanvas');
-  if (cv) {
-    var ctx = cv.getContext('2d');
-    var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var css = function (v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); };
-
-    function resize() {
-      var r = cv.getBoundingClientRect();
-      W = r.width; H = r.height;
-      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    resize();
-    window.addEventListener('resize', resize);
-
-    var N = 130;               // samples across width
-    var ceilFrac = 0.30;       // ceiling height (fraction from top)
-    var raw = [], applied = [], phase = 0;
-
-    // seed a plausible corrector trace: mostly moderate, occasional wild spikes
-    function sample(i) {
-      var base = 0.62 + 0.14 * Math.sin(i * 0.20) + 0.05 * Math.sin(i * 0.9);
-      var spike = 0;
-      var s = (i * 928371) % 1000 / 1000;         // deterministic pseudo-random
-      if (s > 0.86) spike = 0.55 + 0.4 * (((i * 15731) % 100) / 100); // shoots above ceiling
-      return base - spike; // smaller value = higher on canvas (drawn inverted below)
-    }
-
-    function draw() {
-      var ink = css('--ink'), ink2 = css('--ink-2'), brass = css('--brass'), line = css('--line-2'), paper = css('--card');
-      ctx.clearRect(0, 0, W, H);
-      var pad = 14;
-      var top = H * ceilFrac;
-      var baseY = H - pad;
-
-      // faint grid
-      ctx.strokeStyle = line; ctx.lineWidth = 1;
-      for (var g = 1; g <= 4; g++) {
-        var gy = top + (baseY - top) * g / 5;
-        ctx.beginPath(); ctx.moveTo(pad, gy); ctx.lineTo(W - pad, gy); ctx.stroke();
-      }
-
-      var span = W - pad * 2;
-      function X(i) { return pad + span * (i / (N - 1)); }
-      // value 0..1 where higher value -> lower on screen; map so spikes rise above ceiling
-      function Y(v) { return baseY - (baseY - (top - 46)) * (1 - v); }
-
-      var ceilY = top;
-
-      // --- uncapped model estimate (ghost, dashed) ---
-      ctx.strokeStyle = ink2; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.3;
-      ctx.setLineDash([4, 4]); ctx.beginPath();
-      for (var i = 0; i < N; i++) {
-        var v = sample(i + phase);
-        var y = Y(v);
-        i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y);
-      }
-      ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
-
-      // --- ceiling line ---
-      ctx.strokeStyle = brass; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(pad, ceilY); ctx.lineTo(W - pad, ceilY); ctx.stroke();
-
-      // --- applied (clamped) trace + fill ---
-      ctx.beginPath();
-      var pts = [];
-      for (var j = 0; j < N; j++) {
-        var vv = sample(j + phase);
-        var yy = Y(vv);
-        if (yy < ceilY) yy = ceilY;   // clamp: never above the ceiling
-        pts.push([X(j), yy]);
-      }
-      // fill under applied
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], baseY);
-      for (var k = 0; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
-      ctx.lineTo(pts[pts.length - 1][0], baseY); ctx.closePath();
-      var grad = ctx.createLinearGradient(0, ceilY, 0, baseY);
-      grad.addColorStop(0, css('--brass-wash')); grad.addColorStop(1, 'transparent');
-      ctx.fillStyle = grad; ctx.fill();
-      // applied stroke
-      ctx.strokeStyle = ink; ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (var m = 0; m < pts.length; m++) m ? ctx.lineTo(pts[m][0], pts[m][1]) : ctx.moveTo(pts[m][0], pts[m][1]);
-      ctx.stroke();
-
-      // clamp markers where the raw wanted to exceed the ceiling
-      ctx.fillStyle = brass;
-      for (var p = 0; p < N; p += 1) {
-        var raw_v = sample(p + phase);
-        if (Y(raw_v) < ceilY - 1) {
-          ctx.beginPath(); ctx.arc(X(p), ceilY, 2.2, 0, Math.PI * 2); ctx.fill();
-        }
-      }
-    }
-
-    if (reduce) {
-      draw();
-    } else {
-      var last = 0;
-      function loop(t) {
-        if (t - last > 55) { phase += 1; draw(); last = t; }
-        requestAnimationFrame(loop);
-      }
-      requestAnimationFrame(loop);
-    }
-
-    // redraw on theme toggle
-    var mo = new MutationObserver(draw);
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    if (window.matchMedia) {
-      try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw); } catch (e) {}
-    }
-  }
-
-  // ---- mini clamp spikes (mechanism 01) ----
-  var box = document.getElementById('miniClamp');
-  if (box) {
-    var ceilTop = 38;
-    var heights = [56, 40, 150, 62, 48, 170, 44, 130, 58, 52, 120, 46, 66, 155, 50];
-    for (var i = 0; i < heights.length; i++) {
-      var hgt = heights[i];
-      var sp = document.createElement('div');
-      sp.className = 'spike';
-      sp.style.left = (6 + i * 12.6) + '%';
-      var capped = Math.min(hgt, 190 - ceilTop); // clamp height so tip sits at/under ceiling
-      var over = hgt > (190 - ceilTop);
-      sp.style.height = (over ? (190 - ceilTop) : hgt) + 'px';
-      if (over) sp.style.background = 'var(--brass)', sp.style.opacity = '0.9';
-      box.appendChild(sp);
-      if (over) {
-        var d = document.createElement('div');
-        d.className = 'capdot';
-        d.style.left = (6 + i * 12.6) + '%';
-        d.style.top = ceilTop + 'px';
-        box.appendChild(d);
-      }
-    }
-  }
-})();
-</script>
 </body>
 </html>

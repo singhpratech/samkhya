@@ -1,12 +1,30 @@
 # samkhya — सांख्य
 
-> **samkhya is the engine-agnostic Rust SDK for portable, feedback-driven cardinality correction in embedded analytical engines.** Its load-bearing guarantee is *never-regress at the bound level*: every corrected estimate is clamped under a provable `LpJoinBound` ceiling, so a miscalibrated model or hallucinating LLM can never push the optimizer past a bound it can prove; with no feedback yet, cold start falls back to the engine's own estimate. One Puffin stats sidecar, written with `samkhya-core`, is loaded unchanged through Iceberg and exposed to DataFusion and the client-side DuckDB adapter. One `Corrector` trait, many swappable backends (GBT default · TabPFN-2.5 · LLM-pluggable). **13-crate workspace** (11 publishable crates), Apache-2.0, sole author.
+> **A join-cardinality ceiling you can prove, and the portable statistics that
+> feed it.** samkhya clamps a corrected estimate under a bound the join provably
+> cannot exceed, so a miscalibrated model — or a hallucinating LLM — cannot push
+> the optimizer past a number that has been proved. With no feedback yet, cold
+> start falls back to the engine's own estimate. One Puffin sidecar written with
+> `samkhya-core` is read unchanged through Iceberg, DataFusion and DuckDB. One
+> `Corrector` trait, many swappable backends. **15-crate workspace**, Apache-2.0,
+> sole author.
 >
-> Every number here is pre-registered and measured, including the ones that missed — and a 2026-07-24 audit found that the two headline results this README used to lead with did not survive scrutiny, so they are withdrawn rather than defended. **The JOB-Slow campaign is under re-run:** its "corrected" arm turned out to contain no corrector (so it measured portable sidecar statistics, not correction), all four trials were OOM-killed at 55 of 113 queries, the arm order was fixed so the coldest run sat in the baseline (dropping it takes 1.038× → 1.013×), per-query inference is unattainable at the 2 trials per arm used, and the published q-error is structurally pinned at 1.0. Full reproduction of each in [`bench-results/OPEN_AUDIT_ITEMS.md`](bench-results/OPEN_AUDIT_ITEMS.md). A 2026-07-24 audit found that the ceiling shipped through v1.1 was **not actually provable** — it returned values below the true cardinality in 58.8% of trials — and **v1.2.0 fixes that**: 0 violations in 3,704 bound-evaluations, with the bound now exactly tight on foreign-key joins. The 40.95× bound-tightness figure previously quoted here is withdrawn; the full audit is in [`bench-results/20_bound_soundness.md`](bench-results/20_bound_soundness.md).
+> **Read the correction first.** A 2026-07-24 audit found that the ceiling shipped
+> through v1.1 was *not actually provable* — it fell below the true cardinality in
+> 58.8% of measured trials, and the harness measuring it clamped every violation
+> to "perfectly tight" so it could not report the fact. v1.2.0 repairs it:
+> **0 violations in 3,704 bound-evaluations**, and on a foreign-key join the
+> ceiling is exactly the true output. Two headline numbers were withdrawn in the
+> process — the 40.95× bound-tightness figure and the 1.038× JOB-Slow speedup.
+> Both retractions are reproduced against committed raw data in
+> [`bench-results/20_bound_soundness.md`](bench-results/20_bound_soundness.md) and
+> [`bench-results/OPEN_AUDIT_ITEMS.md`](bench-results/OPEN_AUDIT_ITEMS.md).
 
-[![Live site](https://img.shields.io/badge/site-live-a86a12?logo=github&logoColor=white)](https://singhpratech.github.io/samkhya/)
+[![Live site](https://img.shields.io/badge/site-live-2F3B8C?logo=github&logoColor=white)](https://singhpratech.github.io/samkhya/)
+[![Live demo](https://img.shields.io/badge/demo-interactive-356443?logo=webassembly&logoColor=white)](https://singhpratech.github.io/samkhya/demo.html)
 [![CI](https://github.com/singhpratech/samkhya/workflows/CI/badge.svg)](https://github.com/singhpratech/samkhya/actions)
 [![crates.io](https://img.shields.io/crates/v/samkhya-core.svg)](https://crates.io/crates/samkhya-core)
+[![PyPI](https://img.shields.io/pypi/v/samkhya.svg)](https://pypi.org/project/samkhya/)
 [![docs.rs](https://img.shields.io/docsrs/samkhya-core)](https://docs.rs/samkhya-core)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
 
@@ -244,6 +262,15 @@ Layer 3 — corrector backends + GPU + Python:
 Layer 4 — tools:
 - `samkhya-cli` — single-binary evaluator: `build`, `decode`, `stats`,
   `info`, `compare`.
+- `samkhya-wasm` — the JavaScript / TypeScript surface. `samkhya-core`
+  compiled to WebAssembly: five sketches, the provable ceiling, Puffin I/O.
+  84 KB, generated `.d.ts`, no server and no native module. Built and verified;
+  not yet published to npm.
+- `samkhya-qdrant` — provable match-count ceilings for filtered vector search.
+  A Count-Min sketch never undercounts, so for an equality condition its
+  estimate is an upper bound on matching points — which is exactly what the
+  pre-filter / post-filter decision needs. Computes bounds; does not link an
+  engine, and says so.
 - `samkhya-bench` — clap CLI: `list-queries`, `run`, `compare`, `report`,
   `train`, `calibrate`, `build-puffin`. `train` fits and freezes a real GBT
   corrector; `run --corrector gbt --model <path>` evaluates with it, and
@@ -254,7 +281,7 @@ Workspace clippy `-D warnings`, default tests, optional-engine tests, and the
 cross-engine Puffin release fixture run in CI. Historical fuzz and benchmark
 receipts remain under `bench-results/`.
 
-**Test surface.** 301 workspace tests plus 269 under `samkhya-core --all-features`,
+**Test surface.** 345 workspace tests plus 272 under `samkhya-core --all-features`,
 all green, clippy and rustfmt clean, MSRV 1.85 compiling. The suites that carry
 the load for 1.2 are worth naming, because the defects they cover were all
 silent:
@@ -266,6 +293,8 @@ silent:
 | `samkhya-core/tests/feedback_migration.rs` | A pre-1.2 store upgrades in place, keeps its rows, and the migration is idempotent. |
 | `samkhya-bench/tests/corrector_flow.rs` | `--only` / `--exclude` genuinely partition a suite, and training refuses featureless rows instead of padding them with zeros. |
 | `samkhya-core/tests/v1_compat.rs` | Frozen v1 sketch payloads still decode byte-for-byte. |
+| `samkhya-wasm/src/lib.rs` | The JS surface bounds a foreign-key join at exactly 100, degrades to the product without distinct counts, and survives a misbuilt join graph without panicking. |
+| `samkhya-qdrant/src/lib.rs` | The match-count ceiling dominates brute force across five selectivities, and a saturated sketch gives up rather than lying. |
 
 ---
 

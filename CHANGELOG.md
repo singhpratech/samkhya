@@ -39,6 +39,33 @@ of which fails loudly.
   `ALTER TABLE` migration. Stores written by an older binary upgrade in place
   and remain readable by one.
 
+### Added — JavaScript, vector search, and a live demo
+
+- `samkhya-wasm` — the JavaScript / TypeScript surface. `samkhya-core` compiled
+  to WebAssembly: five sketches, the provable ceiling, Puffin I/O, and the
+  hypergraph LP. 84 KB with generated `.d.ts`. Verified in Node —
+  `joinCeiling([10,100],[0,1],[10,10])` returns exactly 100, and sketches
+  round-trip byte-identically against the Rust format. Built, not yet published
+  to npm.
+- `samkhya-qdrant` — provable match-count ceilings for filtered vector search.
+  A Count-Min sketch never undercounts, so for an equality condition its
+  estimate is an upper *bound* on matching points — which is exactly what the
+  pre-filter / post-filter decision needs, and the failure that hurts there is
+  under-estimating. Bounds compose soundly through `AND` (min) and `OR` (sum
+  capped at the collection); `NOT` is left at the collection size rather than
+  quietly guessing, since no lower bound on the excluded set is available.
+  Computes bounds and recommends a strategy; does not link an engine, and the
+  README says so.
+- `docs/demo.html` — an interactive proof. A two-table join the reader controls,
+  with the true output counted from generated data and the ceiling computed
+  beside it by the same wasm binary the npm package ships. A scripted sweep of
+  **73,205 configurations** through that binary found **0 violations**, tightest
+  ratio exactly 1.000×.
+- `docs/index.html` rebuilt as a research page: the theorem with its proof, how
+  the unsound bound survived two releases, an evidence table that shows the
+  withdrawn rows rather than dropping them, and an honest per-target reach
+  matrix including the targets that are not reachable at all.
+
 ### Added — a wasm-capable core
 
 - `samkhya-core`'s SQLite feedback store moves behind a default-on `feedback`

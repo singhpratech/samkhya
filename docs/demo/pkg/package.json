@@ -1,0 +1,32 @@
+{
+  "name": "samkhya-wasm",
+  "type": "module",
+  "collaborators": [
+    "Prateek Singh"
+  ],
+  "description": "samkhya for JavaScript and TypeScript: portable sketches and a provable join-cardinality ceiling, compiled to WebAssembly",
+  "version": "1.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/singhpratech/samkhya"
+  },
+  "files": [
+    "samkhya_wasm_bg.wasm",
+    "samkhya_wasm.js",
+    "samkhya_wasm.d.ts"
+  ],
+  "main": "samkhya_wasm.js",
+  "homepage": "https://github.com/singhpratech/samkhya",
+  "types": "samkhya_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "database",
+    "cardinality",
+    "query-optimizer",
+    "datafusion",
+    "duckdb"
+  ]
+}

@@ -13,6 +13,8 @@ members = [
     "samkhya-bench",
     "samkhya-cli",
     "samkhya-arrow",
+    "samkhya-wasm",
+    "samkhya-qdrant",
     "samkhya-it",
 ]
 
