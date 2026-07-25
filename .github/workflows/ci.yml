@@ -237,20 +237,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
+      # Installed as a prebuilt binary from the cargo-deny GitHub release
+      # rather than via EmbarkStudios/cargo-deny-action@v2. That action is a
+      # Docker action: every run rebuilds an image `FROM rust:1.85.0-alpine`,
+      # so a Docker Hub outage or pull-rate limit fails the job for reasons
+      # that have nothing to do with this repository. It did exactly that on
+      # 2026-07-25 (run 30173310053, i/o timeout to registry-1.docker.io) on
+      # a commit that changed one line of README. taiki-e/install-action
+      # pulls from GitHub releases, which CI already depends on.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
         with:
-          # Default `command = "check"` runs all four checks: bans,
-          # licenses, advisories, sources.
-          command: check
-          # Locked, default-feature workspace resolution aligns with the release pre-flight
-          # verification (default features). cargo-deny-action's default
-          # is --all-features which activates samkhya-postgres's pgrx 0.12
-          # path (pulling unmaintained serde_cbor via RUSTSEC-2021-0127)
-          # and produces ~60 duplicate-version bans from
-          # arrow/brotli/hashbrown/rand co-activation across pgrx +
-          # polars-all-features + iceberg + duckdb. Retire this argument
-          # override when (a) pgrx ≥ 0.13 lands and drops serde_cbor, and
-          # (b) we have a strategy for the cross-engine arrow / hashbrown
-          # version sprawl under all-features.
-          arguments: --locked --workspace
+          tool: cargo-deny
+
+      # `check` runs all four checks: bans, licenses, advisories, sources.
+      #
+      # Locked, default-feature workspace resolution aligns with the release
+      # pre-flight verification (default features). Passing --workspace
+      # explicitly matters: cargo-deny-action defaulted to --all-features,
+      # which activates samkhya-postgres's pgrx 0.12 path (pulling
+      # unmaintained serde_cbor via RUSTSEC-2021-0127) and produces ~60
+      # duplicate-version bans from arrow/brotli/hashbrown/rand co-activation
+      # across pgrx + polars-all-features + iceberg + duckdb. Retire this
+      # scoping when (a) pgrx ≥ 0.13 lands and drops serde_cbor, and (b) we
+      # have a strategy for the cross-engine arrow / hashbrown version sprawl
+      # under all-features.
+      - name: Run cargo-deny
+        run: cargo deny --locked --workspace check
