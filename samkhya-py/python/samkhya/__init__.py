@@ -7,7 +7,8 @@ entry point users need.
 
 The exported types and functions cover the four classical sketches
 samkhya ships (HLL, Bloom, Count-Min, equi-depth histogram) plus the
-LpBound-style ceiling helpers (``product_bound``, ``agm_bound``) that
+Provable join-ceiling helpers (``join_ceiling``, ``product_bound``,
+``agm_bound``) and the selectivity ``selectivity_estimate`` heuristic, that
 keep corrected estimates honest.
 """
 
@@ -23,7 +24,9 @@ from samkhya._native import (  # type: ignore[attr-defined]
     HllSketch,
     SamkhyaError,
     agm_bound,
+    join_ceiling,
     product_bound,
+    selectivity_estimate,
     samkhya_version,
 )
 
@@ -35,7 +38,9 @@ __all__ = [
     "SamkhyaError",
     "__version__",
     "agm_bound",
+    "join_ceiling",
     "product_bound",
+    "selectivity_estimate",
     "samkhya_version",
 ]
 

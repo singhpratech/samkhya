@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>samkhya — try to break the ceiling</title>
+<meta name="description" content="An interactive proof. Move the sliders, and watch a provable join-cardinality ceiling refuse to fall below the true answer — computed live in your browser by 84 KB of WebAssembly.">
+<link rel="icon" href="samkhya-mark.svg" type="image/svg+xml">
+<meta property="og:title" content="samkhya — try to break the ceiling">
+<meta property="og:description" content="Move the sliders. The ceiling never falls below the truth, and you are proving it yourself, in your browser.">
+<meta property="og:url" content="https://singhpratech.github.io/samkhya/demo.html">
+<style>
+
+:root{
+  --paper:#F7F4EE;--paper-2:#EFEBE2;--panel:#FBF9F5;
+  --ink:#2A1F1A;--ink-soft:#5C544A;--ink-faint:#8B8478;
+  --rule:#DDD7CB;--rule-soft:#E8E3D9;
+  --proved:#5B48D8;--proved-tint:#E7E3FA;--proved-deep:#4536B0;
+  --withdrawn:#C13A15;--withdrawn-tint:#F8DFD6;--withdrawn-hot:#EC6236;
+  --measured:#2E6B3C;--measured-tint:#DCEADF;
+  --open:#8A6410;--open-tint:#F4E8CE;
+  --truth:#8A6410;
+  --serif:Charter,'Bitstream Charter','Sitka Text',Cambria,'Iowan Old Style',Georgia,serif;
+  --mono:ui-monospace,'SF Mono','JetBrains Mono','Cascadia Code',Menlo,Consolas,monospace;
+  --wrap:min(1000px,100% - 2.5rem);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#16120F;--paper-2:#1D1815;--panel:#201A16;
+    --ink:#F0EAE0;--ink-soft:#B5ABA0;--ink-faint:#8A8177;
+    --rule:#352C26;--rule-soft:#2A2320;
+    --proved:#A79AF5;--proved-tint:#2A2350;--proved-deep:#C3B9FF;
+    --withdrawn:#F0774B;--withdrawn-tint:#3B1D13;--withdrawn-hot:#FF8A5E;
+    --measured:#82BE8F;--measured-tint:#17301D;
+    --open:#D3A83F;--open-tint:#332609;--truth:#D3A83F;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--serif);
+  font-size:19px;line-height:1.6;text-rendering:optimizeLegibility}
+a{color:inherit;text-decoration-color:color-mix(in srgb,var(--proved) 45%,transparent);text-underline-offset:3px}
+a:hover{color:var(--proved);text-decoration-color:var(--proved)}
+:focus-visible{outline:2px solid var(--proved);outline-offset:3px;border-radius:3px}
+code{font-family:var(--mono);font-size:.82em}
+.wrap{width:var(--wrap);margin-inline:auto}
+
+header{border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:9;
+  background:color-mix(in srgb,var(--paper) 94%,transparent);backdrop-filter:blur(10px)}
+header .wrap{display:flex;align-items:baseline;gap:1.2rem;padding:.8rem 0;flex-wrap:wrap}
+.wordmark{display:inline-flex;align-items:center;gap:.5rem;font-weight:700;text-decoration:none;font-size:1.05rem}
+.wordmark span{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;color:var(--proved);
+  margin-left:.5rem;background:var(--proved-tint);padding:.16rem .42rem;border-radius:3px}
+header nav{margin-left:auto;display:flex;gap:1.1rem;flex-wrap:wrap;font-family:var(--mono);
+  font-size:.71rem;letter-spacing:.05em;text-transform:uppercase}
+header nav a{color:var(--ink-soft);text-decoration:none}
+header nav a:hover{color:var(--proved)}
+
+.intro{padding:3.4rem 0 2.4rem;position:relative}
+.eyebrow{font-family:var(--mono);font-size:.69rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--proved-deep);margin:0 0 1.1rem;display:inline-block;background:var(--proved-tint);
+  padding:.3rem .6rem;border-radius:4px}
+h1{font-size:clamp(1.9rem,5vw,2.95rem);line-height:1.1;font-weight:700;margin:0 0 1.1rem;
+  letter-spacing:-.02em;max-width:18ch}
+.lede{font-size:1.06rem;color:var(--ink-soft);max-width:60ch;margin:0 0 1rem}
+.lede strong{color:var(--ink);font-weight:600}
+
+.panel{border:1px solid var(--rule);border-radius:10px;background:var(--panel);
+  padding:1.6rem;margin:0 0 1.6rem;box-shadow:0 1px 2px rgba(42,31,26,.04)}
+.controls{display:grid;gap:1.6rem 2.2rem;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))}
+fieldset{border:0;padding:0;margin:0;min-width:0}
+legend{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--proved);padding:0;margin-bottom:.7rem;font-weight:600}
+.ctl{margin-bottom:.85rem}
+.ctl label{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;
+  font-size:.84rem;color:var(--ink-soft);margin-bottom:.3rem}
+.ctl label b{font-family:var(--mono);font-size:.86rem;color:var(--proved-deep);font-weight:700}
+input[type=range]{width:100%;accent-color:var(--proved);cursor:pointer;margin:0}
+
+.readout{margin-top:1.6rem;padding-top:1.4rem;border-top:1px solid var(--rule)}
+.rows{display:grid;gap:.75rem}
+.row{display:grid;grid-template-columns:9.5rem 1fr auto;gap:.9rem;align-items:center}
+@media (max-width:640px){.row{grid-template-columns:1fr auto}.row .bar{grid-column:1/-1;order:3}}
+.row .name{font-family:var(--mono);font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-soft);font-weight:600}
+.row .name em{display:block;font-style:normal;text-transform:none;letter-spacing:0;font-size:.66rem;
+  color:var(--ink-faint);font-weight:400}
+.bar{height:14px;border-radius:7px;background:var(--rule-soft);overflow:hidden}
+.bar i{display:block;height:100%;width:0;border-radius:7px;transition:width .18s ease-out}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+.bar.truth i{background:var(--truth)}
+.bar.ceil i{background:var(--proved)}
+.bar.prod i{background:var(--ink-faint);opacity:.4}
+.val{font-family:var(--mono);font-size:.92rem;font-variant-numeric:tabular-nums;min-width:6.5rem;text-align:right}
+.val.ceil{color:var(--proved-deep);font-weight:700}
+
+.verdict{margin-top:1.4rem;padding:.85rem 1rem;border-radius:7px;font-size:.9rem;
+  display:flex;gap:.7rem;align-items:baseline;flex-wrap:wrap}
+.verdict.holds{color:var(--measured);background:var(--measured-tint)}
+.verdict.broken{color:var(--withdrawn);background:var(--withdrawn-tint)}
+.verdict b{font-family:var(--mono);font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
+.verdict span{color:var(--ink-soft)}
+
+.tally{font-family:var(--mono);font-size:.72rem;letter-spacing:.05em;color:var(--ink-faint);
+  margin-top:1rem;display:flex;gap:1.4rem;flex-wrap:wrap}
+.tally b{color:var(--proved-deep);font-weight:700}
+
+.presets{display:flex;gap:.5rem;flex-wrap:wrap;margin:1.2rem 0 0}
+.presets button{font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;padding:.42rem .75rem;
+  border:1px solid var(--rule);border-radius:6px;background:var(--paper);color:var(--ink-soft);cursor:pointer;
+  transition:background .12s,border-color .12s,color .12s}
+.presets button:hover{border-color:var(--proved);color:var(--proved-deep);background:var(--proved-tint)}
+
+section{padding:2.6rem 0;border-top:1px solid var(--rule)}
+h2{font-size:1.32rem;font-weight:700;margin:0 0 .8rem;max-width:28ch;color:var(--proved-deep)}
+p{margin:0 0 1rem;max-width:64ch}
+.small{font-size:.88rem}
+.muted{color:var(--ink-soft)}
+pre{background:var(--panel);border:1px solid var(--rule);border-radius:7px;
+  padding:1rem 1.15rem;overflow-x:auto;font-size:.83rem;line-height:1.7;margin:0 0 1.1rem}
+.c-com{color:var(--ink-faint);font-style:italic}
+.c-key{color:var(--proved)}
+.c-num{color:var(--measured)}
+footer{padding:2.4rem 0 3.5rem;font-size:.85rem;color:var(--ink-soft);border-top:1px solid var(--rule);background:var(--paper-2)}
+.err{color:var(--withdrawn);font-family:var(--mono);font-size:.8rem;background:var(--withdrawn-tint);
+  padding:.6rem .8rem;border-radius:6px;display:block}
+.mark-glyph{display:block;flex:0 0 auto}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="wordmark" href="./"><img src="samkhya-mark.svg" alt="" width="26" height="26" class="mark-glyph">samkhya <span>v1.2.3 &middot; live demo</span></a>
+    <nav>
+      <a href="./">Overview</a>
+      <a href="./#theorem">Theorem</a>
+      <a href="https://github.com/singhpratech/samkhya">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap intro">
+  <p class="eyebrow">Running in your browser · 84 KB WebAssembly</p>
+  <h1>Try to break the ceiling.</h1>
+  <p class="lede">
+    Below is a two-table join you control. The <strong>true</strong> row count is
+    computed by actually building the relations and counting matches. The
+    <strong>ceiling</strong> comes from samkhya, compiled to WebAssembly and
+    running here — it sees only the row counts and distinct counts, never the data.
+  </p>
+  <p class="lede">
+    Move anything you like. The ceiling must never fall below the truth. If you
+    ever get it to, you have found a bug worth reporting.
+  </p>
+  <p class="small muted" style="max-width:60ch">
+    For what it is worth, a scripted sweep of <strong>73,205 configurations</strong>
+    through this same binary — every combination of row counts, distinct counts
+    and skew levels — found <strong>0 violations</strong>, with the tightest ratio
+    landing at exactly 1.000&#215;. Your turn.
+  </p>
+</div>
+
+<div class="wrap">
+  <div class="panel">
+    <div class="controls">
+      <fieldset>
+        <legend>Relation A — orders</legend>
+        <div class="ctl">
+          <label for="rowsA">rows <b id="rowsA-v">10</b></label>
+          <input type="range" id="rowsA" min="1" max="500" value="10">
+        </div>
+        <div class="ctl">
+          <label for="distA">distinct join keys <b id="distA-v">10</b></label>
+          <input type="range" id="distA" min="1" max="500" value="10">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Relation B — line items</legend>
+        <div class="ctl">
+          <label for="rowsB">rows <b id="rowsB-v">100</b></label>
+          <input type="range" id="rowsB" min="1" max="500" value="100">
+        </div>
+        <div class="ctl">
+          <label for="distB">distinct join keys <b id="distB-v">10</b></label>
+          <input type="range" id="distB" min="1" max="500" value="10">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Data shape</legend>
+        <div class="ctl">
+          <label for="skew">skew — rows piled on one key <b id="skew-v">100%</b></label>
+          <input type="range" id="skew" min="0" max="100" value="100">
+        </div>
+        <p class="small muted" style="margin:0">
+          At 100% the surplus rows all share a single key — the worst case, and
+          the shape that exposed the old bound as unsound.
+        </p>
+      </fieldset>
+    </div>
+
+    <div class="presets">
+      <button type="button" data-preset="fk">Foreign-key join</button>
+      <button type="button" data-preset="skewed">Heavy skew</button>
+      <button type="button" data-preset="onekey">Every row, one key</button>
+      <button type="button" data-preset="unique">All keys unique</button>
+    </div>
+
+    <div class="readout">
+      <div class="rows">
+        <div class="row">
+          <div class="name">True output<em>counted from the data</em></div>
+          <div class="bar truth"><i id="bar-truth"></i></div>
+          <div class="val" id="v-truth">—</div>
+        </div>
+        <div class="row">
+          <div class="name">samkhya ceiling<em>proved, never sees the data</em></div>
+          <div class="bar ceil"><i id="bar-ceil"></i></div>
+          <div class="val ceil" id="v-ceil">—</div>
+        </div>
+        <div class="row">
+          <div class="name">Cartesian product<em>the bound without statistics</em></div>
+          <div class="bar prod"><i id="bar-prod"></i></div>
+          <div class="val muted" id="v-prod">—</div>
+        </div>
+      </div>
+
+      <div class="verdict holds" id="verdict">
+        <b id="verdict-label">Holds</b>
+        <span id="verdict-text">The ceiling is at or above the true output.</span>
+      </div>
+
+      <div class="tally">
+        <span>configurations tried <b id="t-tried">0</b></span>
+        <span>violations found <b id="t-bad">0</b></span>
+        <span>tightest so far <b id="t-tight">—</b></span>
+      </div>
+      <p class="err" id="load-error" hidden></p>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <section>
+    <h2>What the ceiling is allowed to know</h2>
+    <p>
+      Four numbers: two row counts and two distinct-key counts. From those it
+      derives a bound on the <em>degree</em> — how many rows can share one key —
+      as <code>rows − distinct + 1</code>, and multiplies along the join. It never
+      looks at a single value.
+    </p>
+    <pre><code><span class="c-key">import</span> init, { joinCeiling } <span class="c-key">from</span> <span class="c-num">'./demo/pkg/samkhya_wasm.js'</span>;
+<span class="c-key">await</span> init();
+
+<span class="c-com">// rows, flattened edge pairs, distinct counts</span>
+joinCeiling([rowsA, rowsB], [<span class="c-num">0</span>, <span class="c-num">1</span>], [distinctA, distinctB]);</code></pre>
+    <p class="small muted">
+      That is the same function, from the same 84 KB binary, that the npm package
+      exports. Nothing on this page is simulated.
+    </p>
+  </section>
+
+  <section>
+    <h2>Why "all keys unique" is the interesting preset</h2>
+    <p>
+      Set both distinct counts equal to their row counts and the degree bound
+      collapses to 1 on each side. The ceiling becomes exactly
+      <code>min(rowsA, rowsB)</code> — and the true output is exactly that too.
+      A foreign-key join is where a provable bound happens to also be a tight one,
+      which is why it matters that analytical workloads are mostly foreign-key
+      joins.
+    </p>
+    <p>
+      Now drag <em>distinct</em> down while leaving <em>rows</em> alone. The
+      ceiling climbs, because fewer distinct keys means more rows can collide —
+      and the truth climbs with it. Watch the gap: that is the price of not
+      knowing the data.
+    </p>
+  </section>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="small">
+      <a href="./">← Back to the overview</a> · samkhya, Apache-2.0, sole author
+      Prateek Singh · <a href="https://github.com/singhpratech/samkhya">source</a>
+    </p>
+  </div>
+</footer>
+
+<script type="module">
+import init, { joinCeiling, productBound } from './demo/pkg/samkhya_wasm.js';
+
+const $ = id => document.getElementById(id);
+const ids = ['rowsA','distA','rowsB','distB','skew'];
+const state = { tried: 0, bad: 0, tightest: null };
+
+/** Frequency map for a relation: `distinct` keys over `rows` rows, with
+ *  `skew` in [0,1] controlling how much of the surplus lands on key 0. */
+function frequencies(rows, distinct, skew){
+  const d = Math.max(1, Math.min(distinct, rows));
+  const freq = new Array(d).fill(1);
+  let surplus = rows - d;
+  const onHot = Math.round(surplus * skew);
+  freq[0] += onHot;
+  surplus -= onHot;
+  for (let i = 0; surplus > 0; i = (i + 1) % d){ freq[i] += 1; surplus -= 1; }
+  return freq;
+}
+
+/** True join size: sum over shared keys of the product of frequencies. */
+function trueJoin(fa, fb){
+  const n = Math.min(fa.length, fb.length);
+  let total = 0;
+  for (let k = 0; k < n; k++) total += fa[k] * fb[k];
+  return total;
+}
+
+const fmt = n => n.toLocaleString('en-US');
+
+function recompute(){
+  const rowsA = +$('rowsA').value, distA = Math.min(+$('distA').value, +$('rowsA').value);
+  const rowsB = +$('rowsB').value, distB = Math.min(+$('distB').value, +$('rowsB').value);
+  const skew  = +$('skew').value / 100;
+
+  $('rowsA-v').textContent = fmt(rowsA);
+  $('distA-v').textContent = fmt(distA);
+  $('rowsB-v').textContent = fmt(rowsB);
+  $('distB-v').textContent = fmt(distB);
+  $('skew-v').textContent  = Math.round(skew * 100) + '%';
+
+  const truth = trueJoin(frequencies(rowsA, distA, skew), frequencies(rowsB, distB, skew));
+  const ceil  = joinCeiling([rowsA, rowsB], [0, 1], [distA, distB]);
+  const prod  = productBound([rowsA, rowsB]);
+
+  $('v-truth').textContent = fmt(truth);
+  $('v-ceil').textContent  = fmt(ceil);
+  $('v-prod').textContent  = fmt(prod);
+
+  const scale = Math.max(prod, ceil, truth, 1);
+  const pct = v => (Math.sqrt(v / scale) * 100).toFixed(1) + '%';   // sqrt keeps small bars visible
+  $('bar-truth').style.width = pct(truth);
+  $('bar-ceil').style.width  = pct(ceil);
+  $('bar-prod').style.width  = pct(prod);
+
+  const holds = ceil >= truth;
+  state.tried += 1;
+  if (!holds) state.bad += 1;
+  if (holds && truth > 0){
+    const ratio = ceil / truth;
+    if (state.tightest === null || ratio < state.tightest) state.tightest = ratio;
+  }
+  $('t-tried').textContent = fmt(state.tried);
+  $('t-bad').textContent   = fmt(state.bad);
+  $('t-tight').textContent = state.tightest === null ? '—' : state.tightest.toFixed(3) + '×';
+
+  const v = $('verdict');
+  v.className = 'verdict ' + (holds ? 'holds' : 'broken');
+  $('verdict-label').textContent = holds ? 'Holds' : 'Violated';
+  $('verdict-text').textContent = holds
+    ? (ceil === truth
+        ? 'The ceiling is exactly the true output — provable and tight.'
+        : `The ceiling is ${fmt(ceil - truth)} above the truth, and ${fmt(prod - ceil)} below the product.`)
+    : 'The ceiling fell below the true output. This is a bug — please report it.';
+}
+
+const PRESETS = {
+  fk:     {rowsA:10,  distA:10,  rowsB:100, distB:10,  skew:100},
+  skewed: {rowsA:200, distA:5,   rowsB:200, distB:5,   skew:100},
+  onekey: {rowsA:60,  distA:1,   rowsB:60,  distB:1,   skew:100},
+  unique: {rowsA:120, distA:120, rowsB:400, distB:400, skew:0},
+};
+
+init()
+  .then(() => {
+    ids.forEach(id => $(id).addEventListener('input', recompute));
+    document.querySelectorAll('[data-preset]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = PRESETS[btn.dataset.preset];
+        for (const [k, val] of Object.entries(p)) $(k).value = val;
+        recompute();
+      });
+    });
+    state.tried = -1;           // the first paint is not a user attempt
+    recompute();
+  })
+  .catch(err => {
+    const box = $('load-error');
+    box.hidden = false;
+    box.textContent = 'Could not load the WebAssembly module: ' + err +
+      ' — this page needs to be served over http(s), not opened from the filesystem.';
+  });
+</script>
+
+</body>
+</html>

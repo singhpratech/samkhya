@@ -91,22 +91,57 @@ pub fn compare(suite: Suite, puffin_dir: Option<&Path>) -> Result<()> {
 /// when that feature is enabled in a downstream build. The CLI surface
 /// is exposed regardless so we can wire training in once the binary is
 /// rebuilt against `samkhya-core --features gbt`.
-pub fn train_stub(feedback_path: &Path, template: &str) -> Result<()> {
+/// Train a GBT residual corrector from a feedback store and persist it.
+///
+/// Trains only on observations that carry plan features
+/// (`FeedbackStore::plan_history`). Rows recorded without them are skipped
+/// rather than padded with zeros: a model fitted on a feature space the
+/// adapter does not reproduce at inference time is blind to everything but
+/// the baseline estimate, which is the defect this path exists to avoid.
+///
+/// The model is written to `out` so evaluation can run in a separate
+/// process against a frozen model. That separation is what makes a
+/// held-out measurement honest — a model frozen before the evaluation
+/// queries ran cannot have seen them.
+pub fn train(
+    feedback_path: &Path,
+    template: &str,
+    out: &Path,
+    options: samkhya_core::residual::gbt::GbtOptions,
+) -> Result<()> {
+    use samkhya_core::residual::gbt::GbtCorrector;
+
     let store = FeedbackStore::open(feedback_path)?;
-    let history = store.history(template)?;
-    if history.is_empty() {
+    let trainable = store.plan_history(template)?;
+
+    if trainable.is_empty() {
+        let legacy = store.history(template)?;
         return Err(Error::Feedback(format!(
-            "no observations found for template {template} in {}",
-            feedback_path.display()
+            "no trainable observations for template '{template}' in {}: found {} row(s), \
+             none carrying plan features. Re-run the suite with --feedback against a \
+             binary at 1.2.0 or later so features are recorded.",
+            feedback_path.display(),
+            legacy.len()
         )));
     }
+
+    let usable = trainable
+        .iter()
+        .filter(|o| o.features.baseline_estimate > 0 && o.actual_rows > 0)
+        .count();
     println!(
-        "train: would train a residual corrector on {} observations for template '{}'",
-        history.len(),
-        template
+        "train: {} observation(s) for template '{}', {} usable (non-zero baseline and actual)",
+        trainable.len(),
+        template,
+        usable
     );
+
+    let corrector = GbtCorrector::train_on_plans(&trainable, options)?;
+    corrector.save(out)?;
     println!(
-        "note: enable samkhya-core's `gbt` feature and link a custom binary to run actual training"
+        "train: fitted on {} row(s); model written to {}",
+        corrector.training_rows(),
+        out.display()
     );
     Ok(())
 }

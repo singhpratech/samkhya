@@ -6,7 +6,289 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The release candidate targets **v1.1.0** because it adds public adapter APIs.
+## [1.2.3] — 2026-07-24
+
+**Documentation corrections. No code, no API, no behaviour change.**
+
+1.2.2 rewrote every crate README. An adversarial verify pass then read each one
+back against its own source and found four crates with factual defects — and
+1.2.2 had already shipped. They are corrected here.
+
+The one that matters most: **`samkhya-py`'s README told readers to derive
+`distinct_counts` from a Count-Min sketch.** Count-Min bounds *frequencies*, not
+distinct values. Following that advice yields a degree of `rows − maxfreq + 1`,
+which *understates* the degree and produces a ceiling below the truth — exactly
+the unsoundness 1.2.0 exists to fix, reintroduced through documentation. From
+Python the sound source is an exact distinct count; sketch-derived degrees belong
+to the Rust `AttributeDegree::from_hll_floor` / `from_count_min` constructors,
+which return degrees rather than values to pass in.
+
+Also corrected:
+
+- `samkhya-py`: `selectivity_estimate` was described as the pre-1.2 `agm_bound`
+  value. It is not — the old one applied a `min × max` shortcut this does not,
+  and the two diverge by 100× on three relations. `BloomFilter` was documented as
+  raising on out-of-range parameters; it silently **clamps**. `merge` was implied
+  for all sketches; it is bound only on `HllSketch`. Wheel coverage was stated as
+  "one wheel per platform" when only `manylinux_2_34 x86_64` is published.
+- `samkhya-core`: `from_count_min` was shown returning `None` on saturation; it
+  returns `AttributeDegree`, degrading to `rows`. "No query engine in its
+  dependency tree" omitted that the default `feedback` feature bundles SQLite.
+- `samkhya-postgres`: documented `anyarray` where pgrx generates `anyelement[]`,
+  and carried a SQL example that errors before reaching the function. It named
+  one build blocker when there are two, and a test command that cannot run. The
+  SQL example is removed rather than corrected — the extension does not build,
+  and printing an example implies it does.
+- `samkhya-polars`: four signatures omitted their `Result` wrapper.
+- The Python type stubs still carried an `LpBound helpers` section header.
+
+
+## [1.2.2] — 2026-07-24
+
+**Package metadata only. No code, no API, no behaviour change.**
+
+1.2.1 corrected the one-line `description` field and I checked that field,
+declared it fixed, and missed the one that matters. On crates.io and PyPI the
+page body is the crate's `README.md`, and those were untouched — so
+`samkhya-py`'s PyPI page still read "its **LpBound** ceiling helpers", naming the
+bound family 1.2.0 found unsound, and carried two `../samkhya-core` links that
+404 outside the repository.
+
+Every published crate's README is rewritten against its actual source:
+
+- No crate advertises "LpBound" as something samkhya offers. References to the
+  real `lpbound::` module path remain, because that API exists.
+- No relative links. They resolve inside the repo and break on both registries;
+  all are now absolute.
+- `samkhya-postgres` opens by stating the planner-hook integration is **not
+  implemented** — which its own module docs have always said.
+- `samkhya-duckdb-ext` and `samkhya-gpudb` state their scaffold boundaries.
+- `samkhya-py` documents the real surface, including that `distinct_counts` must
+  be a *lower* bound on the true distinct count, since the degree is derived as
+  `rows - distinct + 1` and an overstated count yields an unsound ceiling.
+
+Each rewrite was verified against the crate's source for invented API names.
+
+
+## [1.2.1] — 2026-07-24
+
+**Package metadata only. No code, no API, no behaviour change.**
+
+Registry descriptions are baked in at publish time, so correcting them needs a
+release. `samkhya-core` was still advertising itself on crates.io as "sketches,
+**LpBound envelopes**, Puffin sidecars, and residual correctors" — naming the
+exact bound family 1.2.0 found unsound and deprecated. Several others described
+themselves by listing their own type names, which tells a reader nothing.
+
+Every crate now says what it does, leading with the provable ceiling rather than
+the machinery. The PyPI summary and the workspace description follow. `1.2.0` is
+unaffected and remains installable; nothing about it is wrong except how it
+introduced itself.
+
+
+### Added — the corrector can finally be measured
+
+The 2026-07-24 audit found the flagship JOB-Slow campaign had no corrector in
+its "corrected" arm, and that this was not an oversight in the run script: the
+bench CLI had no option that could attach one. `--corrector` offered `none` and
+`identity`, where `identity` returns the baseline unchanged. Underneath that,
+training was blind and models could not be persisted. Four connected gaps, none
+of which fails loudly.
+
+- `PlanObservation` and `FeedbackStore::record_plan` / `plan_history` record an
+  observation together with the plan features the corrector sees at inference
+  time. `Observation` carried only `est_rows` and `actual_rows`, so
+  `GbtCorrector::train` had to synthesise a vector with six of seven features
+  zeroed — constant across every training row, so no tree ever split on them.
+  The model was one-dimensional while the adapter fed it seven live features.
+  A silent train/serve skew, now covered by `tests/corrector_features.rs`, which
+  asserts the new path learns from `join_depth` and pins the legacy path's
+  blindness so it cannot be mistaken for working.
+- `GbtCorrector::train_on_plans` trains on the real feature vector.
+- `GbtCorrector::save` / `load` persist a fitted model, so training and
+  evaluation can run in separate processes. That separation is what makes a
+  held-out measurement honest: a model frozen before the evaluation queries ran
+  cannot have seen them.
+- `samkhya-bench train --feedback <db> --template <t> --out <model>` replaces a
+  stub that printed "would train a residual corrector" and trained nothing.
+  It refuses to train on featureless rows rather than padding them with zeros.
+- `samkhya-bench run --corrector gbt --model <path>` evaluates with a fitted
+  model, and `--only` / `--exclude` select query subsets so the training and
+  evaluation sets can be kept disjoint.
+- The feedback store gains nullable plan-feature columns via an idempotent
+  `ALTER TABLE` migration. Stores written by an older binary upgrade in place
+  and remain readable by one.
+
+### Added — JavaScript, vector search, and a live demo
+
+- `samkhya-wasm` — the JavaScript / TypeScript surface. `samkhya-core` compiled
+  to WebAssembly: five sketches, the provable ceiling, Puffin I/O, and the
+  hypergraph LP. 84 KB with generated `.d.ts`. Verified in Node —
+  `joinCeiling([10,100],[0,1],[10,10])` returns exactly 100, and sketches
+  round-trip byte-identically against the Rust format. Built, not yet published
+  to npm.
+- `samkhya-qdrant` — provable match-count ceilings for filtered vector search.
+  A Count-Min sketch never undercounts, so for an equality condition its
+  estimate is an upper *bound* on matching points — which is exactly what the
+  pre-filter / post-filter decision needs, and the failure that hurts there is
+  under-estimating. Bounds compose soundly through `AND` (min) and `OR` (sum
+  capped at the collection); `NOT` is left at the collection size rather than
+  quietly guessing, since no lower bound on the excluded set is available.
+  Computes bounds and recommends a strategy; does not link an engine, and the
+  README says so.
+- `docs/demo.html` — an interactive proof. A two-table join the reader controls,
+  with the true output counted from generated data and the ceiling computed
+  beside it by the same wasm binary the npm package ships. A scripted sweep of
+  **73,205 configurations** through that binary found **0 violations**, tightest
+  ratio exactly 1.000×.
+- `docs/index.html` rebuilt as a research page: the theorem with its proof, how
+  the unsound bound survived two releases, an evidence table that shows the
+  withdrawn rows rather than dropping them, and an honest per-target reach
+  matrix including the targets that are not reachable at all.
+
+### Added — a wasm-capable core
+
+- `samkhya-core`'s SQLite feedback store moves behind a default-on `feedback`
+  feature. `rusqlite` was the crate's one non-optional native dependency and the
+  only thing preventing a wasm32 build. With `--no-default-features` the crate
+  now compiles for `wasm32-unknown-unknown`, exposing the sketches, the provable
+  degree ceiling, Puffin I/O, and (with `lp_solver`) the hypergraph LP. Existing
+  consumers are unaffected: the feature is on by default, and `gbt` /
+  `additive_gbt` select it automatically.
+- `getrandom` gains its `js` feature on wasm targets, which is the remaining
+  requirement for that build.
+
+### Fixed
+
+- The runner's `avg q-error` summed only finite samples but divided by the
+  unfiltered count, so every unbounded sample silently pulled the average down
+  — which is how a "q-error" of 0.39 could be printed, when q-error is at least
+  1 by definition. It now reports the geometric mean over finite samples and
+  states how many were unbounded instead of dissolving them into the
+  denominator.
+
+### Note on what this measures
+
+The first honest held-out run on the synthetic suite — fit on S1–S5, evaluate on
+S6–S10 — gives q-error geomean **13.46 without the corrector and 26.41 with it**.
+The corrector roughly doubles the error. It was fitted on one usable row, so
+that is the expected outcome and not a surprise; it is recorded because the same
+setup evaluated on its own training queries shows an apparent improvement
+(4.58 → 1.86), and that gap is exactly the train-on-eval artefact this tooling
+exists to make impossible to publish by accident.
+
+
+## [1.2.0] — 2026-07-24
+
+**The ceiling is now actually provable.**
+
+An audit of the upper-bound envelope found that three of the four bounds
+shipped through v1.1 were not sound: they returned ceilings *below* the true
+join cardinality on the shapes that dominate analytical workloads. A correction
+clamped to such a ceiling underestimates, which is the regression the envelope
+exists to prevent. This release repairs the family, adds a bound that is both
+provable and tighter than the Cartesian product, and adds the test that would
+have caught the defect.
+
+Bound values only ever move **up** relative to v1.1 — never down — so no
+correction that was safe before becomes unsafe now. Behaviour changes are
+described per item below.
+
+### Fixed
+
+- `LpJoinBound` no longer returns ceilings below the truth. Its LP added one
+  cover constraint per *predicate*; the AGM bound requires one per *attribute*,
+  plus a full unit of cover weight for every relation carrying a column nothing
+  else covers. Those constraints were missing, so
+  `LpJoinBound::ceiling(&[10, 100], &[(0, 1)])` returned 10 for a foreign-key
+  join that emits 100 rows. The defect is invisible on a triangle — where the
+  two constraint sets coincide, and where the tests happened to look.
+- `ChainBound` no longer divides the Cartesian product by `max(D_i, D_j)`. That
+  is a uniform-distribution estimate, not an upper bound: two 20-row relations
+  with 5 distinct keys and 16 rows on one key join to 260 rows, and the formula
+  returned 80. It now derives a sound degree bound from the same distinct counts
+  and is exactly tight on foreign-key joins.
+- `AgmBound`'s `min × max` shortcut is not an AGM bound and was unsound for
+  three or more relations. It now returns `ProductBound` and is deprecated:
+  given only row counts and which pairs are joined, the Cartesian product is the
+  only sound answer, because every row of every relation may share one key value.
+- `examples/lpbound_tightness.rs` computed `(bound / truth).max(1.0)`. The clamp
+  turned every soundness violation into a perfect-tightness reading, so the
+  campaign could not detect the defect it was averaging over. It now reports
+  per-bound violation counts and unclamped ratios, and excludes trials where the
+  `u128` ground truth exceeds `u64::MAX` and every bound saturates.
+- `samkhya-py`'s `agm_bound` multiplied a ceiling by caller-supplied
+  selectivities. Selectivities are in `[0, 1]`, so this could only shrink the
+  result — passing `0.01` returned a "bound" a hundredth of the real ceiling. The
+  selectivity argument is now ignored; `selectivity_estimate` preserves the old
+  value under a name that says what it is.
+- `CountMinSketch::estimate`'s never-undercount guarantee is documented as
+  conditional on no counter having saturated, which `u32` saturation breaks.
+- `AttributeDegree::from_distinct` states its soundness obligation explicitly.
+  `maxdeg ≤ rows − distinct + 1` subtracts the distinct count, so it is sound
+  only if that count is a *lower* bound on the truth — and the obvious feeder is
+  the wrong one, since an HLL point estimate is two-sided and exceeds the truth
+  about half the time. `HllSketch::nonzero_registers` and
+  `AttributeDegree::from_hll_floor` provide a value that never does: every value
+  hashes to one register, so non-zero registers can only under-count.
+- `SamkhyaPreJoinRule` now recognises `SortMergeJoinExec`. Without it the entire
+  rule was a silent no-op under `prefer_hash_join = false`.
+
+### Added
+
+- `samkhya-core::degree` — a provable join ceiling from degree statistics.
+  `JoinGraph::ceiling` implements a spanning-tree degree bound that is sound for
+  bag semantics and exactly tight on foreign-key, star, and chain shapes.
+  Degrees come from a row count (`maxdeg ≤ rows`), a distinct count
+  (`maxdeg ≤ rows − distinct + 1`, exact for key columns), or a Count-Min sketch.
+- `AttributeDegree::from_count_min` and `CountMinSketch::max_frequency_bound`.
+  For any key `k`, `true_freq(k) ≤ estimate(k) ≤ max counter`, so a sketch's
+  largest counter bounds every key's degree at once without knowing which key is
+  hot. Since that sketch already rides in the Puffin sidecar, a ceiling proved
+  from statistics written by one engine holds in another — no shared catalog, no
+  re-scan. `CountMinSketch::is_saturated` reports the one condition under which
+  the chain fails.
+- `LpJoinBound::ceiling_hypergraph` and `HyperRelation` — the genuine
+  fractional-edge-cover LP over an explicit attribute hypergraph, which still
+  returns the AGM `n^1.5` bound for a triangle. `HyperRelation::new` assumes
+  private columns (the sound default); `HyperRelation::projected` opts out.
+- `tests/soundness_degree.rs` — six properties at 2,048 cases each that build
+  relation instances, brute-force the true join, and assert
+  `ceiling ≥ truth`. The pre-existing property suite checked only *relative*
+  invariants between bounds, which hold fine for a family that is wrong together.
+- `PreJoinCorrectionOptions::derive_ceiling` (default `true`) derives a finite
+  per-input ceiling in the DataFusion adapter: a join emits at most the product
+  of its children's rows, a filter at most its child's. Before this the shipped
+  default had no finite clamp at any layer, so the bound guarantee was absent
+  from the default DataFusion path unless an operator wired one up by hand.
+- `samkhya-py` gains `join_ceiling`, which exposes the provable bound to Python.
+- `SAFE_MAX_ROWS` (2^40) caps every row count the DataFusion rule publishes.
+  DataFusion's join-cardinality estimator multiplies published row counts
+  without an overflow check, so a corrector proposing `u64::MAX` wrapped into a
+  meaningless number inside the planner. This is a sanity cap on absurd inputs,
+  not a proof that the engine's arithmetic is total.
+
+### Changed
+
+- `bench-results/07_lpbound_tightness.md` is **retracted**, including its 40.95×
+  star-5 headline. That ratio was `AgmBound / LpJoinBound` on instances where
+  `LpJoinBound` had collapsed a star to its hub row count, so it was large in
+  proportion to how far below the truth the denominator had fallen. Corrected,
+  the v1.1 figure is undefined; on the repaired bounds it is 1.070×. It was also
+  never a wallclock speedup, and is no longer described as one.
+- `bench-results/20_bound_soundness.md` records the audit and the repair:
+  **2,179 violations in 3,704 bound-evaluations before, 0 after.**
+- `bench-results/OPEN_AUDIT_ITEMS.md` registers what the same audit raised that
+  this release does *not* answer — including a possible run-order confound in the
+  JOB-Slow campaign — with each item marked confirmed, credible-but-unverified,
+  or open.
+
+## [1.1.0] — 2026-07-14
+
+This minor release adds public adapter APIs — a safe DataFusion pre-join
+correction path and a portable Puffin statistics handoff shared across
+Iceberg, DataFusion, and DuckDB — which is why it is a minor rather than a
+patch release.
 
 ### Added
 
@@ -1170,7 +1452,12 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/singhpratech/samkhya/compare/v1.2.2...v1.2.3
+[1.2.2]: https://github.com/singhpratech/samkhya/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/singhpratech/samkhya/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/singhpratech/samkhya/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/singhpratech/samkhya/compare/v1.0.0...v1.1.0
 [v1.0.0-rc.2]: https://github.com/singhpratech/samkhya/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/singhpratech/samkhya/releases/tag/v1.0.0
 [0.9.0]: https://github.com/singhpratech/samkhya/releases/tag/v0.9.0

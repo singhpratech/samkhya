@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya integration helpers for the Arrow ecosystem (Series → Sketch builders)"
+description = "Arrow integration for samkhya: build portable statistics sketches from Arrow arrays"
 
 [dependencies]
 samkhya-core.workspace = true

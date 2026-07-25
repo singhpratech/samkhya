@@ -8,7 +8,7 @@ to match.
 
 from __future__ import annotations
 
-from typing import List, Tuple, Type, TypeVar
+from typing import List, Optional, Tuple, Type, TypeVar
 
 __version__: str
 
@@ -79,7 +79,7 @@ class EquiDepthHistogram:
     def from_bytes(cls: Type[_E], data: bytes) -> _E: ...
     def __repr__(self) -> str: ...
 
-# -- LpBound helpers ---------------------------------------------------------
+# -- Join-ceiling helpers ---------------------------------------------------
 
 def product_bound(card_estimates: List[float]) -> float:
     """Trivial Cartesian-product upper bound: ``prod(card_estimates)``."""
@@ -88,10 +88,41 @@ def agm_bound(
     joins: List[Tuple[int, int, float]],
     card_estimates: List[float],
 ) -> float:
-    """Selectivity-weighted AGM upper bound for an equi-join graph.
+    """Provable upper bound for an equi-join graph.
 
     Each entry in ``joins`` is ``(left_idx, right_idx, predicate_selectivity)``
     where the indices reference positions in ``card_estimates``.
+
+    Changed in 1.2.0: the selectivity field is ignored. Multiplying a ceiling
+    by a selectivity in ``[0, 1]`` can only shrink it, which destroys the
+    upper-bound property. Use :func:`selectivity_estimate` for the old value
+    (an estimate, not a bound) or :func:`join_ceiling` for a bound that is
+    provable *and* tighter than the Cartesian product.
+    """
+
+def selectivity_estimate(
+    joins: List[Tuple[int, int, float]],
+    card_estimates: List[float],
+) -> float:
+    """System-R-style selectivity-weighted cardinality *estimate*.
+
+    The pre-1.2 behaviour of :func:`agm_bound`, under a name that says what it
+    is. This can land below the true cardinality; never clamp a corrector to it.
+    """
+
+def join_ceiling(
+    joins: List[Tuple[int, int]],
+    card_estimates: List[float],
+    distinct_counts: Optional[List[float]] = None,
+) -> float:
+    """Provable join ceiling from row counts and distinct-value counts.
+
+    ``distinct_counts`` gives the number of distinct join-key values per
+    relation; entries that are zero, missing, or larger than the row count
+    degrade safely to "no degree information" rather than an unsound value.
+
+    On a foreign-key join of 10 orders to 100 line items over 10 distinct keys
+    this returns exactly 100, where the Cartesian product returns 1000.
     """
 
 def samkhya_version() -> str:

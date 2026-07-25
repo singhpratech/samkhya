@@ -3,8 +3,9 @@
 //! Validates the sub-ms inference / sub-MB sketch budgets from samkhya.md §3
 //! and guards against regressions on the HLL and Bloom hot paths.
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use samkhya_core::sketches::{BloomFilter, HllSketch, Sketch};
+use std::hint::black_box;
 
 fn bench_hll_add_1k(c: &mut Criterion) {
     let mut group = c.benchmark_group("hll");

@@ -91,23 +91,42 @@ impl UpperBound for ProductBound {
     }
 }
 
-/// Frequency-moment chain-join upper bound.
+/// Degree-derived chain-join upper bound.
 ///
-/// Assumes each equality predicate `(i, j)` joins on a single key whose
-/// distinct-value count is given by `distinct_counts[i]` and
-/// `distinct_counts[j]`. The bound is:
+/// Takes a per-relation distinct-key count and converts it into a sound
+/// bound on the relation's maximum join degree,
+/// `maxdeg_i ≤ |R_i| − D_i + 1`, then applies the spanning-tree degree
+/// ceiling from [`crate::degree`]. Falls back to [`ProductBound`] when no
+/// equality predicates are supplied.
 ///
-/// ```text
-/// |R_i ⋈ R_j| ≤ |R_i| * |R_j| / max(D_i, D_j)
+/// # Caller obligation
+///
+/// `distinct_counts[i]` must be the distinct-value count of the *join key*
+/// relation `i` carries, and it must not over-state the truth — an HLL
+/// reading that comes back high would relax the derived degree bound in the
+/// unsafe direction. [`crate::sketches::HllSketch`] readings should be used
+/// at or below their estimate, not above it.
+///
+/// # Soundness note (changed in 1.2.0)
+///
+/// Through v1.1 this bound divided the Cartesian product by
+/// `max(D_i, D_j)` per predicate. That formula is a uniform-distribution
+/// *estimate*, not an upper bound: under skew it lands below the true
+/// cardinality. Concretely, two 20-row relations with 5 distinct keys each
+/// and 16 rows piled on one key join to 260 rows, while the old formula
+/// returned 80. The bound now returns 320 for that instance — larger, and
+/// actually provable. See `crate::degree` for the theorem.
+///
+/// # Examples
+///
 /// ```
+/// use samkhya_core::lpbound::{ChainBound, UpperBound};
 ///
-/// (Uniform-distribution worst case; tight in expectation when join
-/// keys are evenly spread.) Applied sequentially across all equality
-/// predicates: the result of each join feeds the next bound.
-///
-/// Tighter than [`AgmBound`] for tree / chain joins where each relation
-/// has a non-trivial distinct-key count. Falls back to [`ProductBound`]
-/// when no equality predicates are supplied.
+/// // A foreign-key join: 10 orders, 100 line items, 10 distinct keys on
+/// // both sides. Bounds exactly at the true output of 100 rows.
+/// let cb = ChainBound::new(vec![10, 10]);
+/// assert_eq!(cb.ceiling(&[10, 100], &[(0, 1)]), 100);
+/// ```
 pub struct ChainBound {
     pub distinct_counts: Vec<u64>,
 }
@@ -120,10 +139,10 @@ impl ChainBound {
     /// ```
     /// use samkhya_core::lpbound::{ChainBound, UpperBound};
     ///
-    /// // Two 1000-row relations, joining on a key with 100 distinct values:
-    /// // ceiling = 1000 * 1000 / max(100, 100) = 10_000.
+    /// // Two 1000-row relations over a key with 100 distinct values: at
+    /// // worst 901 rows share one value, so the ceiling is 1000 * 901.
     /// let cb = ChainBound::new(vec![100, 100]);
-    /// assert_eq!(cb.ceiling(&[1_000, 1_000], &[(0, 1)]), 10_000);
+    /// assert_eq!(cb.ceiling(&[1_000, 1_000], &[(0, 1)]), 901_000);
     /// ```
     pub fn new(distinct_counts: Vec<u64>) -> Self {
         Self { distinct_counts }
@@ -138,32 +157,68 @@ impl UpperBound for ChainBound {
         if equality_predicates.is_empty() {
             return ProductBound.ceiling(relations, &[]);
         }
-        // Each predicate divides the running product by the larger of
-        // the two endpoint distinct counts (or 1 if unknown).
-        let mut bound: u128 = relations
-            .iter()
-            .fold(1u128, |acc, &n| acc.saturating_mul(n as u128));
-        for &(i, j) in equality_predicates {
-            let d_i = self.distinct_counts.get(i).copied().unwrap_or(1).max(1) as u128;
-            let d_j = self.distinct_counts.get(j).copied().unwrap_or(1).max(1) as u128;
-            let d = d_i.max(d_j);
-            bound /= d;
-        }
-        if bound > u64::MAX as u128 {
-            u64::MAX
-        } else {
-            bound as u64
-        }
+        degree_graph(relations, equality_predicates, Some(&self.distinct_counts)).ceiling()
     }
 }
 
-/// Coarse AGM-style upper bound for equi-joins.
+/// Build the [`crate::degree::JoinGraph`] implied by the legacy
+/// `(row counts, predicate pairs)` surface.
 ///
-/// Returns `min(product, |R_min| * |R_max|)` when at least one equality
-/// predicate exists, otherwise falls back to [`ProductBound`]. This is a
-/// placeholder approximation; the true AGM / LpBound bound requires
-/// fractional edge cover / LP relaxation — see `LpJoinBound` (under the
-/// `lp_solver` feature) for the principled construction.
+/// Each predicate is treated as introducing its own join attribute, and a
+/// relation's degree on every attribute it touches is derived from its
+/// single supplied distinct count. With no distinct counts the degrees are
+/// unknown and the ceiling collapses to the Cartesian product — sound, and
+/// the honest answer for that input.
+fn degree_graph(
+    relations: &[u64],
+    equality_predicates: &[(usize, usize)],
+    distinct_counts: Option<&[u64]>,
+) -> crate::degree::JoinGraph {
+    use crate::degree::{AttributeDegree, JoinGraph, JoinRelation};
+
+    let n = relations.len();
+    let mut built: Vec<JoinRelation> = relations
+        .iter()
+        .map(|&rows| JoinRelation::new(rows))
+        .collect();
+
+    for (attribute, &(i, j)) in equality_predicates.iter().enumerate() {
+        if i >= n || j >= n || i == j {
+            continue;
+        }
+        let attribute = attribute as u32;
+        for endpoint in [i, j] {
+            let rows = relations[endpoint];
+            let degree = match distinct_counts.and_then(|d| d.get(endpoint).copied()) {
+                Some(distinct) => AttributeDegree::from_distinct(rows, distinct),
+                None => AttributeDegree::unknown(rows),
+            };
+            built[endpoint] = std::mem::replace(&mut built[endpoint], JoinRelation::new(rows))
+                .with_degree(attribute, degree);
+        }
+    }
+
+    let mut graph = JoinGraph::new(built);
+    for (attribute, &(i, j)) in equality_predicates.iter().enumerate() {
+        graph = graph.with_edge(i, j, attribute as u32);
+    }
+    graph
+}
+
+/// Cartesian-product bound retained under its historical name.
+///
+/// # Soundness note (changed in 1.2.0)
+///
+/// Through v1.1 this returned `min(product, |R_min| · |R_max|)`. That
+/// shortcut is not an AGM bound and is unsound for three or more relations:
+/// three 3-row relations chained on one shared key value join to 27 rows,
+/// while the shortcut returned 9. Given only row counts and which pairs are
+/// joined, the Cartesian product is the *only* sound ceiling — every row of
+/// every relation may share a single key value. This type therefore now
+/// returns exactly [`ProductBound`].
+///
+/// To do better, supply degree statistics via [`crate::degree::JoinGraph`],
+/// which bounds the same foreign-key join at 100 rows instead of 1000.
 ///
 /// # Examples
 ///
@@ -171,24 +226,23 @@ impl UpperBound for ChainBound {
 /// use samkhya_core::lpbound::{AgmBound, ProductBound, UpperBound};
 ///
 /// let r = [1_000u64, 1_000_000];
-/// let bound = AgmBound.ceiling(&r, &[(0, 1)]);
-/// // AGM is always at least as tight as the cartesian product.
-/// assert!(bound <= ProductBound.ceiling(&r, &[]));
+/// assert_eq!(
+///     AgmBound.ceiling(&r, &[(0, 1)]),
+///     ProductBound.ceiling(&r, &[])
+/// );
 /// ```
+#[deprecated(
+    since = "1.2.0",
+    note = "the min*max shortcut was unsound for 3+ relations and now simply returns \
+            ProductBound; use samkhya_core::degree::JoinGraph for a bound that is both \
+            provable and tighter"
+)]
 pub struct AgmBound;
 
+#[allow(deprecated)]
 impl UpperBound for AgmBound {
-    fn ceiling(&self, relations: &[u64], equality_predicates: &[(usize, usize)]) -> u64 {
-        if relations.is_empty() {
-            return 0;
-        }
-        if equality_predicates.is_empty() {
-            return ProductBound.ceiling(relations, &[]);
-        }
-        let product: u64 = relations.iter().fold(1u64, |acc, &n| acc.saturating_mul(n));
-        let min_r = *relations.iter().min().unwrap_or(&0);
-        let max_r = *relations.iter().max().unwrap_or(&0);
-        product.min(min_r.saturating_mul(max_r))
+    fn ceiling(&self, relations: &[u64], _equality_predicates: &[(usize, usize)]) -> u64 {
+        ProductBound.ceiling(relations, &[])
     }
 }
 
@@ -312,6 +366,75 @@ impl Default for LpJoinBound {
     }
 }
 
+/// One relation described as a hyperedge: its row count, the join
+/// attributes it exposes, and whether it also carries columns nothing else
+/// covers.
+///
+/// The `has_private_attributes` flag is what makes a fractional edge cover
+/// well defined. A relation contributing any column that no other relation
+/// supplies must take a full unit of cover weight, because the output
+/// projected onto that relation's columns is a subset of the relation
+/// itself. Defaulting the flag to `true` keeps the bound sound for callers
+/// that have not thought about it — the honest default for a safety
+/// envelope.
+#[cfg(feature = "lp_solver")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HyperRelation {
+    /// Row count of the relation.
+    pub rows: u64,
+    /// Join attributes this relation exposes. Two relations share an
+    /// attribute exactly when the same identifier appears in both lists.
+    pub attributes: Vec<u32>,
+    /// Whether the relation contributes output columns no other relation
+    /// covers. `true` is the safe default.
+    pub has_private_attributes: bool,
+}
+
+#[cfg(feature = "lp_solver")]
+impl HyperRelation {
+    /// A relation that carries private columns in addition to its join
+    /// attributes — the ordinary `SELECT *` case.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::lpbound::HyperRelation;
+    ///
+    /// let r = HyperRelation::new(1_000, vec![0, 1]);
+    /// assert!(r.has_private_attributes);
+    /// ```
+    pub fn new(rows: u64, attributes: Vec<u32>) -> Self {
+        Self {
+            rows,
+            attributes,
+            has_private_attributes: true,
+        }
+    }
+
+    /// A relation already projected down to its join attributes, so nothing
+    /// outside the cover needs charging.
+    ///
+    /// Declare this only when it is true — a semi-join-reduced input, a
+    /// pure bridge table, or a query that projects to join keys. Declaring
+    /// it falsely makes the ceiling unsound.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::lpbound::HyperRelation;
+    ///
+    /// let r = HyperRelation::projected(1_000, vec![0, 1]);
+    /// assert!(!r.has_private_attributes);
+    /// ```
+    pub fn projected(rows: u64, attributes: Vec<u32>) -> Self {
+        Self {
+            rows,
+            attributes,
+            has_private_attributes: false,
+        }
+    }
+}
+
 #[cfg(feature = "lp_solver")]
 impl LpJoinBound {
     /// Construct a bound with no distinct-count overrides. The objective
@@ -331,31 +454,51 @@ impl LpJoinBound {
     /// Same semantics as [`UpperBound::ceiling`]; surfaced here so
     /// callers can avoid importing the trait when they already hold an
     /// `&LpJoinBound`.
+    ///
+    /// # Soundness note (changed in 1.2.0)
+    ///
+    /// Row counts plus a list of joined relation *pairs* do not determine a
+    /// fractional edge cover: the pair list says nothing about the columns
+    /// each relation contributes to the output, and every relation that
+    /// carries a column no other relation covers must take a full unit of
+    /// cover weight. Through v1.1 this method solved an LP with one
+    /// constraint per predicate and no private-attribute constraints, which
+    /// bounded a 10-row ⋈ 100-row foreign-key join at 10 rows — the join
+    /// really returns 100.
+    ///
+    /// This entry point now delegates to the degree-derived ceiling in
+    /// [`crate::degree`], which is provable on the same input. Use
+    /// [`Self::ceiling_hypergraph`] when the attribute schema is known and
+    /// the fractional-edge-cover LP is genuinely applicable — that path
+    /// still returns the AGM `n^1.5` bound for a triangle.
     pub fn ceiling(&self, relations: &[u64], equality_predicates: &[(usize, usize)]) -> u64 {
-        self.solve(relations, equality_predicates, /*use_distinct=*/ false)
+        if relations.is_empty() {
+            return 0;
+        }
+        if equality_predicates.is_empty() {
+            return ProductBound.ceiling(relations, &[]);
+        }
+        degree_graph(relations, equality_predicates, None).ceiling()
     }
 
-    /// Like [`Self::ceiling`] but folds the supplied distinct counts
-    /// into the per-relation objective coefficient. If the supplied
-    /// vector is shorter than `relations` or contains zero entries the
-    /// missing entries fall back to the row count.
+    /// Like [`Self::ceiling`] but folds the distinct counts supplied to
+    /// [`Self::with_distinct_counts`] into a sound per-relation degree
+    /// bound (`maxdeg ≤ rows − distinct + 1`). Missing or inconsistent
+    /// entries fall back to the row count.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::lpbound::LpJoinBound;
+    ///
+    /// // 10 orders, 100 line items, 10 distinct order keys: bounds exactly.
+    /// let bound = LpJoinBound::with_distinct_counts(vec![10, 10]);
+    /// assert_eq!(bound.ceiling_with_distinct(&[10, 100], &[(0, 1)]), 100);
+    /// ```
     pub fn ceiling_with_distinct(
         &self,
         relations: &[u64],
         equality_predicates: &[(usize, usize)],
-    ) -> u64 {
-        self.solve(relations, equality_predicates, /*use_distinct=*/ true)
-    }
-
-    /// Core solver: build the per-connected-component LP, solve each,
-    /// and multiply the per-component ceilings. Falls back to
-    /// [`ProductBound`] / [`AgmBound`] if the solver fails for any
-    /// reason — the envelope must never crash the engine.
-    fn solve(
-        &self,
-        relations: &[u64],
-        equality_predicates: &[(usize, usize)],
-        use_distinct: bool,
     ) -> u64 {
         if relations.is_empty() {
             return 0;
@@ -363,164 +506,131 @@ impl LpJoinBound {
         if equality_predicates.is_empty() {
             return ProductBound.ceiling(relations, &[]);
         }
-
-        // Validate predicate indices; defensively drop any out-of-range
-        // pair. A misbuilt join graph must never crash the envelope.
-        let n = relations.len();
-        let preds: Vec<(usize, usize)> = equality_predicates
-            .iter()
-            .copied()
-            .filter(|&(i, j)| i < n && j < n && i != j)
-            .collect();
-        if preds.is_empty() {
-            return ProductBound.ceiling(relations, &[]);
-        }
-
-        // Build connected components over the relation graph induced by
-        // the equality predicates. Each component's LP is independent;
-        // we solve them separately and multiply the ceilings.
-        let components = connected_components(n, &preds);
-        let mut total: u128 = 1;
-        for comp in &components {
-            let ceil = self.solve_component(relations, &preds, comp, use_distinct);
-            total = total.saturating_mul(ceil as u128);
-            if total >= u64::MAX as u128 {
-                return u64::MAX;
-            }
-        }
-        total as u64
+        degree_graph(relations, equality_predicates, Some(&self.distinct_counts)).ceiling()
     }
 
-    /// Solve the AGM LP restricted to a single connected component.
-    fn solve_component(
-        &self,
-        relations: &[u64],
-        all_predicates: &[(usize, usize)],
-        component: &[usize],
-        use_distinct: bool,
-    ) -> u64 {
-        // Singleton component (no predicate incident): output cardinality
-        // is just the relation size.
-        if component.len() == 1 {
-            return relations[component[0]];
+    /// Solve the genuine fractional-edge-cover LP over an explicit
+    /// attribute hypergraph.
+    ///
+    /// This is the AGM bound as Atserias, Grohe and Marx define it: one
+    /// cover constraint per *attribute*, not per predicate. For a triangle
+    /// whose three relations expose only their join attributes it returns
+    /// `(|R₀|·|R₁|·|R₂|)^(1/2)`; for relations carrying private columns it
+    /// correctly charges each of them a full unit of cover weight and
+    /// degrades toward the Cartesian product.
+    ///
+    /// The result is capped at [`ProductBound`] and falls back to it if the
+    /// solver fails — the envelope must never crash the engine, and must
+    /// never return below the product's guarantee.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::lpbound::{HyperRelation, LpJoinBound};
+    ///
+    /// // Triangle R(a,b), S(b,c), T(c,a): no private columns anywhere.
+    /// let tri = vec![
+    ///     HyperRelation::projected(100, vec![0, 1]),
+    ///     HyperRelation::projected(100, vec![1, 2]),
+    ///     HyperRelation::projected(100, vec![2, 0]),
+    /// ];
+    /// assert_eq!(LpJoinBound::new().ceiling_hypergraph(&tri), 1_000);
+    ///
+    /// // The same shape where each relation also carries its own columns:
+    /// // every cover weight is forced to 1, so the ceiling is the product.
+    /// let wide = vec![
+    ///     HyperRelation::new(100, vec![0, 1]),
+    ///     HyperRelation::new(100, vec![1, 2]),
+    ///     HyperRelation::new(100, vec![2, 0]),
+    /// ];
+    /// assert_eq!(LpJoinBound::new().ceiling_hypergraph(&wide), 1_000_000);
+    /// ```
+    pub fn ceiling_hypergraph(&self, relations: &[HyperRelation]) -> u64 {
+        let rows: Vec<u64> = relations.iter().map(|r| r.rows).collect();
+        let product = ProductBound.ceiling(&rows, &[]);
+        if relations.is_empty() {
+            return 0;
         }
+        // Any relation with private columns must be fully covered, so if
+        // every relation has them the LP optimum is the product outright.
+        if relations.iter().all(|r| r.has_private_attributes) {
+            return product;
+        }
+        match self.solve_hypergraph(relations) {
+            Some(value) => value.min(product),
+            None => product,
+        }
+    }
 
-        // Subset of predicates whose endpoints both lie in this
-        // component. (Every predicate connecting two members of a
-        // component is in the component by definition; we filter only
-        // for safety.)
-        let in_comp: std::collections::HashSet<usize> = component.iter().copied().collect();
-        let comp_preds: Vec<(usize, usize)> = all_predicates
-            .iter()
-            .copied()
-            .filter(|&(i, j)| in_comp.contains(&i) && in_comp.contains(&j))
-            .collect();
-
-        // Build the LP via `good_lp`. One x_r per relation in the
-        // component; one >= 1 constraint per equality predicate
-        // (each predicate introduces a distinct shared attribute).
+    /// Build and solve the attribute-level cover LP. Returns `None` when
+    /// the solver fails or produces a non-finite objective.
+    fn solve_hypergraph(&self, relations: &[HyperRelation]) -> Option<u64> {
         use good_lp::{
             Expression, ProblemVariables, Solution, SolverModel, default_solver, variable,
         };
 
         let mut vars = ProblemVariables::new();
-        // Map: relation index in the global `relations` vector ->
-        // good_lp variable handle.
-        let mut var_for: std::collections::HashMap<usize, good_lp::Variable> =
-            std::collections::HashMap::with_capacity(component.len());
-        // Build the objective expression in tandem with adding
-        // variables so coefficients line up with relation order.
-        let mut objective = Expression::with_capacity(component.len());
-        for &r in component {
+        let mut handles = Vec::with_capacity(relations.len());
+        let mut objective = Expression::with_capacity(relations.len());
+
+        for relation in relations {
             let v = vars.add(variable().min(0.0));
-            var_for.insert(r, v);
-            let row_count = relations[r];
-            // Coefficient = log(effective size). Effective size = row
-            // count, optionally clamped to the supplied distinct count
-            // (which can only shrink it).
-            let mut size_f = row_count as f64;
-            if use_distinct {
-                if let Some(&d) = self.distinct_counts.get(r) {
-                    if d > 0 {
-                        size_f = size_f.min(d as f64);
-                    }
-                }
-            }
-            // log(0) is undefined; we treat an empty relation as
-            // contributing 0 to the log-sum (the join is empty anyway).
-            // log(1) is 0 and would let the LP put unbounded weight on
-            // that variable without paying — we clamp the coefficient
-            // away from zero with a tiny epsilon so the objective is
-            // strictly minimised.
-            let coef = if size_f <= 1.0 { 0.0 } else { size_f.ln() };
-            objective.add_mul(coef, v);
+            handles.push(v);
+            let size = relation.rows as f64;
+            let coefficient = if size <= 1.0 { 0.0 } else { size.ln() };
+            objective.add_mul(coefficient, v);
         }
 
-        // Add one >= 1 fractional-cover constraint per predicate.
-        // good_lp's `Expression >> rhs` operator builds a >= constraint.
         let mut model = vars.minimise(&objective).using(default_solver);
-        for &(i, j) in &comp_preds {
-            let xi = var_for[&i];
-            let xj = var_for[&j];
-            let lhs: Expression = xi + xj;
-            model = model.with(lhs.geq(1.0));
-        }
 
-        match model.solve() {
-            Ok(sol) => {
-                let lp_min = sol.eval(&objective);
-                // exp(LP_min) is the AGM ceiling. Guard against
-                // negative noise from the simplex and against overflow.
-                let raw = lp_min.exp();
-                if !raw.is_finite() || raw < 0.0 {
-                    return self.fallback(relations, &comp_preds, component);
-                }
-                // Always at least 1 (a join with at least one row in
-                // both endpoints can return one row); cap at u64::MAX.
-                let raw = raw.max(1.0);
-                if raw >= u64::MAX as f64 {
-                    u64::MAX
-                } else {
-                    // Snap to nearest integer when within a tight
-                    // relative epsilon: `exp(ln(n))` for integer `n`
-                    // can drift to `n + 1e-12` and a blind ceil would
-                    // push the per-component bound a full integer
-                    // above the true AGM optimum, breaking the
-                    // contract that LpJoinBound <= AgmBound. Only
-                    // ceil when the LP value is materially above the
-                    // nearest integer.
-                    let rounded = raw.round();
-                    let snap_eps = 1e-9_f64.max(raw.abs() * 1e-12);
-                    if (raw - rounded).abs() <= snap_eps {
-                        rounded as u64
-                    } else {
-                        raw.ceil() as u64
-                    }
+        // One cover constraint per distinct attribute.
+        let attributes: std::collections::BTreeSet<u32> = relations
+            .iter()
+            .flat_map(|r| r.attributes.iter().copied())
+            .collect();
+        for attribute in attributes {
+            let mut lhs = Expression::with_capacity(relations.len());
+            let mut covered = false;
+            for (idx, relation) in relations.iter().enumerate() {
+                if relation.attributes.contains(&attribute) {
+                    lhs.add_mul(1.0, handles[idx]);
+                    covered = true;
                 }
             }
-            Err(_) => self.fallback(relations, &comp_preds, component),
+            if covered {
+                model = model.with(lhs.geq(1.0));
+            }
         }
-    }
 
-    /// Conservative fallback when the LP solver fails. Returns the
-    /// minimum row count among the component's relations (a valid AGM
-    /// upper bound when at least one predicate covers every relation in
-    /// the component), or [`ProductBound`] over the component otherwise.
-    fn fallback(
-        &self,
-        relations: &[u64],
-        comp_preds: &[(usize, usize)],
-        component: &[usize],
-    ) -> u64 {
-        if comp_preds.is_empty() {
-            return component
-                .iter()
-                .map(|&r| relations[r])
-                .fold(1u64, |a, n| a.saturating_mul(n));
+        // Private columns force a full unit of cover on their relation. A
+        // relation exposing no join attribute at all is in the same
+        // position: nothing can cover it, and under bag semantics it
+        // multiplies the output by its own row count.
+        for (idx, relation) in relations.iter().enumerate() {
+            if relation.has_private_attributes || relation.attributes.is_empty() {
+                let lhs: Expression = handles[idx].into();
+                model = model.with(lhs.geq(1.0));
+            }
         }
-        let comp_rows: Vec<u64> = component.iter().map(|&r| relations[r]).collect();
-        let agm = AgmBound;
-        agm.ceiling(&comp_rows, &[(0, 1)])
+
+        let solution = model.solve().ok()?;
+        let optimum = solution.eval(&objective).exp();
+        if !optimum.is_finite() || optimum < 0.0 {
+            return None;
+        }
+        let optimum = optimum.max(1.0);
+        if optimum >= u64::MAX as f64 {
+            return Some(u64::MAX);
+        }
+        // `exp(ln(n))` drifts; snap to the nearest integer when the value is
+        // within a relative epsilon of it, otherwise round up.
+        let rounded = optimum.round();
+        let epsilon = 1e-9_f64.max(optimum.abs() * 1e-12);
+        Some(if (optimum - rounded).abs() <= epsilon {
+            rounded as u64
+        } else {
+            optimum.ceil() as u64
+        })
     }
 }
 
@@ -529,45 +639,6 @@ impl UpperBound for LpJoinBound {
     fn ceiling(&self, relations: &[u64], equality_predicates: &[(usize, usize)]) -> u64 {
         self.ceiling(relations, equality_predicates)
     }
-}
-
-/// Return the connected components of the graph on `0..n` with edges
-/// given by `edges`. Each component is a sorted list of vertex indices.
-/// Singleton vertices (no incident edge) appear as one-element
-/// components — every relation index in `0..n` is in exactly one
-/// component.
-#[cfg(feature = "lp_solver")]
-fn connected_components(n: usize, edges: &[(usize, usize)]) -> Vec<Vec<usize>> {
-    let mut parent: Vec<usize> = (0..n).collect();
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        x
-    }
-    for &(a, b) in edges {
-        if a >= n || b >= n {
-            continue;
-        }
-        let ra = find(&mut parent, a);
-        let rb = find(&mut parent, b);
-        if ra != rb {
-            parent[ra] = rb;
-        }
-    }
-    let mut groups: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
-    for v in 0..n {
-        let r = find(&mut parent, v);
-        groups.entry(r).or_default().push(v);
-    }
-    let mut out: Vec<Vec<usize>> = groups.into_values().collect();
-    for c in &mut out {
-        c.sort_unstable();
-    }
-    // Sort components by their smallest member for deterministic order.
-    out.sort_by_key(|c| c[0]);
-    out
 }
 
 #[cfg(test)]
@@ -590,16 +661,26 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn agm_no_predicates_falls_back_to_product() {
         assert_eq!(AgmBound.ceiling(&[10, 20, 30], &[]), 10 * 20 * 30);
     }
 
+    /// Since 1.2.0 the deprecated shortcut simply is the product: given
+    /// only row counts and a predicate list there is nothing sound to
+    /// gain, and the old `min * max` answer was below the truth for three
+    /// or more relations.
     #[test]
-    fn agm_with_predicates_tighter_than_product() {
+    #[allow(deprecated)]
+    fn agm_now_equals_the_product() {
         let r = [1_000u64, 1_000_000];
-        let bound = AgmBound.ceiling(&r, &[(0, 1)]);
-        let product = ProductBound.ceiling(&r, &[]);
-        assert!(bound <= product);
+        assert_eq!(
+            AgmBound.ceiling(&r, &[(0, 1)]),
+            ProductBound.ceiling(&r, &[])
+        );
+        // The instance that exposed the defect: three 3-row relations on
+        // one shared key value really do join to 27 rows.
+        assert_eq!(AgmBound.ceiling(&[3, 3, 3], &[(0, 1), (1, 2)]), 27);
     }
 
     #[test]
@@ -621,24 +702,52 @@ mod tests {
 
     #[test]
     fn chain_bound_tighter_than_product() {
-        // Two relations of 1000 rows each, joining on a key with 100 distinct values.
-        // Product = 1_000_000; ChainBound = 1000 * 1000 / 100 = 10_000.
+        // Two relations of 1000 rows each over a key with 100 distinct
+        // values. At worst 1000 - 100 + 1 = 901 rows share one value, so
+        // the ceiling is 1000 * 901 — below the product, and provable.
         let r = [1_000u64, 1_000];
         let cb = ChainBound::new(vec![100, 100]);
         let bound = cb.ceiling(&r, &[(0, 1)]);
-        assert_eq!(bound, 10_000);
+        assert_eq!(bound, 901_000);
         let product = ProductBound.ceiling(&r, &[]);
         assert!(bound < product);
     }
 
     #[test]
-    fn chain_bound_three_table_chain() {
-        // R1(1000) ⋈ R2(2000) ⋈ R3(500), join keys 100 distinct each side.
-        // Product = 1e9. Chain = 1e9 / 100 / 100 = 100_000.
+    fn chain_bound_is_exact_on_a_foreign_key_join() {
+        // The shape that dominates analytical workloads: a key side and a
+        // fact side. maxdeg on the key side is 1, so the ceiling is the
+        // fact table's row count exactly.
+        let cb = ChainBound::new(vec![10, 10]);
+        assert_eq!(cb.ceiling(&[10, 100], &[(0, 1)]), 100);
+    }
+
+    #[test]
+    fn chain_bound_three_table_chain_stays_below_product() {
+        // R0(1000) ⋈ R1(2000) ⋈ R2(500), 100 distinct join keys each.
         let r = [1_000u64, 2_000, 500];
         let cb = ChainBound::new(vec![100, 100, 100]);
         let bound = cb.ceiling(&r, &[(0, 1), (1, 2)]);
-        assert_eq!(bound, 100_000);
+        let product = ProductBound.ceiling(&r, &[]);
+        assert!(
+            bound < product,
+            "chain bound {bound} should be below product {product}"
+        );
+        // Sanity: still far above the old, unsound 100_000.
+        assert!(bound > 100_000);
+    }
+
+    /// Regression guard for the v1.1 soundness defect. Two 20-row relations
+    /// with 5 distinct keys and 16 rows piled on one of them really do join
+    /// to 260 rows; the pre-1.2 formula returned 80.
+    #[test]
+    fn chain_bound_is_sound_under_skew() {
+        let cb = ChainBound::new(vec![5, 5]);
+        let bound = cb.ceiling(&[20, 20], &[(0, 1)]);
+        assert!(
+            bound >= 260,
+            "skewed ceiling {bound} is below the true cardinality 260"
+        );
     }
 
     #[test]
@@ -668,131 +777,113 @@ mod tests {
 mod lp_tests {
     use super::*;
 
-    /// 2-table single-edge join: the LP returns the principled AGM
-    /// bound `min(|R_0|, |R_1|)` and is therefore a valid (tighter than
-    /// or equal) refinement of the coarse [`AgmBound`] approximation,
-    /// which for two relations reduces to `|R_0| * |R_1|`.
+    /// A 2-table join described only by row counts and "these two are
+    /// joined" cannot be bounded below the product: every row of both
+    /// relations may carry the same key. The pre-1.2 LP returned 1000 here,
+    /// which a 1000 x 1_000_000 foreign-key join exceeds by three orders of
+    /// magnitude.
     #[test]
-    fn two_table_join_matches_principled_agm() {
+    fn two_table_join_without_degrees_is_the_product() {
         let r = [1_000u64, 1_000_000u64];
         let lp = LpJoinBound::new();
-        let bound = lp.ceiling(&r, &[(0, 1)]);
-        // True AGM single-edge bound is min(|R_0|, |R_1|).
-        // Allow ceil()'s +/-1 floating-point noise.
-        assert!(
-            (999..=1_001).contains(&bound),
-            "expected ≈1000, got {bound}"
-        );
-        // And the LP bound must never exceed the coarse AGM bound it
-        // replaces (validity / refinement contract).
-        let coarse = AgmBound.ceiling(&r, &[(0, 1)]);
-        assert!(
-            bound <= coarse,
-            "LP bound {bound} must not exceed coarse AGM {coarse}"
-        );
+        assert_eq!(lp.ceiling(&r, &[(0, 1)]), ProductBound.ceiling(&r, &[]));
     }
 
-    /// Triangle: 3 relations, 3 equality predicates each on a distinct
-    /// shared attribute. The fractional AGM cover number is ρ\* = 3/2,
-    /// so the LP bound is `(|R_0| * |R_1| * |R_2|)^{1/2}`.
+    /// With the attribute schema declared, the fractional-edge-cover LP is
+    /// well posed and returns the textbook AGM triangle bound.
     #[test]
-    fn triangle_strictly_tighter_than_chain_and_product() {
-        // Use round numbers so the closed-form expectation is exact.
-        let r = [1_000u64, 1_000u64, 1_000u64];
-        let preds = [(0usize, 1usize), (1, 2), (0, 2)];
-        let lp = LpJoinBound::new();
-        let bound = lp.ceiling(&r, &preds);
-
-        // sqrt(1e9) ≈ 31_622.78  → expect 31_623 (after ceil).
+    fn triangle_hypergraph_matches_agm() {
+        let tri = vec![
+            HyperRelation::projected(1_000, vec![0, 1]),
+            HyperRelation::projected(1_000, vec![1, 2]),
+            HyperRelation::projected(1_000, vec![2, 0]),
+        ];
+        let bound = LpJoinBound::new().ceiling_hypergraph(&tri);
+        // sqrt(1e9) = 31_622.77...
         assert!(
             (31_000u64..=32_000u64).contains(&bound),
             "expected ≈31_623, got {bound}"
         );
+        assert!(bound < ProductBound.ceiling(&[1_000, 1_000, 1_000], &[]));
+    }
 
-        // Strictly tighter than product = 1e9.
-        let product = ProductBound.ceiling(&r, &preds);
-        assert!(bound < product, "LP {bound} should be < product {product}");
-
-        // Strictly tighter than the chain bound under realistic
-        // distinct-count hints (≈10 distinct join keys per relation —
-        // matches the regime where ChainBound is meaningful but not
-        // pathologically optimistic).
-        let cb = ChainBound::new(vec![10, 10, 10]);
-        let chain = cb.ceiling(&r, &preds);
-        assert!(
-            bound < chain,
-            "LP {bound} should be < chain {chain} on the triangle"
+    /// The same triangle where each relation also carries its own columns.
+    /// Every cover weight is forced to 1, so the honest answer is the
+    /// product — this is the case the pre-1.2 LP silently got wrong.
+    #[test]
+    fn triangle_with_private_columns_is_the_product() {
+        let tri = vec![
+            HyperRelation::new(1_000, vec![0, 1]),
+            HyperRelation::new(1_000, vec![1, 2]),
+            HyperRelation::new(1_000, vec![2, 0]),
+        ];
+        assert_eq!(
+            LpJoinBound::new().ceiling_hypergraph(&tri),
+            ProductBound.ceiling(&[1_000, 1_000, 1_000], &[])
         );
     }
 
-    /// Square (4-cycle): R_0 — R_1 — R_2 — R_3 — R_0. AGM ρ\* = 2, so
-    /// the LP bound is `sqrt(|R_0|*|R_2|*|R_1|*|R_3|)` ≈ `(N)^2` for
-    /// equally sized N, vs the product = N^4.
+    /// Square (4-cycle) over a projected hypergraph: AGM ρ* = 2, so equal
+    /// relation sizes N give N².
     #[test]
-    fn square_strictly_tighter_than_chain_and_product() {
-        let r = [100u64, 100u64, 100u64, 100u64];
-        let preds = [(0usize, 1usize), (1, 2), (2, 3), (3, 0)];
-        let lp = LpJoinBound::new();
-        let bound = lp.ceiling(&r, &preds);
-
-        // 4-cycle AGM optimum is ρ* = 2 (alternating x = 1, 0, 1, 0 or
-        // x = 1/2 each); for equal sizes this gives N^2 = 10_000.
-        // Allow a generous numerical tolerance.
+    fn square_hypergraph_matches_agm() {
+        let square = vec![
+            HyperRelation::projected(100, vec![0, 1]),
+            HyperRelation::projected(100, vec![1, 2]),
+            HyperRelation::projected(100, vec![2, 3]),
+            HyperRelation::projected(100, vec![3, 0]),
+        ];
+        let bound = LpJoinBound::new().ceiling_hypergraph(&square);
         assert!(
             (5_000..=15_000).contains(&bound),
             "expected ≈10_000, got {bound}"
         );
-
-        // Strictly tighter than product = 1e8.
-        let product = ProductBound.ceiling(&r, &preds);
-        assert!(bound < product, "LP {bound} should be < product {product}");
-
-        // Strictly tighter than the chain bound under modest
-        // distinct-count hints. d=4 per relation, 4 predicates →
-        // chain = 100^4 / 4^4 = 1e8 / 256 ≈ 390_625, which is
-        // looser than the LP's ≈10_000.
-        let cb = ChainBound::new(vec![4, 4, 4, 4]);
-        let chain = cb.ceiling(&r, &preds);
-        assert!(
-            bound < chain,
-            "LP {bound} should be < chain {chain} on the 4-cycle"
-        );
+        assert!(bound < ProductBound.ceiling(&[100, 100, 100, 100], &[]));
     }
 
-    /// Disconnected join graph: two independent 2-table joins.
-    /// The LP decomposes into one LP per connected component, and the
-    /// total bound is the product of the per-component bounds.
+    /// A disconnected hypergraph decomposes: the LP optimum is the product
+    /// of the per-component bounds.
     #[test]
     fn disconnected_components_multiply() {
-        // Component A: R_0 ⋈ R_1 (relations of sizes 100, 200, single
-        // predicate). Per-component AGM bound = min(100, 200) = 100.
-        // Component B: R_2 ⋈ R_3 (sizes 50, 70). Per-component bound
-        // = min(50, 70) = 50. Total expected ≈ 100 * 50 = 5_000.
-        let r = [100u64, 200, 50, 70];
-        let preds = [(0usize, 1usize), (2, 3)];
-        let lp = LpJoinBound::new();
-        let bound = lp.ceiling(&r, &preds);
+        let graph = vec![
+            HyperRelation::projected(100, vec![0]),
+            HyperRelation::projected(200, vec![0]),
+            HyperRelation::projected(50, vec![1]),
+            HyperRelation::projected(70, vec![1]),
+        ];
+        let bound = LpJoinBound::new().ceiling_hypergraph(&graph);
         assert!(
             (4_900..=5_100).contains(&bound),
             "expected ≈5000, got {bound}"
         );
     }
 
-    /// Singleton relation (no incident predicate) keeps its row count in
-    /// the product of component bounds.
+    /// A relation exposing no join attribute cannot be covered by anything,
+    /// so it must contribute its full row count.
     #[test]
-    fn singleton_component_contributes_row_count() {
-        let r = [100u64, 200, 99];
-        // Only R_0 and R_1 are joined; R_2 is isolated.
-        let preds = [(0usize, 1usize)];
-        let lp = LpJoinBound::new();
-        let bound = lp.ceiling(&r, &preds);
-        // Component {0,1}: min(100, 200) = 100. Component {2}: 99.
-        // Total ≈ 9_900.
+    fn isolated_relation_contributes_row_count() {
+        let graph = vec![
+            HyperRelation::projected(100, vec![0]),
+            HyperRelation::projected(200, vec![0]),
+            HyperRelation::projected(99, Vec::new()),
+        ];
+        let bound = LpJoinBound::new().ceiling_hypergraph(&graph);
         assert!(
             (9_800..=10_000).contains(&bound),
             "expected ≈9_900, got {bound}"
         );
+    }
+
+    /// The hypergraph LP is capped at the Cartesian product in every case.
+    #[test]
+    fn hypergraph_never_exceeds_the_product() {
+        let graph = vec![
+            HyperRelation::projected(37, vec![0]),
+            HyperRelation::new(41, vec![0, 1]),
+            HyperRelation::projected(43, vec![1]),
+        ];
+        let bound = LpJoinBound::new().ceiling_hypergraph(&graph);
+        assert!(bound <= ProductBound.ceiling(&[37, 41, 43], &[]));
     }
 
     /// The LP bound must never exceed the trivial product bound.
@@ -824,19 +915,25 @@ mod lp_tests {
         assert_eq!(lp.ceiling(&r, &[]), 6_000);
     }
 
-    /// `ceiling_with_distinct` clamps the per-relation objective
-    /// coefficient by `min(|R|, D)`. With a tight distinct-count hint
-    /// the bound only gets smaller (tighter).
+    /// Distinct counts turn into a sound degree bound, so
+    /// `ceiling_with_distinct` is tighter than the degree-free ceiling
+    /// while staying above the truth.
     #[test]
     fn ceiling_with_distinct_is_at_most_unconstrained() {
         let r = [1_000u64, 1_000];
         let preds = [(0usize, 1usize)];
         let with_d = LpJoinBound::with_distinct_counts(vec![10, 10]);
-        let unconstrained = LpJoinBound::new();
         let a = with_d.ceiling_with_distinct(&r, &preds);
-        let b = unconstrained.ceiling(&r, &preds);
+        let b = LpJoinBound::new().ceiling(&r, &preds);
         assert!(a <= b, "distinct-aware bound {a} must be tighter than {b}");
-        // With 10 distinct values on each side the bound collapses to 10.
-        assert!(a <= 11, "expected ≈10 with D=10, got {a}");
+        // 1000 rows over 10 distinct values: at worst 991 share one value.
+        assert_eq!(a, 991_000);
+    }
+
+    /// A key column collapses the ceiling to the other side's row count.
+    #[test]
+    fn ceiling_with_distinct_is_exact_on_a_key_join() {
+        let bound = LpJoinBound::with_distinct_counts(vec![10, 10]);
+        assert_eq!(bound.ceiling_with_distinct(&[10, 100], &[(0, 1)]), 100);
     }
 }

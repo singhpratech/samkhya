@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya gpudb engine adapter (CpuFallbackCorrector and GpuCorrector trait)"
+description = "GPU-engine corrector interface for samkhya, with a CPU fallback implementation"
 
 [dependencies]
 samkhya-core.workspace = true

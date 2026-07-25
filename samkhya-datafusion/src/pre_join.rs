@@ -21,7 +21,7 @@ use datafusion::physical_optimizer::PhysicalOptimizerRule;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::joins::{
-    CrossJoinExec, HashJoinExec, NestedLoopJoinExec, SymmetricHashJoinExec,
+    CrossJoinExec, HashJoinExec, NestedLoopJoinExec, SortMergeJoinExec, SymmetricHashJoinExec,
 };
 use samkhya_core::residual::{CorrectionFeatures, Corrector};
 
@@ -30,18 +30,31 @@ use crate::SamkhyaStatsExec;
 const RULE_NAME: &str = "samkhya_pre_join_correction";
 const JOIN_SELECTION_NAME: &str = "join_selection";
 
+/// Sanity ceiling on any row count this rule publishes, ~1.1e12 rows.
+///
+/// DataFusion's join-cardinality estimator multiplies published row counts
+/// together without checking for overflow, so handing it `u64::MAX` — which a
+/// broken or adversarial corrector will happily propose — produces a wrapped,
+/// meaningless number deep inside the planner. Capping what we publish keeps
+/// the blast radius inside samkhya.
+///
+/// This is a sanity cap, not an overflow proof: two values at the cap still
+/// overflow when multiplied. It exists to stop absurd inputs, not to make the
+/// engine's arithmetic total. No real relation has 2^40 rows.
+pub const SAFE_MAX_ROWS: u64 = 1 << 40;
+
 /// Configuration for [`SamkhyaPreJoinRule`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PreJoinCorrectionOptions {
     /// Inclusive upper bound applied to corrector proposals.
     ///
-    /// This adapter does **not** calculate an LpBound. Supply a proven bound
-    /// here, or use a [`Corrector`] that already applies the appropriate
-    /// per-subplan bound, when a finite safety envelope is required. The
-    /// default [`u64::MAX`] is only a saturating conversion guard and means
-    /// "no finite adapter-side bound". With the safe default native floor,
-    /// the native estimate wins if it is already greater than this ceiling.
+    /// An explicit operator-supplied bound. It composes with the ceiling
+    /// [`derive_ceiling`](Self::derive_ceiling) computes from the plan and
+    /// with [`SAFE_MAX_ROWS`]: whichever is tightest wins. The default
+    /// [`u64::MAX`] means "no explicit bound", which since 1.2.0 no longer
+    /// means "no bound at all". With the safe default native floor, the
+    /// native estimate wins if it is already greater than this ceiling.
     pub ceiling: u64,
     /// Permit a corrected estimate smaller than DataFusion's native estimate.
     ///
@@ -51,6 +64,23 @@ pub struct PreJoinCorrectionOptions {
     /// operator has an independently validated rollout policy for downward
     /// corrections.
     pub allow_below_native: bool,
+    /// Derive a per-input ceiling from the shape of the input subplan when
+    /// the input is itself composite.
+    ///
+    /// A join can emit at most the product of its children's outputs, a
+    /// union at most their sum, and a filter or projection at most its
+    /// child's. Walking those relations gives a finite, provable ceiling for
+    /// any composite input without needing the operator to supply one.
+    ///
+    /// Leaf inputs are deliberately left unconstrained: a scan's row count
+    /// *is* the statistic under correction, so deriving a "ceiling" from it
+    /// would simply forbid every upward correction.
+    ///
+    /// Defaults to `true`. Before 1.2.0 there was no derived ceiling and the
+    /// default [`ceiling`](Self::ceiling) was [`u64::MAX`], which meant the
+    /// bound guarantee was absent from the shipped DataFusion configuration
+    /// unless an operator wired one up by hand.
+    pub derive_ceiling: bool,
 }
 
 impl Default for PreJoinCorrectionOptions {
@@ -58,6 +88,7 @@ impl Default for PreJoinCorrectionOptions {
         Self {
             ceiling: u64::MAX,
             allow_below_native: false,
+            derive_ceiling: true,
         }
     }
 }
@@ -68,12 +99,19 @@ impl PreJoinCorrectionOptions {
         Self {
             ceiling,
             allow_below_native: false,
+            derive_ceiling: true,
         }
     }
 
     /// Explicitly opt into or out of estimates below DataFusion's native value.
     pub const fn with_allow_below_native(mut self, allow: bool) -> Self {
         self.allow_below_native = allow;
+        self
+    }
+
+    /// Turn the subplan-derived ceiling on or off.
+    pub const fn with_derive_ceiling(mut self, derive: bool) -> Self {
+        self.derive_ceiling = derive;
         self
     }
 }
@@ -103,10 +141,15 @@ pub struct PreJoinCorrectionMetrics {
 /// successful proposal is marked [`Precision::Inexact`]. By default the
 /// published value is `max(native, min(proposal, ceiling))`; the native floor
 /// can only be disabled with the explicit
-/// [`PreJoinCorrectionOptions::allow_below_native`] opt-in. The rule does not
-/// derive an LpBound, and its default ceiling is unbounded. When byte-size
-/// statistics exist they are scaled by the row-count ratio because DataFusion's
-/// `JoinSelection` prefers bytes over rows when both sides publish them.
+/// [`PreJoinCorrectionOptions::allow_below_native`] opt-in.
+///
+/// Since 1.2.0 the published value is bounded even with no operator
+/// configuration: [`PreJoinCorrectionOptions::derive_ceiling`] bounds composite
+/// inputs by their own plan shape, and [`SAFE_MAX_ROWS`] caps everything.
+///
+/// When byte-size statistics exist they are scaled by the row-count ratio
+/// because DataFusion's `JoinSelection` prefers bytes over rows when both sides
+/// publish them.
 pub struct SamkhyaPreJoinRule {
     corrector: Arc<dyn Corrector>,
     options: PreJoinCorrectionOptions,
@@ -231,7 +274,17 @@ impl SamkhyaPreJoinRule {
             }
         };
 
-        let ceiling_clamped = proposed.min(self.options.ceiling);
+        let derived = if self.options.derive_ceiling {
+            derive_input_ceiling(input.as_ref())
+        } else {
+            None
+        };
+        let effective_ceiling = match derived {
+            Some(value) => self.options.ceiling.min(value),
+            None => self.options.ceiling,
+        };
+
+        let ceiling_clamped = proposed.min(effective_ceiling).min(SAFE_MAX_ROWS);
         if ceiling_clamped != proposed {
             self.clamped.fetch_add(1, Ordering::Relaxed);
         }
@@ -331,12 +384,56 @@ impl JoinInputFeatures {
     }
 }
 
+/// Provable ceiling on how many rows a composite input can emit, derived
+/// from the statistics its own children publish.
+///
+/// Only two shapes are claimed, because only two are guaranteed for every
+/// node DataFusion may hand us:
+///
+/// * a join emits at most the product of its children's row counts;
+/// * a filter emits at most its child's row count.
+///
+/// Everything else returns `None`. That deliberately includes a plain
+/// recursive walk of the plan: a node is free to publish statistics that
+/// differ from its child's — [`SamkhyaStatsExec`] does exactly that, and so
+/// does any source that reports at its own level — so "the child bounds the
+/// parent" is not a safe general rule to lean on for a *provable* ceiling.
+/// Leaves return `None` too, because a scan's row count is precisely the
+/// statistic under correction and treating it as a ceiling would forbid
+/// every upward correction.
+///
+/// Arithmetic saturates rather than wrapping, and a result that saturates
+/// reports `None`: an unbounded answer is worthless as a ceiling, and
+/// dressing it up as one would be worse than admitting there is none.
+fn derive_input_ceiling(plan: &dyn ExecutionPlan) -> Option<u64> {
+    let children = plan.children();
+
+    let child_rows = |child: &dyn ExecutionPlan| -> Option<u64> {
+        precision_value(&child.statistics().ok()?.num_rows).map(|value| value as u64)
+    };
+
+    let ceiling = if is_join(plan) && !children.is_empty() {
+        let mut product = 1u64;
+        for child in &children {
+            product = product.saturating_mul(child_rows(child.as_ref())?);
+        }
+        product
+    } else if plan.as_any().is::<FilterExec>() && children.len() == 1 {
+        child_rows(children[0].as_ref())?
+    } else {
+        return None;
+    };
+
+    (ceiling < u64::MAX).then_some(ceiling)
+}
+
 fn is_join(plan: &dyn ExecutionPlan) -> bool {
     let any = plan.as_any();
     any.is::<HashJoinExec>()
         || any.is::<CrossJoinExec>()
         || any.is::<NestedLoopJoinExec>()
         || any.is::<SymmetricHashJoinExec>()
+        || any.is::<SortMergeJoinExec>()
 }
 
 fn precision_value(value: &Precision<usize>) -> Option<usize> {

@@ -1,103 +1,126 @@
 # samkhya-postgres
 
-PostgreSQL extension adapter for [samkhya](../) — portable
-cardinality correction for embedded analytical engines.
+[![crates.io](https://img.shields.io/crates/v/samkhya-postgres.svg)](https://crates.io/crates/samkhya-postgres)
+[![docs.rs](https://docs.rs/samkhya-postgres/badge.svg)](https://docs.rs/samkhya-postgres)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/singhpratech/samkhya/blob/main/LICENSE)
 
-This crate ships a [pgrx](https://github.com/pgcentralfoundation/pgrx)
-based PostgreSQL extension that exposes samkhya's portable sketch and
-Puffin sidecar primitives to SQL.
+A **scaffold** for a PostgreSQL adapter to
+[samkhya](https://github.com/singhpratech/samkhya). The planner-hook
+integration is **not implemented**: this crate does not install
+`get_relation_info_hook` or any other planner hook, so the PostgreSQL
+planner never sees a samkhya row estimate. Nothing here changes a query
+plan.
 
-## Build modes
+What it contains is the extension surface: crate layout, pgrx feature
+gating, and two read-only SQL functions that expose samkhya's portable
+sketch and Puffin sidecar readers, so you can check from a Postgres
+session that statistics another engine wrote are readable here.
+samkhya's provable join-cardinality ceiling lives in
+[`samkhya_core::degree`](https://docs.rs/samkhya-core/latest/samkhya_core/degree/)
+and is **not** exposed to SQL by this crate.
 
-The crate has two build modes, controlled by the `pg_extension` Cargo
-feature:
+## Two build modes
 
-- **Default (`pg_extension` off)**: empty `rlib`. Compiles in seconds
-  without PostgreSQL development headers. This is what
-  `cargo check --workspace` builds in CI. Suitable for downstream
-  crates that want `samkhya-postgres` in their dependency graph
-  without forcing every consumer to install `libpq-dev`.
-- **`pg_extension` on**: pulls in pgrx and compiles the real
-  PostgreSQL loadable module. Requires PostgreSQL development headers
-  (`postgresql-server-dev-NN` on Debian/Ubuntu, `postgresql-devel` on
-  RHEL/Fedora) and the matching `cargo-pgrx` toolchain.
+Default: an `rlib` with one symbol, `version()`, needing no PostgreSQL
+headers. Extension: a `cdylib` loadable module, needing pgrx and PG 17
+server headers.
 
-## Quickstart (extension build)
+The extension is double-gated: the `pg_extension` Cargo feature **and**
+the `samkhya_pgrx_enabled` rustc cfg. Both are required. The cfg gate
+exists so `cargo check --workspace --all-features` stays green on hosts
+with no PostgreSQL development headers — under `--all-features`,
+`pg_extension` alone is a deliberate no-op, because the pgrx dependency
+sits under `[target.'cfg(samkhya_pgrx_enabled)'.dependencies]` and is
+dropped from the dependency graph.
+
+There are no `pg13`..`pg16` features. As of 1.2.3 the crate pins
+`pgrx/pg17` only; pgrx 0.12's build script panics when several
+`pg$VERSION` features are active at once, which is what a workspace-wide
+`--all-features` gate would do.
+
+## Default build
 
 ```bash
-# 1. Install the pgrx CLI.
-cargo install --locked cargo-pgrx
+cargo check -p samkhya-postgres
+```
 
-# 2. One-time pgrx init — downloads and builds the supported PG
-#    majors into ~/.pgrx (skip the ones you don't need with --pg16
-#    etc.). Pick the version you plan to develop against.
-cargo pgrx init
+Compiles in seconds, no PostgreSQL headers. The only public item is:
 
-# 3. From the workspace root, run the extension inside an ephemeral
-#    PostgreSQL 16 (or 17) instance with psql attached.
-cargo pgrx run pg16 --features pg_extension,pg16 \
-    --package samkhya-postgres
+```rust
+assert!(!samkhya_postgres::version().is_empty()); // crate version string
+```
 
-# Inside psql:
+## Extension build
+
+```bash
+cargo install --locked cargo-pgrx --version 0.12.9
+cargo pgrx init --pg17 download
+
+RUSTFLAGS="--cfg=samkhya_pgrx_enabled" \
+  cargo pgrx run pg17 --features pg_extension --package samkhya-postgres
+
+# then, in the psql session cargo pgrx run opens:
 #   CREATE EXTENSION samkhya_postgres;
 ```
 
+Omitting `RUSTFLAGS` silently builds the stub `rlib` instead of the
+extension — the most common way to get a confusing "function does not
+exist" from `psql`.
+
+**Known gaps.** The extension path does not compile as published, and
+adding one dependency is not enough to fix it:
+
+1. The pgrx module imports `serde_json`, which this crate does not
+   declare. Add `serde_json = "1"` under
+   `[target.'cfg(samkhya_pgrx_enabled)'.dependencies]`.
+2. `samkhya_hll_count` calls `into_datum()` on an `AnyElement` and then
+   `to_ne_bytes()` on the result. `into_datum` returns
+   `Option<pg_sys::Datum>`, so that does not typecheck as written.
+
+CI builds only the default mode, which is why neither was caught. Treat
+the extension path as unbuilt until both are resolved.
+
 ## SQL surface
 
-### `samkhya_hll_count(input anyarray) -> bigint`
+`samkhya_hll_count(input anyelement[]) -> bigint` — builds a
+`samkhya_core::sketches::HllSketch` at precision 14 (~16 KiB registers,
+~0.81% relative standard error) over the array elements and returns the
+distinct-count estimate. NULL elements are skipped. Elements are hashed
+by their raw datum bytes, so two values count as equal iff their
+in-memory representation is bitwise equal — correct for fixed-width
+types. **Varlena types cannot be made to work under this
+implementation:** the value hashed is the Datum word, which for a varlena
+is a pointer address, not the value bytes, so two byte-identical strings
+at different addresses hash differently. Restrict it to fixed-width types.
 
-Builds a samkhya `HllSketch` (precision 14) from the input array and
-returns its estimated distinct-element count.
+No SQL example is given here because the extension does not currently
+build — see the known gaps above. Writing one would imply it runs.
 
-```sql
-SELECT samkhya_hll_count(array_agg(id)) FROM foo;
-SELECT samkhya_hll_count(ARRAY[1, 2, 2, 3, 3, 3]::int[]);
-```
-
-### `samkhya_puffin_inspect(path text) -> jsonb`
-
-Opens an Iceberg [Puffin](https://iceberg.apache.org/puffin-spec/)
-sidecar file on the server filesystem and returns per-blob metadata
-(`kind`, `fields`, `offset`, `length`, `compression_codec`).
+`samkhya_puffin_inspect(path text) -> jsonb` — opens an Iceberg
+[Puffin](https://iceberg.apache.org/puffin-spec/) sidecar on the server
+filesystem and returns per-blob metadata: `kind`, `fields`, `offset`,
+`length`, `compression_codec`.
 
 ```sql
 SELECT samkhya_puffin_inspect('/srv/iceberg/sketches/orders.puffin');
+-- {"blobs":[{"kind":"samkhya.hll-v1","fields":[7],"offset":4,
+--            "length":16384,"compression_codec":null}]}
 ```
 
-Output shape:
+`path` is read with the postmaster's filesystem privileges. Do not grant
+`EXECUTE` on it to untrusted roles.
 
-```json
-{
-  "blobs": [
-    {
-      "kind": "samkhya.hll-v1",
-      "fields": [7],
-      "offset": 4,
-      "length": 16384,
-      "compression_codec": null
-    }
-  ]
-}
-```
+## Scope and caveats
 
-## Scope
-
-This is the v1.0 scaffold. It establishes the extension surface,
-crate layout, and pgrx feature gating. The operator-side cardinality
-hook (replacing `get_relation_info_hook` so the planner picks up
-samkhya's corrected row estimates without per-query SQL changes) is a
-future-release target.
-
-## Testing
-
-```bash
-# Default-feature check (no PG headers required).
-cargo check -p samkhya-postgres
-
-# Extension-side unit tests (requires cargo-pgrx).
-cargo pgrx test pg17 --features pg_extension,pg17,pg_test \
-    --package samkhya-postgres
-```
+- No planner hook, no `pg_statistic` writer, no cost-model changes.
+  Deferred deliberately: it needs deeper pgrx hook plumbing than belongs
+  in a scaffold.
+- PostgreSQL 17 only. pgrx 0.12.
+- The extension path is not covered by CI and has no integration tests
+  beyond one `#[pg_test]` sanity check on `samkhya_hll_count`.
+- The crate declares no `pg_test` feature and no crate-root `pg_test`
+  module, both of which pgrx's `#[pg_test]` expansion requires, so that
+  sanity check cannot currently be run either.
 
 ## License
 

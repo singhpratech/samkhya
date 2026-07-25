@@ -56,6 +56,7 @@ bench-results/*
 !bench-results/BENCHMARKS.md
 !bench-results/METHODOLOGY.md
 !bench-results/EVIDENCE.md
+!bench-results/OPEN_AUDIT_ITEMS.md
 !bench-results/B07_supply_chain.md
 !bench-results/B08_fuzz_inventory.md
 !bench-results/B09_property_100k.md

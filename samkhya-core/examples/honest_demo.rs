@@ -23,8 +23,9 @@
 use std::fs::File;
 use std::io::BufWriter;
 
+use samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
 use samkhya_core::lpbound::{
-    AgmBound, ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp,
+    ChainBound, ProductBound, UpperBound, clamp_estimate, saturating_clamp,
 };
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
 use samkhya_core::sketches::{HllSketch, Sketch};
@@ -104,65 +105,61 @@ fn part1_never_regress_envelope() -> Result<(), Box<dyn std::error::Error>> {
     println!("  TRUE output cardinality (counted from data) = {true_card}");
 
     // --- Compute each available bound ---------------------------------------
+    // Degrees derived from the distinct counts: at worst `rows - distinct + 1`
+    // rows share one key value. That is the statistic samkhya already carries
+    // in an HLL sidecar, and it is what makes a ceiling below the Cartesian
+    // product provable rather than merely plausible.
+    let degree_graph = JoinGraph::new(vec![
+        JoinRelation::new(relations[0]).with_degree(
+            0,
+            AttributeDegree::from_distinct(relations[0], distinct_counts[0]),
+        ),
+        JoinRelation::new(relations[1])
+            .with_degree(
+                0,
+                AttributeDegree::from_distinct(relations[1], distinct_counts[1]),
+            )
+            .with_degree(
+                1,
+                AttributeDegree::from_distinct(relations[1], distinct_counts[1]),
+            ),
+        JoinRelation::new(relations[2]).with_degree(
+            1,
+            AttributeDegree::from_distinct(relations[2], distinct_counts[2]),
+        ),
+    ])
+    .with_edge(0, 1, 0)
+    .with_edge(1, 2, 1);
+
     let product = ProductBound.ceiling(&relations, &predicates);
-    let agm = AgmBound.ceiling(&relations, &predicates);
     let chain = ChainBound::new(distinct_counts.clone()).ceiling(&relations, &predicates);
+    let degree = degree_graph.ceiling();
 
     println!("  ProductBound ceiling = {product}");
-    println!("  AgmBound     ceiling = {agm}");
     println!("  ChainBound   ceiling = {chain}");
+    println!("  degree ceiling       = {degree}   (spanning-tree degree bound)");
 
     // --- Invariant 1: every bound is an inclusive upper bound ----------------
     assert!(
         product >= true_card,
         "ProductBound {product} < true {true_card}"
     );
-    assert!(agm >= true_card, "AgmBound {agm} < true {true_card}");
     assert!(chain >= true_card, "ChainBound {chain} < true {true_card}");
+    assert!(
+        degree >= true_card,
+        "degree ceiling {degree} < true {true_card}"
+    );
     println!("  [ok] every bound >= true cardinality (sound inclusive ceiling)");
 
-    // --- Invariant 2: documented partial order -------------------------------
-    //   ProductBound >= { ChainBound, AgmBound }
+    // --- Invariant 2: the degree ceiling refines the product ------------------
     assert!(
-        product >= chain,
-        "ProductBound {product} < ChainBound {chain}"
+        product >= degree,
+        "ProductBound {product} < degree ceiling {degree}"
     );
-    assert!(product >= agm, "ProductBound {product} < AgmBound {agm}");
-    println!("  [ok] ProductBound >= {{ChainBound, AgmBound}} (documented partial order)");
-
-    // --- Optional LP leg: LpJoinBound <= AgmBound on this tree-shaped input ---
-    #[cfg(feature = "lp_solver")]
-    let lp_ceiling: Option<u64> = {
-        use samkhya_core::lpbound::LpJoinBound;
-        let lp = LpJoinBound::new();
-        let lp_bound = lp.ceiling(&relations, &predicates);
-        println!("  LpJoinBound  ceiling = {lp_bound}   (real fractional-edge-cover LP)");
-        assert!(
-            lp_bound >= true_card,
-            "LpJoinBound {lp_bound} < true {true_card}"
-        );
-        // On this tree-shaped (path) input the LP ceiling is tighter than or
-        // equal to the coarse AGM `min * max` shortcut.
-        assert!(
-            lp_bound <= agm,
-            "LpJoinBound {lp_bound} must be <= AgmBound {agm} on a tree-shaped join"
-        );
-        println!("  [ok] LpJoinBound <= AgmBound on this path join (LP refinement holds)");
-        Some(lp_bound)
-    };
-    #[cfg(not(feature = "lp_solver"))]
-    let lp_ceiling: Option<u64> = {
-        println!("  LpJoinBound  ceiling = (skipped — rerun with --features lp_solver)");
-        None
-    };
+    println!("  [ok] ProductBound >= degree ceiling (a real refinement, still provable)");
 
     // --- Invariant 3: the clamp itself — the never-regress guarantee ---------
-    // The tightest sound ceiling we hold is the min over all computed bounds
-    // (the optimizer is documented to take the minimum, not a strict chain).
-    let mut ceiling = product.min(agm).min(chain);
-    if let Some(lp) = lp_ceiling {
-        ceiling = ceiling.min(lp);
-    }
+    let ceiling = product.min(chain).min(degree);
     println!("  tightest ceiling = min(all bounds) = {ceiling}");
 
     // A hypothetical *over-eager* corrector that wildly over-estimates.
@@ -281,15 +278,9 @@ fn part2_puffin_round_trip() -> Result<(u64, u64, String), Box<dyn std::error::E
 
 fn print_summary(puffin_before: u64, puffin_after: u64, puffin_path: &str) {
     println!("=== SUMMARY — what this run demonstrated (all numbers computed above) ===");
-    println!(
-        "  PART 1  Every shipped upper bound (Product/AGM/Chain{}) is a SOUND inclusive",
-        if cfg!(feature = "lp_solver") {
-            "/LpJoin"
-        } else {
-            ""
-        }
-    );
-    println!("          ceiling on a known path join, and obeys the documented partial order.");
+    println!("  PART 1  Every shipped upper bound (Product / Chain / degree) is a SOUND");
+    println!("          inclusive ceiling on a known path join, and the degree ceiling");
+    println!("          genuinely refines the product without giving up provability.");
     println!("          Clamping an over-eager corrector to the tightest ceiling can NEVER push");
     println!("          an estimate above that ceiling — the never-regress guarantee, enforced by");
     println!(

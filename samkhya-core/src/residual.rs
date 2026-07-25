@@ -72,9 +72,7 @@ fn warn_if_remote_plaintext_http(url: &str, backend: &'static str) {
     }
     // Pull the host (between "http://" and the next "/" or ":" or end).
     let rest = &url[7..]; // safe: starts_with confirmed above
-    let host_end = rest
-        .find(|c: char| c == '/' || c == ':' || c == '?')
-        .unwrap_or(rest.len());
+    let host_end = rest.find(['/', ':', '?']).unwrap_or(rest.len());
     let host = &rest[..host_end];
     let is_loopback = matches!(host, "127.0.0.1" | "::1" | "localhost")
         || host.starts_with("[::1]")
@@ -113,7 +111,7 @@ fn warn_if_remote_plaintext_http(url: &str, backend: &'static str) {
 /// };
 /// assert_eq!(features.to_vec().len(), CorrectionFeatures::FEATURE_LEN);
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CorrectionFeatures {
     pub baseline_estimate: u64,
     pub left_input_rows: Option<u64>,
@@ -292,7 +290,7 @@ pub mod gbt {
     use gbdt::gradient_boost::GBDT;
 
     use super::{CorrectionFeatures, Corrector};
-    use crate::feedback::Observation;
+    use crate::feedback::{Observation, PlanObservation};
     use crate::lpbound::saturating_clamp;
     use crate::{Error, Result};
 
@@ -331,6 +329,7 @@ pub mod gbt {
     pub struct GbtCorrector {
         model: GBDT,
         ceiling: u64,
+        training_rows: usize,
     }
 
     impl GbtCorrector {
@@ -382,13 +381,149 @@ pub mod gbt {
             cfg.set_min_leaf_size(options.min_leaf_size);
             cfg.set_loss(&loss_name(Loss::SquaredError));
 
+            let rows = training.len();
             let mut model = GBDT::new(&cfg);
             model.fit(&mut training);
 
             Ok(Self {
                 model,
                 ceiling: options.ceiling,
+                training_rows: rows,
             })
+        }
+
+        /// Train from observations that carry the plan features the
+        /// corrector will actually see at inference time.
+        ///
+        /// Prefer this over [`train`](Self::train). That method has to
+        /// synthesise a feature vector with only `baseline_estimate`
+        /// populated, because [`Observation`] carries nothing else — so the
+        /// remaining six features are constant across the whole training
+        /// set, no tree ever splits on them, and the model is effectively
+        /// one-dimensional while the adapter feeds it seven live features.
+        /// The mismatch is silent: nothing fails, the corrector is just
+        /// blind to everything except the baseline.
+        ///
+        /// Observations with `baseline_estimate == 0` or `actual_rows == 0`
+        /// are dropped, since the target is `log(actual / baseline)`.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use samkhya_core::feedback::PlanObservation;
+        /// use samkhya_core::residual::CorrectionFeatures;
+        /// use samkhya_core::residual::gbt::{GbtCorrector, GbtOptions};
+        ///
+        /// let observations: Vec<PlanObservation> = (1..40u64)
+        ///     .map(|i| PlanObservation {
+        ///         template_hash: "t".into(),
+        ///         plan_fingerprint: "p".into(),
+        ///         features: CorrectionFeatures {
+        ///             baseline_estimate: i * 10,
+        ///             join_depth: (i % 4) as u32,
+        ///             ..Default::default()
+        ///         },
+        ///         actual_rows: i * 25,
+        ///         latency_ms: None,
+        ///     })
+        ///     .collect();
+        ///
+        /// let corrector = GbtCorrector::train_on_plans(&observations, GbtOptions::default())
+        ///     .expect("trains");
+        /// assert_eq!(corrector.training_rows(), 39);
+        /// ```
+        pub fn train_on_plans(
+            observations: &[PlanObservation],
+            options: GbtOptions,
+        ) -> Result<Self> {
+            if observations.is_empty() {
+                return Err(Error::Feedback(
+                    "cannot train GbtCorrector: observation slice is empty".into(),
+                ));
+            }
+
+            let mut training: DataVec = Vec::with_capacity(observations.len());
+            for obs in observations {
+                if obs.features.baseline_estimate == 0 || obs.actual_rows == 0 {
+                    continue;
+                }
+                let feature_f32: Vec<f32> = obs
+                    .features
+                    .to_vec()
+                    .into_iter()
+                    .map(|v| v as f32)
+                    .collect();
+                let ratio_log =
+                    (obs.actual_rows as f64 / obs.features.baseline_estimate as f64).ln() as f32;
+                training.push(Data::new_training_data(feature_f32, 1.0, ratio_log, None));
+            }
+
+            if training.is_empty() {
+                return Err(Error::Feedback(
+                    "cannot train GbtCorrector: every observation had a zero baseline or actual"
+                        .into(),
+                ));
+            }
+
+            let rows = training.len();
+            let mut cfg = Config::new();
+            cfg.set_feature_size(CorrectionFeatures::FEATURE_LEN);
+            cfg.set_max_depth(options.max_depth);
+            cfg.set_iterations(options.num_trees as usize);
+            cfg.set_shrinkage(options.learning_rate as f32);
+            cfg.set_min_leaf_size(options.min_leaf_size);
+            cfg.set_loss(&loss_name(Loss::SquaredError));
+
+            let mut model = GBDT::new(&cfg);
+            model.fit(&mut training);
+
+            Ok(Self {
+                model,
+                ceiling: options.ceiling,
+                training_rows: rows,
+            })
+        }
+
+        /// Persist the trained model so a later process can evaluate with
+        /// it instead of retraining.
+        ///
+        /// Keeping training and evaluation in separate processes is what
+        /// makes an honest held-out measurement possible: the model cannot
+        /// see the evaluation queries if it was frozen before they ran.
+        pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+            let path = path.as_ref();
+            let name = path.to_str().ok_or_else(|| {
+                Error::Feedback(format!("model path is not valid UTF-8: {}", path.display()))
+            })?;
+            self.model
+                .save_model(name)
+                .map_err(|e| Error::Feedback(format!("could not save GBT model: {e}")))
+        }
+
+        /// Load a model persisted by [`save`](Self::save), applying
+        /// `ceiling` as the clamp.
+        ///
+        /// The ceiling is supplied at load time rather than stored with the
+        /// model because it is a property of the query being bounded, not
+        /// of the model.
+        pub fn load(path: impl AsRef<std::path::Path>, ceiling: u64) -> Result<Self> {
+            let path = path.as_ref();
+            let name = path.to_str().ok_or_else(|| {
+                Error::Feedback(format!("model path is not valid UTF-8: {}", path.display()))
+            })?;
+            let model = GBDT::load_model(name)
+                .map_err(|e| Error::Feedback(format!("could not load GBT model: {e}")))?;
+            Ok(Self {
+                model,
+                ceiling,
+                training_rows: 0,
+            })
+        }
+
+        /// Number of observations the model was fitted on. Zero for a model
+        /// restored by [`load`](Self::load), which does not carry it.
+        pub fn training_rows(&self) -> usize {
+            self.training_rows
         }
 
         /// Predict the log-ratio correction for a single feature vector.
@@ -1455,7 +1590,11 @@ mod llm_http_tests {
         let (url, counter) = spawn_mock(|_| br#"{"estimate": 4242}"#.to_vec(), 2);
         let corrector = LlmHttpCorrector::new(LlmHttpOptions {
             base_url: url,
-            timeout_ms: 2_000,
+            // Generous on purpose: these assert the *response* is handled
+            // correctly, not that it arrives quickly. A shared CI runner can
+            // take seconds to spawn the mock thread and complete the loopback
+            // round trip, and a tight bound here turns that into a flake.
+            timeout_ms: 15_000,
             ceiling: 1_000_000,
         });
         let features = CorrectionFeatures {
@@ -1472,7 +1611,11 @@ mod llm_http_tests {
         let (url, _counter) = spawn_mock(|_| br#"{"estimate": 99999999}"#.to_vec(), 2);
         let corrector = LlmHttpCorrector::new(LlmHttpOptions {
             base_url: url,
-            timeout_ms: 2_000,
+            // Generous on purpose: these assert the *response* is handled
+            // correctly, not that it arrives quickly. A shared CI runner can
+            // take seconds to spawn the mock thread and complete the loopback
+            // round trip, and a tight bound here turns that into a flake.
+            timeout_ms: 15_000,
             ceiling: 500,
         });
         let result = corrector

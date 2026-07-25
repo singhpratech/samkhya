@@ -104,7 +104,7 @@ pub mod table_provider;
 pub use optimizer_rule::SamkhyaOptimizerRule;
 pub use physical_plan::SamkhyaStatsExec;
 pub use pre_join::{
-    PreJoinCorrectionMetrics, PreJoinCorrectionOptions, SamkhyaPreJoinRule,
+    PreJoinCorrectionMetrics, PreJoinCorrectionOptions, SAFE_MAX_ROWS, SamkhyaPreJoinRule,
     install_pre_join_corrector,
 };
 pub use stats_provider::to_datafusion_column_statistics;

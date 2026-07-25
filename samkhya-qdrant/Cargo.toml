@@ -1,0 +1,16 @@
+[package]
+name = "samkhya-qdrant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+description = "Provable match-count ceilings for filtered vector search, from samkhya's Count-Min sketches"
+keywords = ["vector-search", "cardinality", "qdrant", "selectivity", "sketches"]
+categories = ["database"]
+
+[dependencies]
+samkhya-core = { path = "../samkhya-core", version = "1.2.3", default-features = false }

@@ -1,0 +1,36 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_bloomfilter_free: (a: number, b: number) => void;
+export const __wbg_countminsketch_free: (a: number, b: number) => void;
+export const __wbg_hllsketch_free: (a: number, b: number) => void;
+export const bloomfilter_add: (a: number, b: number, c: number) => void;
+export const bloomfilter_contains: (a: number, b: number, c: number) => number;
+export const bloomfilter_fromBytes: (a: number, b: number) => [number, number, number];
+export const bloomfilter_new: (a: number, b: number) => [number, number, number];
+export const bloomfilter_toBytes: (a: number) => [number, number, number, number];
+export const countminsketch_add: (a: number, b: number, c: number, d: number) => void;
+export const countminsketch_estimate: (a: number, b: number, c: number) => number;
+export const countminsketch_fromBytes: (a: number, b: number) => [number, number, number];
+export const countminsketch_isSaturated: (a: number) => number;
+export const countminsketch_maxFrequencyBound: (a: number) => [number, number];
+export const countminsketch_new: (a: number, b: number) => [number, number, number];
+export const countminsketch_toBytes: (a: number) => [number, number, number, number];
+export const hllsketch_add: (a: number, b: number, c: number) => void;
+export const hllsketch_addBytes: (a: number, b: number, c: number) => void;
+export const hllsketch_distinctFloor: (a: number) => number;
+export const hllsketch_estimate: (a: number) => number;
+export const hllsketch_fromBytes: (a: number, b: number) => [number, number, number];
+export const hllsketch_merge: (a: number, b: number) => [number, number];
+export const hllsketch_new: (a: number) => [number, number, number];
+export const hllsketch_precision: (a: number) => number;
+export const hllsketch_toBytes: (a: number) => [number, number, number, number];
+export const joinCeiling: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const productBound: (a: number, b: number) => number;
+export const version: () => [number, number];
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

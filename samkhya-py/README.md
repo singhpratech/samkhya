@@ -1,15 +1,12 @@
 # samkhya — Python bindings
 
-> Portable, feedback-driven cardinality correction for embedded analytical
-> engines (DuckDB, Polars, DataFusion, gpudb).
-
-This wheel exposes [samkhya-core](../samkhya-core)'s classical sketches
-(HyperLogLog, Bloom, Count-Min, equi-depth histogram) and its LpBound
-ceiling helpers to Python, with no Rust toolchain required at install
-time.
-
-Built on top of [PyO3](https://pyo3.rs/) with a stable-ABI (`abi3-py39`)
-wheel — one wheel per platform serves every CPython 3.9+ interpreter.
+Python bindings for samkhya: four portable statistics sketches
+(HyperLogLog, Bloom, Count-Min, equi-depth histogram) and a provable
+join-cardinality ceiling — an upper bound the join provably cannot
+exceed. Compiled Rust behind a stable-ABI (`abi3-py39`) wheel, so one wheel
+serves every CPython 3.9+ interpreter on the platforms published —
+currently `manylinux_2_34 x86_64`. Elsewhere pip falls back to the sdist,
+which does need a Rust toolchain and maturin.
 
 ## Install
 
@@ -17,84 +14,115 @@ wheel — one wheel per platform serves every CPython 3.9+ interpreter.
 pip install samkhya
 ```
 
-For a from-source build of this directory:
+From a source checkout of this directory: `pip install maturin`, then
+`maturin develop --release` (editable) or `maturin build --release`.
 
-```bash
-pip install maturin
-maturin develop --release            # editable install into the current venv
-maturin build --release              # produce a redistributable wheel
-```
-
-## Quickstart — count 1000 distinct items, get back ~42 for a small set
+## Sketches
 
 ```python
 import samkhya
 
-# Precision 14 gives 2^14 = 16384 registers; relative error ~ 0.8%.
+# Precision 14 gives 2^14 = 16384 registers; relative error ~0.8%.
 hll = samkhya.HllSketch(14)
 for i in range(1000):
     hll.add(str(i).encode("utf-8"))
+print(round(hll.estimate()))          # ~1000
 
-print(f"~1000 → {hll.estimate():.0f}")
-
-# A second sketch over the first 42 distinct items returns ~42.
-small = samkhya.HllSketch(14)
-for i in range(42):
-    small.add(str(i).encode("utf-8"))
-print(f"~42 → {small.estimate():.0f}")
-
-# Sketches are mergeable and serialisable for transport (e.g. Iceberg Puffin).
-hll.merge(small)
-payload: bytes = hll.to_bytes()
-restored = samkhya.HllSketch.from_bytes(payload)
+# HLL sketches merge, and every sketch serialises for transport
+# (e.g. an Iceberg Puffin blob).
+second = samkhya.HllSketch(14)      # same precision, or merge raises
+second.add(b"1001")
+hll.merge(second)
+restored = samkhya.HllSketch.from_bytes(hll.to_bytes())
 assert restored.estimate() == hll.estimate()
 ```
 
-The same API style applies to `BloomFilter`, `CountMinSketch`, and
-`EquiDepthHistogram` — see the type stubs in
-[`python/samkhya/__init__.pyi`](python/samkhya/__init__.pyi) for full
-signatures.
+`BloomFilter(n_items, fp_rate)`, `CountMinSketch(width, depth)`, and
+`EquiDepthHistogram(boundaries, counts)` share the `to_bytes` /
+`from_bytes` shape. `merge` is bound only on `HllSketch`. Full signatures are in the type stubs:
+https://github.com/singhpratech/samkhya/blob/main/samkhya-py/python/samkhya/__init__.pyi
 
-## LpBound — keep corrected estimates honest
+## The join ceiling
 
-Every corrected cardinality estimate samkhya emits is clamped from above
-by a provable pessimistic ceiling derived from the AGM /
-fractional-edge-cover bound (Atserias–Grohe–Marx; extended to ℓp-norms
-by Zhang et al., SIGMOD 2025 Best Paper). The Python wheel exposes two
-ceiling helpers that operate on plain row-count and selectivity inputs:
+`join_ceiling` computes a spanning-tree degree ceiling: sound for bag
+semantics, and exactly tight on foreign-key joins.
 
 ```python
 import samkhya
 
-# Cartesian-product safety floor for three relations.
-print(samkhya.product_bound([1_000, 2_000, 3_000]))   # 6_000_000_000.0
+rows = [10.0, 100.0]        # 10 orders, 100 line items
+joins = [(0, 1)]            # relation 0 joins relation 1
+distinct = [10.0, 10.0]     # 10 distinct order keys on both sides
 
-# Selectivity-weighted AGM ceiling for an equi-join graph.
-# joins: list of (left_idx, right_idx, predicate_selectivity)
-rows = [1_000_000, 1_000_000]
-joins = [(0, 1, 1e-5)]
-print(samkhya.agm_bound(joins, rows))                 # ~ 10_000.0
+print(samkhya.join_ceiling(joins, rows, distinct))  # 100.0 — the true size
+print(samkhya.product_bound(rows))                  # 1000.0
 ```
 
-`product_bound` is the trivial worst case; `agm_bound` collapses the
-ceiling using the supplied predicate selectivities. Cold-start plans are
-always either the native estimate or the ceiling — whichever is tighter
-— and never degrade below baseline.
+Without `distinct_counts` the ceiling degrades to the Cartesian product:
+given only row counts and which pairs are joined, every row can carry the
+same key value, so nothing below the product is provable.
+
+**`distinct_counts` must be a lower bound on the true distinct count.**
+The degree is derived as `rows - distinct + 1`, so an overstated distinct
+count understates the degree and makes the ceiling unsound. Do not feed
+it `HllSketch.estimate()`, which is two-sided and exceeds the truth about
+half the time. From Python the sound source is an exact distinct count. Do **not**
+derive it from a Count-Min sketch: Count-Min bounds *frequencies*, not
+distinct values, so feeding it here yields `rows - maxfreq + 1`, which
+understates the degree and produces exactly the unsound ceiling this
+paragraph warns about. If you need a sketch-derived degree, use the Rust
+API — `samkhya_core::degree::AttributeDegree::from_hll_floor` and
+`from_count_min` produce degrees directly rather than values to pass
+here. Entries that are zero,
+larger than the row count, or absent degrade safely to "no degree
+information" rather than to a wrong answer.
+
+`distinct_counts` is indexed per relation, not per (relation, join
+column): if a relation joins on several columns, pass the smallest count
+among them, which overstates the degree and stays sound.
+
+## Function reference
+
+- `join_ceiling(joins, card_estimates, distinct_counts=None) -> float`
+  The bound to use; `joins` is a list of `(left_idx, right_idx)`.
+- `product_bound(card_estimates) -> float` — Cartesian product fallback.
+- `agm_bound(joins, card_estimates) -> float` — compatibility shim. Its
+  selectivity field is ignored since 1.2; it returns the product.
+- `selectivity_estimate(joins, card_estimates) -> float` —
+  `prod(card_estimates) * prod(clamped selectivities)`. An estimate, not
+  a ceiling: it lands below the true cardinality routinely. Never clamp
+  to it. (It is close in spirit to the pre-1.2 `agm_bound`, but not equal
+  — that one applied a `min * max` shortcut this does not.)
+- `samkhya_version() -> str` and `samkhya.__version__` — the underlying
+  crate version.
+
+## Changed in 1.2 — soundness fix
+
+A 2026-07-24 audit found the bound family shipped through 1.1 was not
+sound: it returned ceilings below the true cardinality in 2,179 of 3,704
+measured bound-evaluations (58.8%), from multiplying a ceiling by
+selectivities in `[0, 1]`, which can only shrink it. 1.2 replaces that
+path with the degree ceiling above: 0 violations, same trials. Two
+published headline numbers are withdrawn: a 40.95x bound-tightness
+figure and a 1.038x JOB-Slow speedup.
 
 ## Errors
 
-Recoverable errors from the core (out-of-range sketch parameters, malformed
-serialised payloads, etc.) surface as `samkhya.SamkhyaError`, a subclass
-of the built-in `Exception`:
+Malformed serialised payloads, a merge across mismatched precisions, and
+out-of-range `HllSketch` / `CountMinSketch` parameters raise
+`samkhya.SamkhyaError`, a subclass of `Exception`.
 
-```python
-try:
-    samkhya.HllSketch(3)               # precision must be in [4, 18]
-except samkhya.SamkhyaError as exc:
-    print("rejected:", exc)
-```
+`BloomFilter` is the exception: out-of-range parameters are **clamped,
+not rejected**. `BloomFilter(1000, 0.0)` returns a filter rather than
+raising, because the Python binding wraps the infallible constructor.
+Validate `fp_rate` yourself if it comes from user input.
 
-## License
+## Scope
 
-Apache-2.0. See the [workspace README](../README.md) for the broader
-samkhya project layout and the Rust crate documentation.
+This wheel exposes the sketches and the ceiling functions, nothing else:
+no query-engine integration, feedback store, or correction loop — those
+live in the Rust crates at https://github.com/singhpratech/samkhya. The
+theorem, its proof, and the full degree-source API are documented at
+https://docs.rs/samkhya-core under `samkhya_core::degree`.
+
+Licensed under Apache-2.0.

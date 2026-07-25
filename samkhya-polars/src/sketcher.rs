@@ -113,8 +113,12 @@ pub fn histogram_from_series(series: &Series, buckets: usize) -> Result<EquiDept
         .f64()
         .map_err(|e| Error::InvalidSketch(format!("downcast to f64 failed: {e}")))?;
 
+    // `iter()` rather than `into_iter()`: polars 0.54 dropped the
+    // `IntoIterator` impl on `&ChunkedArray`. `flatten()` skips nulls, which
+    // is what an equi-depth histogram wants — a null is an absent value, not
+    // a zero.
     let mut values: Vec<f64> = Vec::with_capacity(ca.len());
-    for v in ca.into_iter().flatten() {
+    for v in ca.iter().flatten() {
         values.push(v);
     }
     EquiDepthHistogram::from_values(&values, buckets)

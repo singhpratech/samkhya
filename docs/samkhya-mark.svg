@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-labelledby="samkhya-mark-title samkhya-mark-desc">
+  <title id="samkhya-mark-title">samkhya</title>
+  <desc id="samkhya-mark-desc">A saffron pataka bearing a sun drawn as an open ring — the sun as
+  zero, the origin of counting and the source of life.</desc>
+
+  <defs>
+    <linearGradient id="sk-bhagwa" x1="12" y1="10" x2="57" y2="49" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5A623"/>
+      <stop offset="0.55" stop-color="#EF7A2A"/>
+      <stop offset="1" stop-color="#DC4B22"/>
+    </linearGradient>
+    <linearGradient id="sk-staff" x1="7" y1="4" x2="11" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A8703A"/>
+      <stop offset="1" stop-color="#7A4A22"/>
+    </linearGradient>
+  </defs>
+
+  <!-- the staff, and its finial -->
+  <rect x="7.2" y="8" width="3.1" height="50" rx="1.55" fill="url(#sk-staff)"/>
+  <circle cx="8.75" cy="6.1" r="2.5" fill="#D3A83F"/>
+
+  <!-- the pataka: swallow-tailed, flowing right -->
+  <path d="M10.3 11.5 H57 L44.2 29.8 L57 48 H10.3 Z" fill="url(#sk-bhagwa)"/>
+
+  <!-- the sun, drawn as an open ring: this is the zero -->
+  <g stroke="#FFF6E6" stroke-linecap="round" fill="none">
+    <circle cx="27.4" cy="29.8" r="8.1" stroke-width="3.4"/>
+    <g stroke-width="2.5" opacity="0.92">
+      <path d="M27.4 13.9 v3.6"/>
+      <path d="M27.4 42.1 v3.6"/>
+      <path d="M11.5 29.8 h3.6"/>
+      <path d="M39.7 29.8 h3.6"/>
+      <path d="M16.2 18.6 l2.5 2.5"/>
+      <path d="M36.1 38.5 l2.5 2.5"/>
+      <path d="M38.6 18.6 l-2.5 2.5"/>
+      <path d="M18.7 38.5 l-2.5 2.5"/>
+    </g>
+  </g>
+</svg>

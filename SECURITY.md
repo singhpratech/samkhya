@@ -1,10 +1,10 @@
 # Security policy
 
-samkhya is **v1.0+ software**. The public API and on-disk formats (Puffin
-sidecar layout, sketch payload codecs, SQLite feedback-store schema) are
-covered by semver. Breaking changes require a major-version bump and the
-deprecation window in `docs/SEMVER.md`. The supply-chain guarantees in
-this document apply across all supported lines.
+samkhya is **post-1.0 software (currently v1.2.x)**. The public API and
+on-disk formats (Puffin sidecar layout, sketch payload codecs, SQLite
+feedback-store schema) are covered by semver. Breaking changes require a
+major-version bump and the deprecation window in `docs/SEMVER.md`. The
+supply-chain guarantees in this document apply across all supported lines.
 
 Sole author and security contact: **Prateek Singh** (via GitHub Security
 Advisories on the `singhpratech/samkhya` repository — see the
@@ -19,7 +19,9 @@ backports — operators on those lines must upgrade.
 
 | Version  | Supported          |
 | -------- | ------------------ |
-| 1.0.x    | yes (current)      |
+| 1.2.x    | yes (current)      |
+| 1.1.x    | yes                |
+| 1.0.x    | yes                |
 | < 1.0.0  | no                 |
 
 The previous-major row will populate once v2.0 ships.
@@ -81,6 +83,13 @@ In-scope:
   schema. **Every `from_bytes` constructor is adversarial-input scope:**
   any panic, OOB read, allocator-DoS, or silent corruption on attacker
   -supplied bytes is a security bug.
+* **The v1.1 portable-statistics handoff** — `PortableStatsSnapshot`, the
+  Iceberg `load_portable_stats_from_table` loader, and the shared DataFusion /
+  DuckDB consumers. These read Puffin blobs referenced from real Iceberg table
+  metadata; rejecting corrupt payloads, duplicate or unknown blob kinds, and
+  schema / snapshot / sequence-number mismatches (including explicitly declared
+  future schema versions) is security scope. A malformed or stale sidecar that
+  reaches engine internals unvalidated is a security bug.
 * The build pipeline (CI workflows, `deny.toml`, `Cargo.lock`).
 
 Out-of-scope:
@@ -109,6 +118,44 @@ Out-of-scope:
 * Performance / DoS issues that don't violate a stated bound — samkhya's
   contract is correctness, not real-time performance. A bench regression
   is not a vulnerability.
+
+## Bound soundness
+
+The envelope's ceiling is the guarantee everything else rests on: a correction
+clamped under it cannot regress a plan. **A ceiling that can fall below the true
+cardinality is therefore a correctness defect in a safety guarantee**, and is
+treated with the same seriousness as a memory-safety bug, even though it is not
+exploitable in the usual sense.
+
+One such defect shipped. Through v1.1, `LpJoinBound`, `AgmBound`, and
+`ChainBound` all returned ceilings below the true join cardinality on common
+shapes — 2,179 violations in 3,704 measured bound-evaluations. It is fixed in
+1.2.0 and documented in full, including how the measurement harness masked it,
+in `bench-results/20_bound_soundness.md`. No advisory was filed: the defect
+causes underestimation and bad plans, not memory unsafety, information
+disclosure, or denial of service, and no CVE class fits it.
+
+The standing invariants:
+
+* Every bound exposed through `UpperBound` must be sound for **bag** semantics —
+  the semantics engines actually execute — for every database instance
+  consistent with the statistics it was handed.
+* A bound that cannot be derived soundly from its inputs must return the
+  Cartesian product, not a tighter guess. Given only row counts and which pairs
+  of relations are joined, the product is the only sound answer.
+* Every degree statistic feeding `samkhya-core::degree` must be an **over**
+  -estimate. Constructors either derive that guarantee (`from_distinct`,
+  `from_count_min`) or state the obligation on the caller
+  (`from_upper_bound`). `CountMinSketch::max_frequency_bound` returns `None`
+  rather than an unsound number when its counters have saturated.
+* Soundness is tested absolutely, not relatively.
+  `samkhya-core/tests/soundness_degree.rs` builds instances, brute-forces the
+  true join, and asserts `ceiling >= truth`. Relative invariants between bounds
+  hold perfectly well for a family that is wrong together, which is exactly what
+  happened.
+
+A reported ceiling that lands below a demonstrable true cardinality is a valid
+report under this policy and should be sent through the GHSA channel above.
 
 ## Adversarial-input invariants
 

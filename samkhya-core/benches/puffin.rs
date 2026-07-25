@@ -5,8 +5,9 @@
 
 use std::io::Cursor;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
+use std::hint::black_box;
 
 /// Deterministic pseudo-random 1KB blob payloads (no rand dep needed).
 fn make_blobs(n: usize, size: usize) -> Vec<Vec<u8>> {

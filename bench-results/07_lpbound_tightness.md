@@ -1,3 +1,29 @@
+> ## ⚠ RETRACTED — 2026-07-24
+>
+> **Every tightness figure in this file is withdrawn, including the headline
+> 40.95× star-5 ratio.** The bounds measured here were not sound, and the
+> harness that measured them could not report that fact.
+>
+> * `LpJoinBound`, `AgmBound`, and `ChainBound` returned ceilings *below* the
+>   true cardinality in 2,179 of 3,704 comparable bound-evaluations (58.8%).
+> * The harness computed `(bound / truth).max(1.0)`. The `.max(1.0)` clamped
+>   every violation to exactly 1.0 — reporting an unsound bound as a perfectly
+>   tight one — so the campaign was structurally unable to detect the defect it
+>   was averaging over.
+> * The 40.95× ratio is `AgmBound / LpJoinBound` on instances where
+>   `LpJoinBound` had collapsed a star to its hub row count. It was large in
+>   proportion to how far below the truth the denominator had fallen. Corrected,
+>   the v1.1 figure is undefined (no star-5 trial has both bounds sound); on the
+>   repaired 1.2.0 bounds the same measurement is **1.070×**.
+> * The number was additionally mislabelled a "wallclock speedup" in
+>   `EVIDENCE.md` and the technical paper. It never was one.
+>
+> The audit, the repair, and the corrected measurements are in
+> [`20_bound_soundness.md`](./20_bound_soundness.md). This file is retained
+> unedited below as the record of what was originally reported.
+
+---
+
 # 07 — LpBound family tightness on multi-way joins
 
 **Date:** 2026-05-16

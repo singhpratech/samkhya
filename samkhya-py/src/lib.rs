@@ -17,7 +17,8 @@ use pyo3::types::{PyBytes, PyType};
 use serde::{Deserialize, Serialize};
 
 use samkhya_core::Error as CoreError;
-use samkhya_core::lpbound::{AgmBound, ProductBound, UpperBound};
+use samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
+use samkhya_core::lpbound::{ProductBound, UpperBound};
 use samkhya_core::sketches::{
     BloomFilter as CoreBloom, CountMinSketch as CoreCms, EquiDepthHistogram as CoreHistogram,
     HllSketch as CoreHll, Sketch,
@@ -375,19 +376,9 @@ fn product_bound(card_estimates: Vec<f64>) -> f64 {
     ProductBound.ceiling(&rows, &[]) as f64
 }
 
-/// AGM-style upper bound for an equi-join graph with predicate selectivities.
-///
-/// `joins` is a list of `(left_idx, right_idx, predicate_selectivity)`
-/// tuples; `card_estimates` is the per-relation row count. Returns
-/// `core::AgmBound::ceiling(card_estimates, [(i,j), ...])` multiplied by
-/// the product of all predicate selectivities — a System-R-style
-/// selectivity-weighted refinement of the coarse AGM ceiling.
-#[pyfunction]
-fn agm_bound(joins: Vec<(usize, usize, f64)>, card_estimates: Vec<f64>) -> f64 {
-    if card_estimates.is_empty() {
-        return 0.0;
-    }
-    let rows: Vec<u64> = card_estimates
+/// Convert Python floats to saturating, non-negative row counts.
+fn to_row_counts(card_estimates: &[f64]) -> Vec<u64> {
+    card_estimates
         .iter()
         .map(|&c| {
             if !c.is_finite() || c < 0.0 {
@@ -398,11 +389,100 @@ fn agm_bound(joins: Vec<(usize, usize, f64)>, card_estimates: Vec<f64>) -> f64 {
                 c as u64
             }
         })
-        .collect();
-    let preds: Vec<(usize, usize)> = joins.iter().map(|&(i, j, _)| (i, j)).collect();
-    let coarse = AgmBound.ceiling(&rows, &preds) as f64;
+        .collect()
+}
+
+/// Provable upper bound for an equi-join graph.
+///
+/// `joins` is a list of `(left_idx, right_idx, predicate_selectivity)`
+/// tuples; `card_estimates` is the per-relation row count.
+///
+/// Changed in 1.2.0 — soundness fix
+/// --------------------------------
+/// Through 1.1 this multiplied the ceiling by the product of the supplied
+/// selectivities. Selectivities are in `[0, 1]`, so that could only shrink
+/// the result: passing `0.01` returned a "bound" a hundred times below the
+/// real ceiling, and a corrector clamped to it would underestimate. A
+/// provable bound cannot be tightened by an estimate. The selectivity
+/// field is now ignored here; use `selectivity_estimate` if you want the
+/// old System-R-style value, which is an estimate and is labelled as one.
+///
+/// For a bound that is both provable *and* tighter than the Cartesian
+/// product, pass distinct counts to `join_ceiling`.
+#[pyfunction]
+fn agm_bound(_joins: Vec<(usize, usize, f64)>, card_estimates: Vec<f64>) -> f64 {
+    if card_estimates.is_empty() {
+        return 0.0;
+    }
+    let rows = to_row_counts(&card_estimates);
+    // Given only row counts and which pairs are joined, the Cartesian
+    // product is the only sound ceiling: every row of every relation may
+    // carry the same key value.
+    ProductBound.ceiling(&rows, &[]) as f64
+}
+
+/// System-R-style selectivity-weighted cardinality *estimate*.
+///
+/// This is the pre-1.2 behaviour of `agm_bound`, under a name that says
+/// what it is. It is an estimate, not a ceiling: it can and does land
+/// below the true cardinality. Never clamp a corrector to it.
+#[pyfunction]
+fn selectivity_estimate(joins: Vec<(usize, usize, f64)>, card_estimates: Vec<f64>) -> f64 {
+    if card_estimates.is_empty() {
+        return 0.0;
+    }
+    let rows = to_row_counts(&card_estimates);
+    let coarse = ProductBound.ceiling(&rows, &[]) as f64;
     let sel: f64 = joins.iter().map(|&(_, _, s)| s.clamp(0.0, 1.0)).product();
     (coarse * sel).max(0.0)
+}
+
+/// Provable join ceiling derived from row counts and distinct-value counts.
+///
+/// `joins` is a list of `(left_idx, right_idx)` pairs. `distinct_counts`
+/// gives the number of distinct join-key values per relation; entries that
+/// are zero, missing, or larger than the row count degrade safely to "no
+/// degree information" rather than producing an unsound value.
+///
+/// This is the bound to use. On a foreign-key join of 10 orders to 100
+/// line items over 10 distinct keys it returns exactly 100, where the
+/// Cartesian product returns 1000 — tighter, and still provable.
+#[pyfunction]
+#[pyo3(signature = (joins, card_estimates, distinct_counts=None))]
+fn join_ceiling(
+    joins: Vec<(usize, usize)>,
+    card_estimates: Vec<f64>,
+    distinct_counts: Option<Vec<f64>>,
+) -> f64 {
+    if card_estimates.is_empty() {
+        return 0.0;
+    }
+    let rows = to_row_counts(&card_estimates);
+    let mut relations: Vec<JoinRelation> = rows.iter().map(|&n| JoinRelation::new(n)).collect();
+
+    if let Some(distinct) = distinct_counts {
+        let distinct = to_row_counts(&distinct);
+        for (attribute, &(i, j)) in joins.iter().enumerate() {
+            for endpoint in [i, j] {
+                if endpoint >= rows.len() {
+                    continue;
+                }
+                let degree = match distinct.get(endpoint) {
+                    Some(&d) => AttributeDegree::from_distinct(rows[endpoint], d),
+                    None => AttributeDegree::unknown(rows[endpoint]),
+                };
+                relations[endpoint] =
+                    std::mem::replace(&mut relations[endpoint], JoinRelation::new(rows[endpoint]))
+                        .with_degree(attribute as u32, degree);
+            }
+        }
+    }
+
+    let mut graph = JoinGraph::new(relations);
+    for (attribute, &(i, j)) in joins.iter().enumerate() {
+        graph = graph.with_edge(i, j, attribute as u32);
+    }
+    graph.ceiling() as f64
 }
 
 /// Return the samkhya-py crate version.
@@ -432,6 +512,8 @@ fn _native(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_function(wrap_pyfunction!(product_bound, m)?)?;
     m.add_function(wrap_pyfunction!(agm_bound, m)?)?;
+    m.add_function(wrap_pyfunction!(selectivity_estimate, m)?)?;
+    m.add_function(wrap_pyfunction!(join_ceiling, m)?)?;
     m.add_function(wrap_pyfunction!(samkhya_version, m)?)?;
     Ok(())
 }

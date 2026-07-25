@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "samkhya client-side DuckDB integration (Rust crate, bundled feature)"
+description = "DuckDB client integration for samkhya's portable statistics"
 
 [dependencies]
 samkhya-core.workspace = true

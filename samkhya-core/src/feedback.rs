@@ -27,6 +27,25 @@ CREATE INDEX IF NOT EXISTS idx_obs_template ON observations(template_hash);
 CREATE INDEX IF NOT EXISTS idx_obs_plan ON observations(plan_fingerprint);
 "#;
 
+/// Plan-shape feature columns, added in 1.2.0.
+///
+/// Every column is nullable, so a store written by an older binary reads
+/// back unchanged and rows recorded through [`FeedbackStore::record`]
+/// simply leave them `NULL`. That keeps the addition a migration rather
+/// than a schema break, which is why `SCHEMA_USER_VERSION` does not move.
+///
+/// They exist because a corrector trained without them is trained on a
+/// different feature space than the one it sees at inference time — see
+/// [`PlanObservation`].
+const FEATURE_COLUMNS: &[(&str, &str)] = &[
+    ("left_input_rows", "INTEGER"),
+    ("right_input_rows", "INTEGER"),
+    ("left_distinct", "INTEGER"),
+    ("right_distinct", "INTEGER"),
+    ("predicate_count", "INTEGER"),
+    ("join_depth", "INTEGER"),
+];
+
 /// Schema version stamped into SQLite's `PRAGMA user_version`.
 ///
 /// Bumped only when the on-disk schema changes in a backwards-incompatible
@@ -74,6 +93,72 @@ impl Observation {
     }
 }
 
+/// An observation captured together with the plan-shape features the
+/// corrector will be handed at inference time.
+///
+/// # Why this exists alongside [`Observation`]
+///
+/// [`Observation`] records only `est_rows` and `actual_rows`. Training from
+/// it forces the trainer to synthesise a feature vector with
+/// `baseline_estimate` set and the other six slots zeroed — while at
+/// inference time an adapter fills all seven. A tree model never splits on
+/// a feature that was constant during training, so six of the seven
+/// features are dead weight and the corrector is effectively
+/// one-dimensional. That is a silent train/serve skew, not a crash, which
+/// is why it survived so long.
+///
+/// `PlanObservation` closes it by recording what the corrector will
+/// actually see. Prefer it for anything that will be trained on.
+///
+/// # Examples
+///
+/// ```
+/// use samkhya_core::feedback::PlanObservation;
+/// use samkhya_core::residual::CorrectionFeatures;
+///
+/// let obs = PlanObservation {
+///     template_hash: "q7".into(),
+///     plan_fingerprint: "hash-join#1".into(),
+///     features: CorrectionFeatures { baseline_estimate: 10, ..Default::default() },
+///     actual_rows: 100,
+///     latency_ms: None,
+/// };
+/// // 10x under-estimate.
+/// assert!((obs.q_error() - 10.0).abs() < 1e-9);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlanObservation {
+    pub template_hash: String,
+    pub plan_fingerprint: String,
+    /// The feature vector the corrector saw, including `baseline_estimate`.
+    pub features: crate::residual::CorrectionFeatures,
+    pub actual_rows: u64,
+    pub latency_ms: Option<f64>,
+}
+
+impl PlanObservation {
+    /// Multiplicative q-error against the baseline estimate. `f64::INFINITY`
+    /// when either side is zero, matching [`Observation::q_error`].
+    pub fn q_error(&self) -> f64 {
+        if self.features.baseline_estimate == 0 || self.actual_rows == 0 {
+            return f64::INFINITY;
+        }
+        let r = self.actual_rows as f64 / self.features.baseline_estimate as f64;
+        if r >= 1.0 { r } else { 1.0 / r }
+    }
+
+    /// Reduce to the legacy shape, discarding the plan features.
+    pub fn to_observation(&self) -> Observation {
+        Observation {
+            template_hash: self.template_hash.clone(),
+            plan_fingerprint: self.plan_fingerprint.clone(),
+            est_rows: self.features.baseline_estimate,
+            actual_rows: self.actual_rows,
+            latency_ms: self.latency_ms,
+        }
+    }
+}
+
 /// SQLite-backed feedback store.
 pub struct FeedbackStore {
     conn: Connection,
@@ -86,6 +171,7 @@ impl FeedbackStore {
         let conn = Connection::open(path_ref).map_err(map_sqlite)?;
         conn.execute_batch(SCHEMA_V1).map_err(map_sqlite)?;
         check_or_stamp_schema_version(&conn)?;
+        add_feature_columns(&conn)?;
         // SECURITY-REVIEW-2026-05-17.md (M2): the feedback store records
         // plan fingerprints which may carry schema details or filter
         // values. Tighten the file mode to 0o600 (owner-only) so a
@@ -123,7 +209,108 @@ impl FeedbackStore {
         let conn = Connection::open_in_memory().map_err(map_sqlite)?;
         conn.execute_batch(SCHEMA_V1).map_err(map_sqlite)?;
         check_or_stamp_schema_version(&conn)?;
+        add_feature_columns(&conn)?;
         Ok(Self { conn })
+    }
+
+    /// Record an observation *with* the plan-shape features the corrector
+    /// will see at inference time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use samkhya_core::feedback::{FeedbackStore, PlanObservation};
+    /// use samkhya_core::residual::CorrectionFeatures;
+    ///
+    /// let store = FeedbackStore::open_in_memory().unwrap();
+    /// let obs = PlanObservation {
+    ///     template_hash: "job-slow".into(),
+    ///     plan_fingerprint: "hash-join#7".into(),
+    ///     features: CorrectionFeatures {
+    ///         baseline_estimate: 1_000,
+    ///         left_input_rows: Some(500),
+    ///         right_input_rows: Some(2_000),
+    ///         predicate_count: 2,
+    ///         join_depth: 3,
+    ///         ..Default::default()
+    ///     },
+    ///     actual_rows: 9_500,
+    ///     latency_ms: Some(12.5),
+    /// };
+    /// store.record_plan(&obs).unwrap();
+    ///
+    /// let history = store.plan_history("job-slow").unwrap();
+    /// assert_eq!(history.len(), 1);
+    /// assert_eq!(history[0].features.join_depth, 3);
+    /// ```
+    pub fn record_plan(&self, obs: &PlanObservation) -> Result<i64> {
+        let f = &obs.features;
+        self.conn
+            .execute(
+                "INSERT INTO observations (template_hash, plan_fingerprint, est_rows, actual_rows, \
+                 latency_ms, left_input_rows, right_input_rows, left_distinct, right_distinct, \
+                 predicate_count, join_depth) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    obs.template_hash,
+                    obs.plan_fingerprint,
+                    f.baseline_estimate as i64,
+                    obs.actual_rows as i64,
+                    obs.latency_ms,
+                    f.left_input_rows.map(|v| v as i64),
+                    f.right_input_rows.map(|v| v as i64),
+                    f.left_distinct.map(|v| v as i64),
+                    f.right_distinct.map(|v| v as i64),
+                    i64::from(f.predicate_count),
+                    i64::from(f.join_depth),
+                ],
+            )
+            .map_err(map_sqlite)?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Return every observation for `template_hash` that carries plan
+    /// features, oldest first.
+    ///
+    /// Rows recorded through [`record`](Self::record) have no features and
+    /// are skipped: training on them would silently reintroduce the
+    /// feature-space mismatch this type exists to prevent. The filter is
+    /// `predicate_count IS NOT NULL`, which only
+    /// [`record_plan`](Self::record_plan) sets.
+    pub fn plan_history(&self, template_hash: &str) -> Result<Vec<PlanObservation>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT template_hash, plan_fingerprint, est_rows, actual_rows, latency_ms, \
+                 left_input_rows, right_input_rows, left_distinct, right_distinct, \
+                 predicate_count, join_depth \
+                 FROM observations \
+                 WHERE template_hash = ?1 AND predicate_count IS NOT NULL \
+                 ORDER BY id ASC",
+            )
+            .map_err(map_sqlite)?;
+        let rows = stmt
+            .query_map(params![template_hash], |row| {
+                let opt_u64 = |v: Option<i64>| v.map(|n| n as u64);
+                Ok(PlanObservation {
+                    template_hash: row.get(0)?,
+                    plan_fingerprint: row.get(1)?,
+                    features: crate::residual::CorrectionFeatures {
+                        baseline_estimate: row.get::<_, i64>(2)? as u64,
+                        left_input_rows: opt_u64(row.get(5)?),
+                        right_input_rows: opt_u64(row.get(6)?),
+                        left_distinct: opt_u64(row.get(7)?),
+                        right_distinct: opt_u64(row.get(8)?),
+                        predicate_count: row.get::<_, i64>(9)? as u32,
+                        join_depth: row.get::<_, i64>(10)? as u32,
+                    },
+                    actual_rows: row.get::<_, i64>(3)? as u64,
+                    latency_ms: row.get(4)?,
+                })
+            })
+            .map_err(map_sqlite)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(map_sqlite)
     }
 
     /// Record an observation.
@@ -195,6 +382,37 @@ impl FeedbackStore {
             .map(|n| n as u64)
             .map_err(map_sqlite)
     }
+}
+
+/// Add the 1.2.0 plan-feature columns to an existing `observations` table.
+///
+/// Idempotent: each column is added only when absent, so opening a store
+/// repeatedly is free and opening one written by an older binary upgrades
+/// it in place. Every column is nullable, so nothing already recorded
+/// becomes invalid and an older binary can still read the file.
+fn add_feature_columns(conn: &Connection) -> Result<()> {
+    let mut existing = std::collections::HashSet::new();
+    {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(observations)")
+            .map_err(map_sqlite)?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(map_sqlite)?;
+        for name in names {
+            existing.insert(name.map_err(map_sqlite)?);
+        }
+    }
+    for (column, ty) in FEATURE_COLUMNS {
+        if existing.contains(*column) {
+            continue;
+        }
+        conn.execute_batch(&format!(
+            "ALTER TABLE observations ADD COLUMN {column} {ty}"
+        ))
+        .map_err(map_sqlite)?;
+    }
+    Ok(())
 }
 
 fn map_sqlite(e: rusqlite::Error) -> Error {

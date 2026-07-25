@@ -9,6 +9,8 @@
 //! Emits a CSV-like block on stdout that the parent bench-results doc
 //! ingests verbatim. No external deps beyond samkhya-core itself + std.
 
+#![allow(deprecated)] // measures solve latency of the legacy bound family
+
 use std::cell::RefCell;
 use std::env;
 use std::fs::File;
