@@ -22,7 +22,7 @@
 
 [![Live site](https://img.shields.io/badge/site-live-2F3B8C?logo=github&logoColor=white)](https://singhpratech.github.io/samkhya/)
 [![Live demo](https://img.shields.io/badge/demo-interactive-356443?logo=webassembly&logoColor=white)](https://singhpratech.github.io/samkhya/demo.html)
-[![CI](https://github.com/singhpratech/samkhya/workflows/CI/badge.svg)](https://github.com/singhpratech/samkhya/actions)
+[![CI](https://github.com/singhpratech/samkhya/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/singhpratech/samkhya/actions/workflows/ci.yml?query=branch%3Amain)
 [![crates.io](https://img.shields.io/crates/v/samkhya-core.svg)](https://crates.io/crates/samkhya-core)
 [![PyPI](https://img.shields.io/pypi/v/samkhya.svg)](https://pypi.org/project/samkhya/)
 [![docs.rs](https://img.shields.io/docsrs/samkhya-core)](https://docs.rs/samkhya-core)
