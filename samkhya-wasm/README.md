@@ -28,7 +28,7 @@ joinCeiling([10, 100], [0, 1], []);         // 1000 — the Cartesian product
 exceed, derived from row counts and distinct counts by a spanning-tree degree
 bound. On foreign-key joins — the shape that dominates analytical workloads —
 it is exactly tight. The theorem and its brute-force verification are in
-[`bench-results/20_bound_soundness.md`](../bench-results/20_bound_soundness.md).
+[`20_bound_soundness.md`](https://github.com/singhpratech/samkhya/blob/main/bench-results/20_bound_soundness.md).
 
 The sketches use the same byte format as the Rust and Python packages, so a
 sketch built in a browser deserialises unchanged in a Rust query engine.

@@ -6,6 +6,33 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-07-24
+
+**Package metadata only. No code, no API, no behaviour change.**
+
+1.2.1 corrected the one-line `description` field and I checked that field,
+declared it fixed, and missed the one that matters. On crates.io and PyPI the
+page body is the crate's `README.md`, and those were untouched — so
+`samkhya-py`'s PyPI page still read "its **LpBound** ceiling helpers", naming the
+bound family 1.2.0 found unsound, and carried two `../samkhya-core` links that
+404 outside the repository.
+
+Every published crate's README is rewritten against its actual source:
+
+- No crate advertises "LpBound" as something samkhya offers. References to the
+  real `lpbound::` module path remain, because that API exists.
+- No relative links. They resolve inside the repo and break on both registries;
+  all are now absolute.
+- `samkhya-postgres` opens by stating the planner-hook integration is **not
+  implemented** — which its own module docs have always said.
+- `samkhya-duckdb-ext` and `samkhya-gpudb` state their scaffold boundaries.
+- `samkhya-py` documents the real surface, including that `distinct_counts` must
+  be a *lower* bound on the true distinct count, since the degree is derived as
+  `rows - distinct + 1` and an overstated count yields an unsound ceiling.
+
+Each rewrite was verified against the crate's source for invented API names.
+
+
 ## [1.2.1] — 2026-07-24
 
 **Package metadata only. No code, no API, no behaviour change.**
@@ -1388,7 +1415,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/singhpratech/samkhya/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/singhpratech/samkhya/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/singhpratech/samkhya/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/singhpratech/samkhya/compare/v1.0.0...v1.1.0

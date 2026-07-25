@@ -4,99 +4,115 @@
 [![docs.rs](https://docs.rs/samkhya-polars/badge.svg)](https://docs.rs/samkhya-polars)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/singhpratech/samkhya/blob/main/LICENSE)
 
-Polars adapter for samkhya. Builds samkhya sketches directly from a
-`polars::series::Series` and wraps `LazyFrame::collect()` with feedback
-recording, so downstream pipelines can produce Puffin sidecars and train the
-residual corrector even before Polars exposes an optimizer-rule extension
-API upstream.
+Build samkhya sketches from a Polars `Series`, and feed those sketches into a
+provable join-cardinality ceiling — a number the join provably cannot exceed.
 
-Part of the [samkhya](https://github.com/singhpratech/samkhya) project —
-portable, feedback-driven cardinality correction for embedded analytical
-engines.
+This is an adapter, not a Polars optimizer integration. Polars has no public
+optimizer-rule extension API ([pola-rs/polars#23345](https://github.com/pola-rs/polars/issues/23345)),
+so nothing here rewrites a `LazyFrame` plan, injects statistics, or changes how
+Polars executes anything. Every helper is called explicitly by your code.
 
-## What this crate provides
+## Install
 
-Behind the `engine` cargo feature:
-
-- **`sketcher::hll_from_series(&Series, precision)`** — `HllSketch` for
-  distinct-count / equality selectivity.
-- **`sketcher::bloom_from_series(&Series, fp_rate)`** — `BloomFilter` sized
-  to `series.len()`, for join pre-filtering.
-- **`sketcher::cms_from_series(&Series, depth, width)`** — `CountMinSketch`
-  for heavy-hitter and skew detection.
-- **`sketcher::histogram_from_series(&Series, buckets)`** —
-  `EquiDepthHistogram` for range-predicate selectivity. Numeric only;
-  non-numeric columns return `Error::InvalidSketch`.
-- **`feedback_wrapper::lazy_collect_with_feedback(lf, &store, template)`** —
-  times `collect()` on a `LazyFrame` and writes an `Observation` to the
-  given `FeedbackStore` with `actual_rows = df.height()` and `est_rows = 0`.
-
-Always available (no feature flag):
-
-- **`column_stats_for(table, col)`** — placeholder accessor for a future
-  Polars-side stats provider; returns `None` until Polars exposes optimizer
-  hooks.
-
-## Quick start
-
-```rust
-use polars::prelude::*;
-use samkhya_polars::sketcher::{hll_from_series, histogram_from_series};
-
-let s = Series::new("customer_id".into(), &[1i64, 2, 3, 1, 2]);
-let hll = hll_from_series(&s, 12)?;
-println!("approx distinct = {}", hll.estimate());
-
-let nums = Series::new("amount".into(), &[1.0f64, 2.5, 3.7, 4.1, 5.0]);
-let hist = histogram_from_series(&nums, 4)?;
-println!("buckets = {:?}", hist.buckets());
-# Ok::<(), Box<dyn std::error::Error>>(())
+```toml
+[dependencies]
+samkhya-polars = { version = "1.2", features = ["engine"] }
+samkhya-core = "1.2"
 ```
 
-## Feature flags
+The `engine` feature is off by default. Without it the crate is two no-op
+placeholders and a single `samkhya-core` dependency, so workspace members that
+never touch Polars do not pay for polars in their build graph.
 
-- `engine` (off by default) — pulls in `polars = "0.44"` with every
-  `dtype-*` sub-feature except `dtype-decimal` (excluded to avoid a
-  resolver collision through workspace feature unification with other
-  crates depending on `pyo3 0.29`). With the feature off, the default
-  build keeps a single `samkhya-core` dependency and a back-compat stub —
-  workspace builds that do not need Polars stay lean.
+## From a Series to a ceiling
 
-## Hashing strategy
+10 orders join 100 line items over 10 distinct customer ids. The Cartesian
+product says 1,000 rows. The ceiling says 100, which is the exact answer.
 
-- Numeric variants → little-endian bytes (matches the encoding used by
-  `samkhya-core`'s own sketch tests, so values hashed here collide with
-  values added directly via the core API).
-- `Boolean` → single byte.
-- Strings and binary → underlying bytes.
-- Anything else → debug-format string bytes; stable enough for
-  distinct-count / membership purposes.
+```rust
+use polars::prelude::{NamedFrom, Series};
+use samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
+use samkhya_polars::sketcher::cms_from_series;
 
-Nulls are skipped. Multi-chunk inputs from `LazyFrame::collect()` are
-rechunked transparently before iteration.
+let orders =
+    Series::new("customer_id".into(), &[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+let items: Vec<i64> = (0..100i64).map(|i| i % 10).collect();
+let items = Series::new("customer_id".into(), items);
 
-## Status
+let orders_cms = cms_from_series(&orders, 5, 1024).unwrap();
+let items_cms = cms_from_series(&items, 5, 1024).unwrap();
 
-Polars currently has no public optimizer-rule extension API (tracked
-upstream in
-[pola-rs/polars#23345](https://github.com/pola-rs/polars/issues/23345)),
-so this crate cannot inject corrected cardinality hints into a `LazyFrame`
-plan the way `samkhya-datafusion` does through a `TableProvider`. Until
-that upstream gap closes, integration is exposed through the surfaces
-documented above. Once optimizer hooks land, this crate will gain a
-`LazyFrame` rewriter analogous to `SamkhyaTableProvider`.
+const CUSTOMER_ID: u32 = 0; // attribute ids are caller-assigned
+let orders_deg = AttributeDegree::from_count_min(10, &orders_cms);
+let items_deg = AttributeDegree::from_count_min(100, &items_cms);
 
-## Integration
+let graph = JoinGraph::new(vec![
+    JoinRelation::new(10).with_degree(CUSTOMER_ID, orders_deg),
+    JoinRelation::new(100).with_degree(CUSTOMER_ID, items_deg),
+])
+.with_edge(0, 1, CUSTOMER_ID);
 
-A Polars-based pipeline imports `samkhya-polars` with `features = ["engine"]`
-to:
+assert_eq!(graph.ceiling(), 100);
+```
 
-- Materialize samkhya sketches from any DataFrame column and publish them
-  via the Iceberg Puffin codec in `samkhya-core::puffin`.
-- Record real `(estimated, actual)` row counts into a `FeedbackStore` for
-  the residual-correction model in `samkhya-core::residual`, even before
-  Polars supports plan-level injection.
+The row counts are yours to supply (`df.height()`, a catalog, a Parquet
+footer). The sketch supplies the degree.
 
-## License
+## Which degree constructor is sound
 
-Apache-2.0. Sole author: Prateek Singh.
+A degree bound must never under-state the true maximum number of rows sharing
+one key value. Under-stating it produces a ceiling below the true cardinality,
+which is the exact failure the ceiling exists to prevent.
+
+- `AttributeDegree::from_count_min(rows, &cms)` — the tightest sketch source.
+  Count-Min never undercounts, so its largest counter bounds every key at once.
+- `AttributeDegree::from_hll_floor(rows, &hll)` — uses the sketch's
+  distinct-count *floor*, not its point estimate.
+- Do not pass `HllSketch::estimate()` to `AttributeDegree::from_distinct`. That
+  estimate is two-sided, so it exceeds the truth about half the time, and
+  `from_distinct` subtracts it — an over-stated distinct count yields an
+  unsound ceiling.
+
+## Surface
+
+Behind `engine`, in `sketcher`:
+
+- `hll_from_series(&Series, precision) -> HllSketch`
+- `bloom_from_series(&Series, fp_rate) -> BloomFilter`, sized to `series.len()`
+- `cms_from_series(&Series, depth, width) -> CountMinSketch`
+- `histogram_from_series(&Series, buckets) -> EquiDepthHistogram`, numeric
+  columns only; anything else returns `Error::InvalidSketch`
+
+All four implement `samkhya_core::sketches::Sketch`, so `to_bytes()` drops
+straight into a Puffin blob via `samkhya_core::puffin` for another engine to
+read back.
+
+In `feedback_wrapper`: `lazy_collect_with_feedback(lf, &store, template_hash)`
+times `LazyFrame::collect()` and records the resulting `actual_rows` into a
+`FeedbackStore`. See the caveat below before planning around it.
+
+Always compiled: `column_stats_for(table, col)`, which returns `Ok(None)`
+unconditionally, and `build_sketches_from_series_stub()`, a no-op. Both are
+placeholders held for API stability.
+
+## Value encoding
+
+Numeric variants hash as little-endian bytes, matching `samkhya-core`'s own
+encoding, so a value hashed here collides with the same value added directly
+through the core API. `Boolean` is one byte; strings and binary hash their
+underlying bytes. Everything else — `List`, `Struct`, `Categorical`, temporal —
+falls back to debug-format bytes, which is fine for distinct-count and
+membership within one build but is not a format to persist across Polars
+versions. Nulls are skipped; multi-chunk series are rechunked first.
+
+## Caveats
+
+- The feedback wrapper writes `est_rows = 0`, because Polars 0.44 exposes no
+  plan-level row estimate publicly. `GbtCorrector::train` skips observations
+  with `est_rows == 0`, so these rows cannot train a residual corrector. They
+  are an actual-row log — enough to check a ceiling against truth, nothing more.
+- Pinned to `polars = "0.44"`, with every `dtype-*` sub-feature except
+  `dtype-decimal`, whose feature graph pulls a second `pyo3` and collides with
+  `samkhya-py` under workspace feature unification.
+
+Apache-2.0. Part of [samkhya](https://github.com/singhpratech/samkhya).

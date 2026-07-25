@@ -4,52 +4,39 @@
 [![docs.rs](https://docs.rs/samkhya-arrow/badge.svg)](https://docs.rs/samkhya-arrow)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/singhpratech/samkhya/blob/main/LICENSE)
 
-Engine-agnostic Apache Arrow integration for samkhya sketches. Feed an
-`arrow::array::Array` or a `RecordBatch` in, get back ready-to-serialize HLL,
-Bloom, Count-Min, and equi-depth-histogram sketches.
+Builds samkhya sketches from Apache Arrow data. Hand it an
+`arrow::array::Array` or a `RecordBatch`, get back HLL, Bloom, Count-Min,
+and equi-depth-histogram sketches that serialize and travel. It depends on
+`arrow` and `samkhya-core` only — not DataFusion, not DuckDB, not Polars —
+so the same column produces the same sketch bytes whichever engine handed
+you the buffers.
 
-Part of the [samkhya](https://github.com/singhpratech/samkhya) project —
-portable, feedback-driven cardinality correction for embedded analytical
-engines.
+## Install
 
-## What this crate provides
+`samkhya-arrow = "1.2"`. The `arrow` dependency is pinned to major version
+54, the one DataFusion 46 vendors, so a consumer that already pulls
+DataFusion does not link two Arrow stacks.
 
-- **`ingest`** — array-level helpers that dispatch once on `DataType`,
-  downcast to the concrete primitive / byte array, and walk values into a
-  sketch:
-  - `ingest_array_into_hll(array, &mut HllSketch)`
-  - `ingest_array_into_bloom(array, &mut BloomFilter)`
-  - `ingest_array_into_cms(array, &mut CountMinSketch, count_per_value)`
-  - `ingest_array_into_histogram_values(array) -> Result<Vec<f64>>`
-- **`batch`** — `RecordBatch`-level convenience wrappers that fan out the
-  array helpers across every column:
-  - `build_column_sketches(batch, precision) -> Result<Vec<HllSketch>>`
-  - `build_blooms(batch, fp_rate) -> Result<Vec<BloomFilter>>`
-  - `build_histograms(batch, buckets) -> Result<Vec<Option<EquiDepthHistogram>>>`
+## API
 
-The crate intentionally does *not* depend on DataFusion, DuckDB, Polars, or
-any other engine — only on `arrow` itself — so any Arrow-aware caller can use
-it. Sketches built from a DataFusion `RecordBatch` hash to the same keys as
-sketches built from a Polars DataFrame's Arrow chunks.
+`ingest` — array level, one dispatch on `DataType`, nulls skipped:
 
-## Hash-key conventions
+- `ingest_array_into_hll(&dyn Array, &mut HllSketch)`
+- `ingest_array_into_bloom(&dyn Array, &mut BloomFilter)`
+- `ingest_array_into_cms(&dyn Array, &mut CountMinSketch, count_per_value: u32)`
+- `ingest_array_into_histogram_values(&dyn Array) -> Result<Vec<f64>>`
 
-All ingestion paths hash a column value by its canonical byte form:
+`batch` — fan those across every column of a `RecordBatch`:
 
-| Arrow type                                  | Bytes fed to the sketch              |
-|---------------------------------------------|--------------------------------------|
-| `Int8` … `Int64`, `UInt8` … `UInt64`        | little-endian primitive bytes        |
-| `Float32`, `Float64`                        | little-endian (`to_le_bytes`)        |
-| `Utf8`, `LargeUtf8`                         | raw UTF-8 bytes                      |
-| `Binary`, `LargeBinary`                     | bytes as-is                          |
-| `Date32`, `Date64`, `TimestampNanosecond`   | little-endian of the underlying int  |
-| `Boolean`                                   | `[0]` for false, `[1]` for true      |
+- `build_column_sketches(&RecordBatch, precision: u8) -> Result<Vec<HllSketch>>`
+- `build_blooms(&RecordBatch, fp_rate: f64) -> Result<Vec<BloomFilter>>`
+- `build_histograms(&RecordBatch, buckets: usize) -> Result<Vec<Option<EquiDepthHistogram>>>`
 
-These match the byte form `samkhya-core` sketches consume directly, so values
-added through this crate and values added directly via the core API hash to
-the same key.
+## Example: sketches to a provable join ceiling
 
-## Quick start
+Sketches built here are inputs to samkhya's provable join-cardinality
+ceiling in `samkhya_core::degree`. Ten orders joined to a hundred line
+items over ten distinct keys:
 
 ```rust
 use arrow::array::{Int64Array, RecordBatch};
@@ -57,43 +44,80 @@ use arrow::datatypes::{DataType, Field, Schema};
 use std::sync::Arc;
 
 use samkhya_arrow::batch::build_column_sketches;
+use samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
 
-let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
-let batch = RecordBatch::try_new(
-    schema,
-    vec![Arc::new(Int64Array::from(vec![1, 2, 3, 1, 2]))],
-)?;
+let schema = Arc::new(Schema::new(vec![Field::new("order_id", DataType::Int64, false)]));
+let col = |v: Vec<i64>| {
+    RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(v))]).unwrap()
+};
 
-let sketches = build_column_sketches(&batch, 12)?;
-let approx_distinct = sketches[0].estimate();
-println!("approx_distinct = {approx_distinct}"); // ~3
+let orders = col((0..10i64).collect());
+let line_items = col((0..100i64).map(|i| i % 10).collect());
+
+let order_hll = &build_column_sketches(&orders, 12)?[0];
+let item_hll = &build_column_sketches(&line_items, 12)?[0];
+
+const ORDER_ID: u32 = 0;
+let graph = JoinGraph::new(vec![
+    JoinRelation::new(10).with_degree(ORDER_ID,
+        AttributeDegree::from_hll_floor(10, order_hll)),
+    JoinRelation::new(100).with_degree(ORDER_ID,
+        AttributeDegree::from_hll_floor(100, item_hll)),
+])
+.with_edge(0, 1, ORDER_ID);
+
+assert_eq!(graph.ceiling(), 100); // the Cartesian product would say 1000
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## Feature flags
+Use `AttributeDegree::from_hll_floor`, never `HllSketch::estimate`: the
+point estimate is two-sided, so it exceeds the true distinct count about
+half the time, and since the degree arithmetic subtracts that count an
+over-stated one yields a ceiling below the truth. `from_hll_floor` reads a
+distinct-count floor instead. On high-cardinality columns a Count-Min
+sketch bounds degrees far more tightly — build one with
+`ingest_array_into_cms(array, &mut cms, 1)` and pass it to
+`AttributeDegree::from_count_min`, sound because Count-Min never
+undercounts.
 
-This crate has no cargo features. The `arrow` dependency is pinned to the
-major version DataFusion 46 vendors (`arrow = "54"`), so consumers that
-already pull DataFusion never end up with two parallel Arrow stacks linked
-into the same binary.
+## Hash-key conventions
 
-## Behavior on unsupported types
+Every path hashes a value by its canonical byte form — the same form
+`samkhya-core` sketches consume directly, so a value added through this
+crate and one added via the core API hash to the same key:
 
-- HLL / Bloom / CMS helpers silently skip arrays whose `DataType` is not
-  recognized (e.g. nested `Struct`, `List`, `Dictionary`). A generalized
-  "build sketches for every column" caller can fan out without first
-  auditing the schema.
-- The histogram helper is stricter: it requires a numeric column and returns
-  `Error::InvalidSketch` for non-numeric input rather than producing a
-  meaningless empty histogram.
+| Arrow type                          | Bytes fed to the sketch       |
+|-------------------------------------|-------------------------------|
+| `Int8`..`Int64`, `UInt8`..`UInt64`  | little-endian primitive bytes |
+| `Float32`, `Float64`                | little-endian bytes           |
+| `Utf8`, `LargeUtf8`                 | raw UTF-8 bytes               |
+| `Binary`, `LargeBinary`             | bytes as-is                   |
+| `Date32`, `Date64`, `Timestamp(ns)` | little-endian underlying int  |
+| `Boolean`                           | `[0]` false, `[1]` true       |
 
-## Integration
+## Scope and caveats
 
-Any caller that already speaks Arrow and wants engine-neutral cardinality
-stats. Inside the samkhya workspace, this is the path adapters take when they
-receive data as Arrow `RecordBatch` rather than as engine-native rows —
-keeping sketch construction in one tested place rather than re-implemented
-per engine.
+- The HLL / Bloom / CMS helpers silently skip arrays of unrecognized
+  `DataType` — `Struct`, `List`, `Dictionary`, non-nanosecond timestamps.
+  Such a column yields an empty sketch, not an error. Check the schema
+  yourself if an empty sketch would be wrong for you.
+- `ingest_array_into_histogram_values` is the exception: non-numeric input
+  returns `Error::InvalidSketch`, which `build_histograms` turns into a
+  `None` in its schema-aligned vector.
+- `build_blooms` sizes each filter for the row count of the batch it was
+  handed. Sketching a table in chunks gives per-chunk filters, not one
+  filter sized for the table.
+- This crate builds sketches. It does not plan, rewrite, or execute
+  anything, and carries no engine integration; those live in
+  `samkhya-datafusion`, `samkhya-duckdb-ext`, and the other adapters.
+
+## 1.2
+
+The bound family shipped through 1.1 was found unsound and was repaired in
+1.2; `AgmBound` is deprecated. This crate's API is unchanged, but what to
+do with its output is not: feed distinct-count floors and Count-Min
+sketches to `samkhya_core::degree`, never a two-sided point estimate. See
+https://github.com/singhpratech/samkhya/blob/main/CHANGELOG.md
 
 ## License
 

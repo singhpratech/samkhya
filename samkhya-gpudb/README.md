@@ -1,129 +1,109 @@
 # samkhya-gpudb
 
-[![crates.io](https://img.shields.io/crates/v/samkhya-gpudb.svg)](https://crates.io/crates/samkhya-gpudb)
-[![docs.rs](https://docs.rs/samkhya-gpudb/badge.svg)](https://docs.rs/samkhya-gpudb)
-[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/singhpratech/samkhya/blob/main/LICENSE)
+A batch-scoring trait for samkhya's cardinality corrector, plus a CPU
+implementation of it. **This is a scaffold.** There is no GPU code in this
+crate — no CUDA, no Metal, no device kernels, no GPU runtime linked under
+any feature. What ships is one trait (`GpuCorrector`) and one implementation
+(`CpuFallbackCorrector`) that returns each row's baseline estimate
+unchanged. The name records an intended direction, not a capability.
 
-GPU batch-inference adapter for samkhya. Defines the `GpuCorrector` trait —
-the batch sibling of `samkhya_core::residual::Corrector` — and ships a CPU
-fallback so downstream code can exercise the surface today without a CUDA
-toolkit or a Metal framework on the build host.
+## What is here
 
-Part of the [samkhya](https://github.com/singhpratech/samkhya) project —
-portable, feedback-driven cardinality correction for embedded analytical
-engines.
+`GpuCorrector` is the batch sibling of the single-row
+`samkhya_core::residual::Corrector`. Its one method is
+`fn batch_score(&self, features: &[CorrectionFeatures]) -> Result<Vec<u64>>`,
+and the returned `Vec<u64>` has the same length and order as the input
+slice. A kernel backend would score the whole slice in one dispatch; that is
+the only reason the batch form exists. `CpuFallbackCorrector` is a
+zero-sized struct that echoes each row's `baseline_estimate`, matching
+`samkhya_core::residual::IdentityCorrector`. It keeps the trait exercised in
+CI and gives an engine something that compiles. It corrects nothing.
 
-## What this crate provides
+## Install
 
-- **`GpuCorrector`** — the batch-scoring trait. Implementations score a slice
-  of `CorrectionFeatures` in a single call; real GPU backends dispatch one
-  CUDA / Metal kernel launch over the entire batch. The contract mirrors the
-  single-row `Corrector` trait in `samkhya-core` but in batch form: the
-  output `Vec<u64>` is parallel to the input slice and uses LpBound-clamped
-  row-count estimates.
-- **`CpuFallbackCorrector`** — a zero-sized struct that walks the batch
-  sequentially and echoes each row's `baseline_estimate`, matching the
-  behavior of `samkhya_core::residual::IdentityCorrector`. Useful for
-  keeping the trait honest in CI, for local development without a GPU, and
-  as a safe default for engines that opt into the batch surface before
-  wiring up real kernels.
+```toml
+[dependencies]
+samkhya-gpudb = "1.2"
+samkhya-core = "1.2"
+```
 
-## Why batch GPU inference
-
-Subplan enumeration is embarrassingly parallel: each candidate is an
-independent forward pass through a sub-MB residual model (GBT or PFN-style).
-CPU inference walks candidates one at a time; a single GPU kernel batches
-the lot. The companion [gpudb](https://github.com/singhpratech/gpudb)
-project targets CUDA and Apple Silicon Metal, and this crate is the
-integration surface between samkhya's residual corrector and that batch
-path.
-
-## Quick start
+## Example
 
 ```rust
+use samkhya_core::degree::{AttributeDegree, JoinGraph, JoinRelation};
 use samkhya_core::residual::CorrectionFeatures;
 use samkhya_gpudb::{CpuFallbackCorrector, GpuCorrector};
 
 let corrector = CpuFallbackCorrector::new();
 let batch = vec![
-    CorrectionFeatures { baseline_estimate: 10,    ..Default::default() },
-    CorrectionFeatures { baseline_estimate: 250,   ..Default::default() },
-    CorrectionFeatures { baseline_estimate: 9_999, ..Default::default() },
+    CorrectionFeatures { baseline_estimate: 10,  ..Default::default() },
+    CorrectionFeatures { baseline_estimate: 250, ..Default::default() },
 ];
+let scored = corrector.batch_score(&batch).expect("batch_score");
+assert_eq!(scored, vec![10, 250]);   // the fallback echoes baselines
 
-let scored = corrector.batch_score(&batch)?;
-assert_eq!(scored, vec![10, 250, 9_999]);
-# Ok::<(), samkhya_core::Error>(())
+// The ceiling is the caller's job. 10 orders to 100 line items over 10
+// distinct keys: the join provably cannot exceed 100 rows.
+const KEY: u32 = 0;
+let orders = JoinRelation::new(10)
+    .with_degree(KEY, AttributeDegree::from_distinct(10, 10));
+let lineitem = JoinRelation::new(100)
+    .with_degree(KEY, AttributeDegree::from_distinct(100, 10));
+let graph = JoinGraph::new(vec![orders, lineitem]).with_edge(0, 1, KEY);
+let ceiling = graph.ceiling();
+assert_eq!(ceiling, 100);
+let clamped: Vec<u64> = scored.iter().map(|&e| e.min(ceiling)).collect();
+assert_eq!(clamped, vec![10, 100]);
 ```
 
-## LLM-pluggable corrector — server transports
+## The ceiling is not applied here
 
-The `samkhya-core` `llm_http` feature speaks a small JSON wire contract
-to an external inference server. `samkhya-gpudb/scripts/` ships **two
-reference implementations** of that server, both behind the same wire
-contract — pick whichever fits your environment:
-
-| Transport | Entry point | Runtime | When to pick |
-|---|---|---|---|
-| **Python (FastAPI)** — canonical | `llm_infer_server.py` | Python 3.10+, FastAPI, uvicorn | The reference build the v1.0 empirical campaign measured. Pick this if you already have a Python venv. |
-| **TypeScript (Node)** — broader appeal | `llm_infer_server.ts` | Node 18+, zero deps for transport (uses `node:http`), optional `@anthropic-ai/sdk` / `openai` peers | Pick this if your team is Node/TS shop and you don't want a Python venv. Same wire contract; the Rust client doesn't notice the swap. |
-
-Both servers expose `POST /infer` + `GET /health` and accept the same
-four backends — `anthropic` / `openai` / `local` (Ollama) /
-`dummy` — selected via `SAMKHYA_LLM_BACKEND`. They use disjoint default
-ports (`8766` for Python, `8767` for TypeScript) so they can run side
-by side.
-
-```bash
-# Python (canonical)
-python -m pip install -r samkhya-gpudb/scripts/requirements-llm.txt
-bash samkhya-gpudb/scripts/run-llm-bench.sh --backend dummy
-
-# TypeScript (broader appeal)
-cd samkhya-gpudb/scripts && npm install         # one-time
-bash samkhya-gpudb/scripts/run-llm-bench-ts.sh --backend dummy
-```
-
-Per the samkhya naming rule, the LLM transport is framed as a
-**pluggable corrector backend** — *not* an "AI feature." The default
-samkhya build does not link either server in; the `llm_http` cargo
-feature is off by default.
+samkhya's central guarantee is a provable join-cardinality ceiling: a
+corrected estimate is held under a number the join cannot exceed.
+`batch_score` does not enforce it and cannot — `CorrectionFeatures` carries
+no ceiling field. Compute the ceiling from `samkhya_core::degree::JoinGraph`
+and clamp the results yourself, as above. Versions of this file through 1.1
+described `batch_score` as returning clamped estimates. It never did, and
+the bound family they named was found unsound by the 2026-07-24 audit.
 
 ## Feature flags
 
-- `cuda` (off by default) — placeholder for the CUDA kernel backend. Default
-  builds never link a CUDA runtime; turning this on will pull in the kernel
-  scoring path without changing the public trait surface.
-- `metal` (off by default) — placeholder for the Apple Silicon Metal kernel
-  backend. Default builds never link a Metal framework.
+`cuda` and `metal` are off by default and **gate no code today** — enabling
+either compiles exactly the same bytes. They are reserved names so a kernel
+backend can arrive as a feature flip, not a breaking change.
 
-GPU is **strictly opt-in**. With neither feature enabled, this crate
-compiles on any host with a Rust toolchain — no GPU drivers, no system C++
-build required. Engines without a GPU can depend on `samkhya-gpudb`, use the
-`CpuFallbackCorrector`, and switch to a real backend later by flipping a
-feature flag.
+## The `scripts/` directory
 
-## Planned wiring
+The repository copy of this crate carries the server side of two opt-in
+`samkhya-core` features. These are standalone programs; the Rust code here
+neither launches nor depends on them.
 
-1. **Batch-score subplan candidates.** During plan enumeration, gpudb's
-   optimizer accumulates a vector of `CorrectionFeatures` (one per
-   candidate) and calls `GpuCorrector::batch_score` once per planning round.
-   The CUDA / Metal backend dispatches a single kernel.
-2. **Reuse the residual model.** The trained residual model (sub-MB
-   footprint) is uploaded to device memory once per query and reused across
-   all subplan batches in that query.
-3. **LpBound clamp on-device.** The per-row LpBound ceiling travels with the
-   feature vector and is applied inside the kernel, so the safety contract
-   is preserved without a host round-trip.
+| Script | Serves | Runtime |
+| --- | --- | --- |
+| `llm_infer_server.py` | `llm_http` | Python 3.10+, FastAPI, uvicorn |
+| `llm_infer_server.ts` | `llm_http` | Node 18+, `node:http` |
+| `tabpfn_infer_server.py` | `tabpfn_http` | Python, TabPFN |
 
-## Integration
+Both LLM servers expose `POST /infer` and `GET /health` and speak the same
+JSON: `{"features": [f64...], "baseline_estimate": u64}` in,
+`{"estimate": u64}` out. `SAMKHYA_LLM_BACKEND` picks `anthropic`, `openai`,
+`local` (Ollama / llama.cpp), or `dummy`, which returns the baseline
+unchanged so transport cost can be measured without an API key. The bench
+wrappers bind to `127.0.0.1` and default to port 8766 for Python and 8767
+for Node, so both can run at once. A non-2xx, timeout, or unparseable
+response means "no correction" to the Rust client, so a dead server degrades
+to the baseline instead of failing the query. From a checkout of
+<https://github.com/singhpratech/samkhya>,
+`bash samkhya-gpudb/scripts/run-llm-bench.sh --backend dummy` starts the
+Python server and benchmarks against it.
 
-The companion [gpudb](https://github.com/singhpratech/gpudb) engine is the
-intended primary consumer. Engines that want to enumerate thousands of
-subplans against a sub-MB residual model — without serializing each through
-CPU inference — depend on this crate to keep the batch interface stable
-while the kernel backends evolve behind cargo features.
+## Scope
 
-## License
+- No kernel, no device code, no GPU dependency, under any feature.
+- Nothing in the workspace calls `GpuCorrector`; no engine integration
+  exists, and this file will not imply one until it does.
+- `CpuFallbackCorrector` is an identity function, not a corrector to deploy.
+- The `scripts/` servers are reference implementations for local
+  benchmarking, not production services.
 
 Apache-2.0. Sole author: Prateek Singh.

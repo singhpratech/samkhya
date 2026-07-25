@@ -13,4 +13,4 @@ keywords = ["vector-search", "cardinality", "qdrant", "selectivity", "sketches"]
 categories = ["database"]
 
 [dependencies]
-samkhya-core = { path = "../samkhya-core", version = "1.2.1", default-features = false }
+samkhya-core = { path = "../samkhya-core", version = "1.2.2", default-features = false }
