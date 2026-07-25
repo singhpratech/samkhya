@@ -28,7 +28,7 @@ samkhya-core.workspace = true
 # `dtype-*` sub-feature except `dtype-decimal`, which gives the sketcher
 # full coverage of integer / boolean / temporal / array / struct /
 # categorical / string columns without poking the resolver.
-polars = { version = "0.44", optional = true, default-features = false, features = [
+polars = { version = "0.54", optional = true, default-features = false, features = [
     "lazy",
     "dtype-date",
     "dtype-datetime",
