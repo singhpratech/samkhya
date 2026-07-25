@@ -451,7 +451,7 @@ Reading and reference:
   flow, integration surfaces, safety guarantees, glossary.
 - [SECURITY.md](./SECURITY.md) — supported versions, disclosure policy, and
   the GitHub Security Advisories channel.
-- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.2.2).
+- [CHANGELOG.md](./CHANGELOG.md) — release history (v0.0.1 → v1.2.3).
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — how to file bugs, PRs, and run the
   test suite.
 - [REPRODUCIBILITY.md](./REPRODUCIBILITY.md) — ACM AE v1.1 reviewer entry,

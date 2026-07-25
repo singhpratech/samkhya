@@ -79,7 +79,7 @@ class EquiDepthHistogram:
     def from_bytes(cls: Type[_E], data: bytes) -> _E: ...
     def __repr__(self) -> str: ...
 
-# -- LpBound helpers ---------------------------------------------------------
+# -- Join-ceiling helpers ---------------------------------------------------
 
 def product_bound(card_estimates: List[float]) -> float:
     """Trivial Cartesian-product upper bound: ``prod(card_estimates)``."""

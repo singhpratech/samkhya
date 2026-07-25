@@ -77,10 +77,10 @@ which is the exact failure the ceiling exists to prevent.
 
 Behind `engine`, in `sketcher`:
 
-- `hll_from_series(&Series, precision) -> HllSketch`
-- `bloom_from_series(&Series, fp_rate) -> BloomFilter`, sized to `series.len()`
-- `cms_from_series(&Series, depth, width) -> CountMinSketch`
-- `histogram_from_series(&Series, buckets) -> EquiDepthHistogram`, numeric
+- `hll_from_series(&Series, precision) -> Result<HllSketch>`
+- `bloom_from_series(&Series, fp_rate) -> Result<BloomFilter>`, sized to `series.len()`
+- `cms_from_series(&Series, depth, width) -> Result<CountMinSketch>`
+- `histogram_from_series(&Series, buckets) -> Result<EquiDepthHistogram>`, numeric
   columns only; anything else returns `Error::InvalidSketch`
 
 All four implement `samkhya_core::sketches::Sketch`, so `to_bytes()` drops

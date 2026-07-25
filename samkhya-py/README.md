@@ -3,8 +3,10 @@
 Python bindings for samkhya: four portable statistics sketches
 (HyperLogLog, Bloom, Count-Min, equi-depth histogram) and a provable
 join-cardinality ceiling — an upper bound the join provably cannot
-exceed. Compiled Rust behind a stable-ABI (`abi3-py39`) wheel: no Rust
-toolchain at install time, one wheel per platform for CPython 3.9+.
+exceed. Compiled Rust behind a stable-ABI (`abi3-py39`) wheel, so one wheel
+serves every CPython 3.9+ interpreter on the platforms published —
+currently `manylinux_2_34 x86_64`. Elsewhere pip falls back to the sdist,
+which does need a Rust toolchain and maturin.
 
 ## Install
 
@@ -26,7 +28,8 @@ for i in range(1000):
     hll.add(str(i).encode("utf-8"))
 print(round(hll.estimate()))          # ~1000
 
-# Sketches merge, and serialise for transport (e.g. an Iceberg Puffin blob).
+# HLL sketches merge, and every sketch serialises for transport
+# (e.g. an Iceberg Puffin blob).
 second = samkhya.HllSketch(14)      # same precision, or merge raises
 second.add(b"1001")
 hll.merge(second)
@@ -35,8 +38,8 @@ assert restored.estimate() == hll.estimate()
 ```
 
 `BloomFilter(n_items, fp_rate)`, `CountMinSketch(width, depth)`, and
-`EquiDepthHistogram(boundaries, counts)` follow the same shape, including
-`to_bytes` / `from_bytes`. Full signatures are in the type stubs:
+`EquiDepthHistogram(boundaries, counts)` share the `to_bytes` /
+`from_bytes` shape. `merge` is bound only on `HllSketch`. Full signatures are in the type stubs:
 https://github.com/singhpratech/samkhya/blob/main/samkhya-py/python/samkhya/__init__.pyi
 
 ## The join ceiling
@@ -63,8 +66,14 @@ same key value, so nothing below the product is provable.
 The degree is derived as `rows - distinct + 1`, so an overstated distinct
 count understates the degree and makes the ceiling unsound. Do not feed
 it `HllSketch.estimate()`, which is two-sided and exceeds the truth about
-half the time. Use an exact count, a Count-Min-derived bound, or the
-Rust-side `AttributeDegree::from_hll_floor`. Entries that are zero,
+half the time. From Python the sound source is an exact distinct count. Do **not**
+derive it from a Count-Min sketch: Count-Min bounds *frequencies*, not
+distinct values, so feeding it here yields `rows - maxfreq + 1`, which
+understates the degree and produces exactly the unsound ceiling this
+paragraph warns about. If you need a sketch-derived degree, use the Rust
+API — `samkhya_core::degree::AttributeDegree::from_hll_floor` and
+`from_count_min` produce degrees directly rather than values to pass
+here. Entries that are zero,
 larger than the row count, or absent degrade safely to "no degree
 information" rather than to a wrong answer.
 
@@ -79,9 +88,13 @@ among them, which overstates the degree and stays sound.
 - `product_bound(card_estimates) -> float` — Cartesian product fallback.
 - `agm_bound(joins, card_estimates) -> float` — compatibility shim. Its
   selectivity field is ignored since 1.2; it returns the product.
-- `selectivity_estimate(joins, card_estimates) -> float` — the pre-1.2
-  `agm_bound` value, renamed for what it is. An estimate, not a ceiling:
-  it lands below the true cardinality routinely. Never clamp to it.
+- `selectivity_estimate(joins, card_estimates) -> float` —
+  `prod(card_estimates) * prod(clamped selectivities)`. An estimate, not
+  a ceiling: it lands below the true cardinality routinely. Never clamp
+  to it. (It is close in spirit to the pre-1.2 `agm_bound`, but not equal
+  — that one applied a `min * max` shortcut this does not.)
+- `samkhya_version() -> str` and `samkhya.__version__` — the underlying
+  crate version.
 
 ## Changed in 1.2 — soundness fix
 
@@ -95,9 +108,14 @@ figure and a 1.038x JOB-Slow speedup.
 
 ## Errors
 
-Recoverable core errors — out-of-range sketch parameters, malformed
-serialised payloads, a merge across precisions — raise
+Malformed serialised payloads, a merge across mismatched precisions, and
+out-of-range `HllSketch` / `CountMinSketch` parameters raise
 `samkhya.SamkhyaError`, a subclass of `Exception`.
+
+`BloomFilter` is the exception: out-of-range parameters are **clamped,
+not rejected**. `BloomFilter(1000, 0.0)` returns a filter rather than
+raising, because the Python binding wraps the infallible constructor.
+Validate `fp_rate` yourself if it comes from user input.
 
 ## Scope
 

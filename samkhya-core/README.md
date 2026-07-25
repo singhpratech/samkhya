@@ -8,7 +8,7 @@ A provable ceiling on join output cardinality, plus the portable sketches that
 feed it. Hand it row counts and a degree bound per join attribute and it returns
 a number the join cannot exceed on any database instance consistent with those
 statistics, so an estimate can be clamped under something proved rather than
-guessed. Engine-agnostic: no query engine appears in its dependency tree, and
+guessed. Engine-agnostic: no analytical query engine appears in its dependency tree (the default `feedback` feature does embed SQLite as a local feedback store), and
 the per-engine adapters are built on this crate.
 
 ```toml
@@ -47,7 +47,7 @@ Degrees come from statistics you already have:
 | `unknown` | row count | `rows`; ceiling degrades to the product |
 | `from_distinct` | distinct-count **floor** | `rows - distinct + 1`; 1 on a key |
 | `from_hll_floor` | `HllSketch::nonzero_registers` | same, from a sketch |
-| `from_count_min` | largest Count-Min counter | tightest; `None` if saturated |
+| `from_count_min` | largest Count-Min counter | tightest; degrades to `rows` if the sketch saturated |
 
 `HllSketch::estimate` is deliberately not a valid source: it is two-sided, so it
 exceeds the truth about half the time, and the subtraction above would then hand
@@ -79,8 +79,9 @@ violation being a "ceiling" that came back below the true output. 1.2 measures
 
 Five sketches, each with a `to_bytes` / `from_bytes` codec and a stable `KIND`
 tag used as the Iceberg Puffin blob type. `PuffinWriter` / `PuffinReader` write
-and read the sidecar; `portable::PortableStatsSnapshot` is its decoded,
-engine-neutral view, and unknown blob kinds are carried through, never errored.
+and read the sidecar; `portable::PortableStatsSnapshot` is its decoded
+view of the HLL and equi-depth histogram blobs; other kinds are carried
+through as raw blobs, and unknown blob kinds are carried through, never errored.
 
 | Type | Purpose | `KIND` |
 | ---- | ------- | ------ |

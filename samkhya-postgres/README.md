@@ -33,7 +33,7 @@ with no PostgreSQL development headers — under `--all-features`,
 sits under `[target.'cfg(samkhya_pgrx_enabled)'.dependencies]` and is
 dropped from the dependency graph.
 
-There are no `pg13`..`pg16` features. As of 1.2.1 the crate pins
+There are no `pg13`..`pg16` features. As of 1.2.3 the crate pins
 `pgrx/pg17` only; pgrx 0.12's build script panics when several
 `pg$VERSION` features are active at once, which is what a workspace-wide
 `--all-features` gate would do.
@@ -67,25 +67,34 @@ Omitting `RUSTFLAGS` silently builds the stub `rlib` instead of the
 extension — the most common way to get a confusing "function does not
 exist" from `psql`.
 
-**Known gap (1.2.1):** the pgrx module imports `serde_json`, which this
-crate does not declare as a dependency, so the extension path does not
-compile as published. Add `serde_json = "1"` under
-`[target.'cfg(samkhya_pgrx_enabled)'.dependencies]` to build it locally.
-CI only builds the default mode, which is why this went unnoticed.
+**Known gaps.** The extension path does not compile as published, and
+adding one dependency is not enough to fix it:
+
+1. The pgrx module imports `serde_json`, which this crate does not
+   declare. Add `serde_json = "1"` under
+   `[target.'cfg(samkhya_pgrx_enabled)'.dependencies]`.
+2. `samkhya_hll_count` calls `into_datum()` on an `AnyElement` and then
+   `to_ne_bytes()` on the result. `into_datum` returns
+   `Option<pg_sys::Datum>`, so that does not typecheck as written.
+
+CI builds only the default mode, which is why neither was caught. Treat
+the extension path as unbuilt until both are resolved.
 
 ## SQL surface
 
-`samkhya_hll_count(input anyarray) -> bigint` — builds a
+`samkhya_hll_count(input anyelement[]) -> bigint` — builds a
 `samkhya_core::sketches::HllSketch` at precision 14 (~16 KiB registers,
 ~0.81% relative standard error) over the array elements and returns the
 distinct-count estimate. NULL elements are skipped. Elements are hashed
 by their raw datum bytes, so two values count as equal iff their
 in-memory representation is bitwise equal — correct for fixed-width
-types, but pre-canonicalize varlena inputs.
+types. **Varlena types cannot be made to work under this
+implementation:** the value hashed is the Datum word, which for a varlena
+is a pointer address, not the value bytes, so two byte-identical strings
+at different addresses hash differently. Restrict it to fixed-width types.
 
-```sql
-SELECT samkhya_hll_count(ARRAY[1, 2, 2, 3, 3, 3]::int[]::anyarray);
-```
+No SQL example is given here because the extension does not currently
+build — see the known gaps above. Writing one would imply it runs.
 
 `samkhya_puffin_inspect(path text) -> jsonb` — opens an Iceberg
 [Puffin](https://iceberg.apache.org/puffin-spec/) sidecar on the server
@@ -109,8 +118,9 @@ SELECT samkhya_puffin_inspect('/srv/iceberg/sketches/orders.puffin');
 - PostgreSQL 17 only. pgrx 0.12.
 - The extension path is not covered by CI and has no integration tests
   beyond one `#[pg_test]` sanity check on `samkhya_hll_count`.
-- `cargo pgrx test pg17 --features pg_extension,pg_test` runs that test;
-  it needs the same `RUSTFLAGS` cfg.
+- The crate declares no `pg_test` feature and no crate-root `pg_test`
+  module, both of which pgrx's `#[pg_test]` expansion requires, so that
+  sanity check cannot currently be run either.
 
 ## License
 

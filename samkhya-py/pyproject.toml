@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "samkhya"
-version = "1.2.2"
+version = "1.2.3"
 description = "A provable join-cardinality ceiling and portable statistics sketches, for query planning"
 readme = "README.md"
 license = { text = "Apache-2.0" }

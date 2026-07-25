@@ -6,6 +6,43 @@ honors [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.3] — 2026-07-24
+
+**Documentation corrections. No code, no API, no behaviour change.**
+
+1.2.2 rewrote every crate README. An adversarial verify pass then read each one
+back against its own source and found four crates with factual defects — and
+1.2.2 had already shipped. They are corrected here.
+
+The one that matters most: **`samkhya-py`'s README told readers to derive
+`distinct_counts` from a Count-Min sketch.** Count-Min bounds *frequencies*, not
+distinct values. Following that advice yields a degree of `rows − maxfreq + 1`,
+which *understates* the degree and produces a ceiling below the truth — exactly
+the unsoundness 1.2.0 exists to fix, reintroduced through documentation. From
+Python the sound source is an exact distinct count; sketch-derived degrees belong
+to the Rust `AttributeDegree::from_hll_floor` / `from_count_min` constructors,
+which return degrees rather than values to pass in.
+
+Also corrected:
+
+- `samkhya-py`: `selectivity_estimate` was described as the pre-1.2 `agm_bound`
+  value. It is not — the old one applied a `min × max` shortcut this does not,
+  and the two diverge by 100× on three relations. `BloomFilter` was documented as
+  raising on out-of-range parameters; it silently **clamps**. `merge` was implied
+  for all sketches; it is bound only on `HllSketch`. Wheel coverage was stated as
+  "one wheel per platform" when only `manylinux_2_34 x86_64` is published.
+- `samkhya-core`: `from_count_min` was shown returning `None` on saturation; it
+  returns `AttributeDegree`, degrading to `rows`. "No query engine in its
+  dependency tree" omitted that the default `feedback` feature bundles SQLite.
+- `samkhya-postgres`: documented `anyarray` where pgrx generates `anyelement[]`,
+  and carried a SQL example that errors before reaching the function. It named
+  one build blocker when there are two, and a test command that cannot run. The
+  SQL example is removed rather than corrected — the extension does not build,
+  and printing an example implies it does.
+- `samkhya-polars`: four signatures omitted their `Result` wrapper.
+- The Python type stubs still carried an `LpBound helpers` section header.
+
+
 ## [1.2.2] — 2026-07-24
 
 **Package metadata only. No code, no API, no behaviour change.**
@@ -1415,7 +1452,8 @@ graduates into v0.1.0.
   1.94 (`unsafe-op-in-unsafe-fn` from `#[pymethods]` macro). Tracked
   upstream in pyo3-rs/pyo3. No functional impact.
 
-[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/singhpratech/samkhya/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/singhpratech/samkhya/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/singhpratech/samkhya/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/singhpratech/samkhya/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/singhpratech/samkhya/compare/v1.1.0...v1.2.0
