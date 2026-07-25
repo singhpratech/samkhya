@@ -176,13 +176,19 @@ skip = [
     # the modern 2.x line directly.
     { name = "bitflags", version = "1.3" },
 
-    # --- hashbrown — two engines, two pins ---
-    # DataFusion 46 → hashbrown 0.15; DuckDB 1.x → hashbrown 0.17. Both
-    # transitive only; no samkhya code constructs a hashbrown map
-    # directly. The 0.14 entry remains because indexmap 1.x
-    # (clap-2 / rusqlite ffi path) still pins it.
+    # --- hashbrown — four lines, all transitive ---
+    # No samkhya code constructs a hashbrown map directly; every version
+    # below arrives through a dependency we do not control. Paths verified
+    # with `cargo tree -i hashbrown@<v> --target all` on 2026-07-25:
+    #   0.14 → dashmap 6 → datafusion-catalog 46
+    #   0.15 → arrow-array 54 → arrow → datafusion 46
+    #   0.16 → hashlink 0.11 → rusqlite 0.39 (samkhya-core `feedback`)
+    #   0.17 → indexmap 2.14 → arrow-json 54  (the version we converge on)
+    # Retires when DataFusion rebases dashmap/arrow onto 0.17 and rusqlite
+    # picks up a hashlink that does the same.
     { name = "hashbrown", version = "0.14" },
     { name = "hashbrown", version = "0.15" },
+    { name = "hashbrown", version = "0.16" },
 
     # --- getrandom — three lines ---
     # getrandom 0.2 → rand 0.8 (samkhya-core's deterministic Bloom

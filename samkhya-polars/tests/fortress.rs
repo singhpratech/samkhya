@@ -13,7 +13,7 @@ use std::panic::AssertUnwindSafe;
 
 use polars::frame::DataFrame;
 use polars::prelude::{
-    AnyValue, CategoricalOrdering, DataType, IntoLazy, IntoSeries, ListChunked, NamedFrom, Series,
+    AnyValue, Categories, DataType, IntoLazy, IntoSeries, ListChunked, NamedFrom, Series,
     StructChunked, col, lit,
 };
 
@@ -95,7 +95,7 @@ fn adversarial_empty_dataframe() {
     assert_sketchers_dont_panic("empty-i64", &s);
 
     // Wrapper on an empty LazyFrame.
-    let df = DataFrame::new(vec![s.into()]).expect("df");
+    let df = DataFrame::new(0, vec![s.into()]).expect("df");
     let store = FeedbackStore::open_in_memory().expect("store");
     let df_out = lazy_collect_with_feedback(df.lazy(), &store, "tmpl-empty").expect("collect");
     assert_eq!(df_out.height(), 0);
@@ -148,7 +148,7 @@ fn adversarial_wide_dataframe_with_unusual_types() {
     {
         let raw = Series::new("cat".into(), &["a", "b", "a", "c"]);
         let cat = raw
-            .cast(&DataType::Categorical(None, CategoricalOrdering::Physical))
+            .cast(&DataType::from_categories(Categories::global()))
             .expect("cast categorical");
         columns.push(cat.into());
     }
@@ -219,7 +219,7 @@ fn adversarial_wide_dataframe_with_unusual_types() {
     }
     assert_eq!(columns.len(), 50);
 
-    let df = DataFrame::new(columns).expect("wide df");
+    let df = DataFrame::new(4, columns).expect("wide df");
     assert_eq!(df.width(), 50);
     assert_eq!(df.height(), 4);
 

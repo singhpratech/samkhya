@@ -14,21 +14,18 @@ description = "Polars integration for samkhya: build portable statistics sketche
 
 [dependencies]
 samkhya-core.workspace = true
-# polars 0.44 is the highest minor that compiles under Rust 1.94 / edition 2024
-# *and* coexists with this workspace's samkhya-py crate (pyo3 0.29). polars
-# 0.43 / 0.42 / 0.41 fail to build because polars-core uses
-# hashbrown::HashMap::raw_table_mut without enabling the corresponding
-# `raw` feature on hashbrown 0.14 — see
-# https://github.com/pola-rs/polars/issues — and the workspace cannot
-# downgrade hashbrown without breaking DataFusion. The full `dtype-full`
-# meta-feature also activates `dtype-decimal`, whose feature graph in
-# polars-mem-engine 0.44 ends up pulling pyo3 0.21 (optional → required
-# through workspace feature unification with samkhya-py's pyo3 0.29) and
-# triggers a "links = python" collision. We therefore enable every
-# `dtype-*` sub-feature except `dtype-decimal`, which gives the sketcher
+# polars 0.54. The earlier 0.44 pin existed because polars-mem-engine 0.44's
+# `dtype-decimal` graph pulled pyo3 0.21, which collided on `links = python`
+# with samkhya-py's pyo3 0.29 under workspace feature unification. That
+# collision no longer occurs at 0.54 — verified by building this crate with
+# `--features engine` alongside the rest of the workspace.
+#
+# `dtype-decimal` stays off regardless: the sketcher has no decimal path, and
+# enabling it drags in polars-sql, which the resolver cannot satisfy against
+# the rest of this lock. Every other `dtype-*` sub-feature is enabled, giving
 # full coverage of integer / boolean / temporal / array / struct /
-# categorical / string columns without poking the resolver.
-polars = { version = "0.44", optional = true, default-features = false, features = [
+# categorical / string columns.
+polars = { version = "0.54", optional = true, default-features = false, features = [
     "lazy",
     "dtype-date",
     "dtype-datetime",

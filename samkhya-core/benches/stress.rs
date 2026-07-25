@@ -28,7 +28,8 @@
 
 use std::io::Cursor;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 
 use samkhya_core::feedback::{FeedbackStore, Observation};
 use samkhya_core::puffin::{Blob, PuffinReader, PuffinWriter};
