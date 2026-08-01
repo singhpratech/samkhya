@@ -40,7 +40,7 @@ bincode = "1.3"
 thiserror = "2"
 byteorder = "1.5"
 # Hashing for sketches
-twox-hash = "1.6"
+twox-hash = "2.1"
 # Persistence (feedback recorder)
 rusqlite = { version = "0.39", features = ["bundled"] }
 # Logging / errors
