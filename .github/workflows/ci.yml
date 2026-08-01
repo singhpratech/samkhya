@@ -246,7 +246,7 @@ jobs:
       # a commit that changed one line of README. taiki-e/install-action
       # pulls from GitHub releases, which CI already depends on.
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.4
         with:
           tool: cargo-deny
 
