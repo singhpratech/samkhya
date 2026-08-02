@@ -228,11 +228,26 @@ skip = [
     # Retires with the getrandom consolidation above.
     { name = "r-efi", version = "5.3.0" },
 
-    # --- twox-hash (Bloom hash path + DataFusion) ---
-    # samkhya-core pins twox-hash 1.6 for the Bloom hash path
-    # (deterministic across releases). DataFusion 46 pulls twox-hash
-    # 2.x. Both coexist; size cost negligible. Retires when DataFusion
-    # exposes a hash-builder API that lets samkhya share its 2.x.
+    # --- syn (proc-macro expansion — serde/thiserror moved first) ---
+    # syn 3.0 shipped 2026-07; the derive ecosystem is mid-migration.
+    # Paths verified with `cargo tree -i syn@<v> --workspace` on 2026-08-01:
+    #   3.0 → serde_derive 1.0.229, thiserror-impl 2.0.19  (2 roots)
+    #   2.0 → the other 18 derive crates (arrow, datafusion-macros, pyo3,
+    #         tokio, clap, wasm-bindgen, cxx, …)             (the majority)
+    # Every root on both lines is a proc-macro or build-script crate, so
+    # neither version links into a shipped artifact; the cost is compile
+    # time. Retires when the 2.0 side of that list empties out — check by
+    # dropping this entry, not by waiting for a notification.
+    { name = "syn", version = "2.0" },
+
+    # --- twox-hash (both versions arrive through DataFusion 46) ---
+    # Corrected 2026-08-01: this entry used to claim samkhya-core pinned
+    # 1.6 and DataFusion pulled 2.x. Both versions are in fact rooted in
+    # DataFusion 46 — parquet 54.3.1 → 1.6.3, lz4_flex 0.11 → 2.1.2 — and
+    # samkhya-core's own pin was the 1.6 that made it look like ours.
+    # samkhya-core now takes 2.1 (digest-identical; XXH64 is spec-fixed),
+    # so this skip covers upstream only. Retires when parquet drops its
+    # 1.6 dependency, which the DataFusion 54 bump may already do.
     { name = "twox-hash", version = "1.6" },
 ]
 skip-tree = []
