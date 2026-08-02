@@ -11,6 +11,18 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Every action in these workflows is referenced by its floating major
+    # tag (`@v7`), so patch and minor releases already arrive without a PR
+    # and a PR for one is pure noise. It is not free noise either: left on,
+    # Dependabot proposes replacing a floating `@v2` with an exact patch —
+    # taiki-e/install-action#16 did exactly that — and then opens a fresh PR
+    # for every subsequent patch, of which that action publishes several a
+    # week. Major bumps are the ones that need a human, and still get one.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
 
   - package-ecosystem: pip
     directory: /samkhya-py

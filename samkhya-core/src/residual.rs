@@ -1480,11 +1480,60 @@ mod llm_http_tests {
     };
     use super::{CorrectionFeatures, Corrector};
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
+
+    /// Read one HTTP request off `stream` in full: everything up to the
+    /// `\r\n\r\n` header terminator, then exactly `Content-Length` more
+    /// bytes. Returns the raw request, or `None` if the peer hung up or
+    /// the read timeout fired before a complete one arrived.
+    ///
+    /// Deliberately not a general HTTP parser — it handles what the
+    /// corrector sends (one POST, explicit `Content-Length`, no chunked
+    /// encoding, no `Expect: 100-continue`) and nothing more.
+    fn drain_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
+        let mut req: Vec<u8> = Vec::with_capacity(512);
+        let mut buf = [0u8; 4096];
+
+        // Phase 1 — read until the header terminator is in hand.
+        let body_start = loop {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => return None,
+                Ok(n) => {
+                    req.extend_from_slice(&buf[..n]);
+                    if let Some(p) = req.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break p + 4;
+                    }
+                }
+            }
+        };
+
+        // Phase 2 — read the declared body. A request without a
+        // Content-Length has no body to wait for, so the headers alone
+        // are the whole request.
+        let content_length = std::str::from_utf8(&req[..body_start])
+            .ok()
+            .and_then(|head| {
+                head.lines()
+                    .find_map(|line| {
+                        line.split_once(':')
+                            .filter(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+                    })
+                    .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+
+        while req.len() - body_start < content_length {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => req.extend_from_slice(&buf[..n]),
+            }
+        }
+        Some(req)
+    }
 
     /// Tiny hand-rolled mock HTTP server, one-shot per accept. We avoid
     /// pulling `mockito` (not currently a dep) and keep the test binary
@@ -1509,13 +1558,20 @@ mod llm_http_tests {
                 let Ok(mut stream) = stream else { continue };
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-                // Drain HTTP request: read headers + body. We pull a
-                // bounded chunk; the bench client sends tiny payloads
-                // (sub-200 bytes) so this is sufficient for the tests
-                // and avoids the parsing complexity of a full HTTP
-                // server.
-                let mut buf = [0u8; 4096];
-                let _ = stream.read(&mut buf);
+                // Drain the *whole* request — headers and body — before
+                // answering. One `read` is not enough, however small the
+                // payload: it returns one segment's worth, and ureq can
+                // put the header block and the JSON body in separate
+                // segments. If we reply and drop the socket with body
+                // bytes still unread, the kernel answers the leftovers
+                // with an RST instead of a FIN, and that RST discards the
+                // response we just wrote out of the client's receive
+                // buffer. ureq then reports a transport error, the
+                // corrector's failure contract turns it into `Ok(None)`,
+                // and a green-path assertion fails as if the endpoint
+                // were down — which is exactly how this surfaced on a
+                // loaded CI runner while passing every local run.
+                let _ = drain_request(&mut stream);
                 let idx = counter_thread.fetch_add(1, Ordering::SeqCst);
                 let body = responder.lock().unwrap()(idx);
                 let header = format!(
